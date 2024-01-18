@@ -1,20 +1,42 @@
 import time
 import cofable
 
+project_obj_list = []
 print('业务流程：')
 # 首先创建一个项目
 pro_test1 = cofable.Project(name='pro_test1', description='cofable测试项目1')
+pro_test1.save()
+project_obj_list.append(pro_test1)
 
 # 再创建资源
 cred_host1 = cofable.Credential(name='cred_host1', username='root', password='xxxxxx', project_id=pro_test1.id)
+cred_host1.save_to_project(pro_test1)
+
+cred_host2 = cofable.Credential(name='cred_host2', username='root', password='xxxxxx', project_id=pro_test1.id)
+cred_host2.save_to_project(pro_test1)
 
 host_1 = cofable.Host(name='host_01', address='10.99.1.233', ssh_port='22', project_id=pro_test1.id)
 host_1.add_credential(cred_host1.id)  # 主机添加登录凭据
+host_1.add_credential(cred_host2.id)  # 主机添加登录凭据
+host_1.save_to_project(pro_test1)
+host_1.save_to_project(pro_test1)
 
-inspect_code_test1 = cofable.InspectionCode(name='inspect_code_test1', code_source='local',
+host_group1 = cofable.HostGroup(name='host_group1')
+host_group1.add_host(host_1)
+host_group1.save_to_project(pro_test1)
+
+host_group2 = cofable.HostGroup(name='host_group2')
+host_group2.add_host(host_1)
+host_group2.add_host_group(host_group1)
+host_group2.add_host_group(host_group2)
+host_group2.save_to_project(pro_test1)
+
+inspect_code_test1 = cofable.InspectionCode(name='inspect_code_test1', code_source=cofable.CODE_SOURCE_LOCAL,
                                             project_id=pro_test1.id)
 inspect_code_test1.add_code(r'df -Th')  # 巡检代码对象添加要执行的命令
 inspect_code_test1.add_code(r'ls -lh')  # 巡检代码对象添加要执行的命令
+inspect_code_test1.save_to_project(pro_test1)
+inspect_code_test1.save_to_project(pro_test1)
 
 # 创建巡检模板
 inspection_template_test1 = cofable.InspectionTemplate(name='template1', enabled_crond_job=True,
