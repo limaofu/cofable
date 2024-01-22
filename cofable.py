@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # coding=utf-8
 # module name: cofable
-# dependence: cofnet, cofnetclass  (https://github.com/limaofu/cofnet)
+# dependence: cofnet  (https://github.com/limaofu/cofnet)
 # author: Cof-Lee
 # update: 2024-01-22
 # 本模块使用GPL-3.0开源协议
