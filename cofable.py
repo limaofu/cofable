@@ -3,7 +3,7 @@
 # module name: cofable
 # dependence: cofnet, cofnetclass  (https://github.com/limaofu/cofnet)
 # author: Cof-Lee
-# update: 2024-01-21
+# update: 2024-01-22
 # 本模块使用GPL-3.0开源协议
 
 import uuid
