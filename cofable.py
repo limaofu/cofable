@@ -3,7 +3,7 @@
 # module name: cofable
 # dependence: cofnet  (https://github.com/limaofu/cofnet)
 # author: Cof-Lee
-# update: 2024-01-22
+# update: 2024-01-23
 # 本模块使用GPL-3.0开源协议
 
 import uuid
@@ -31,6 +31,8 @@ EXECUTION_METHOD_AT = 2
 EXECUTION_METHOD_CROND = 3
 EXECUTION_METHOD_AFTER = 4
 CODE_POST_WAIT_TIME_DEFAULT = 0.1
+CODE_POST_WAIT_TIME_MAX_TIMEOUT_INTERVAL = 0.1
+CODE_POST_WAIT_TIME_MAX_TIMEOUT_COUNT = 30
 
 
 # 项目，是一个全局概念，一个项目包含若干资源（认证凭据，受管主机，巡检代码，巡检模板等）
@@ -722,6 +724,31 @@ class LaunchInspectionJob:
         else:
             self.create_timestamp = create_timestamp
         self.inspection_template = inspection_template  # InspectionTemplate对象
+        self.unduplicated_host_obj_list = []  # <Host>对象，无重复项
+
+    def get_unduplicated_host_obj_from_group(self, host_group):  # 从主机组中获取非重复主机
+        for host in host_group.host_obj_list:
+            if host in self.unduplicated_host_obj_list:
+                print(f"get_unduplicated_host_obj_from_group:重复主机：{host.name} *************")
+                continue
+            else:
+                self.unduplicated_host_obj_list.append(host)
+        for group in host_group.host_group_obj_list:
+            self.get_unduplicated_host_obj_from_group(group)
+        return None
+
+    def get_unduplicated_host_obj_from_inspection_template(self):  # 从巡检模板的主机列表及主机组列表中获取非重复主机
+        if self.inspection_template is None:
+            print("巡检模板为空")
+            return
+        for host in self.inspection_template.host_obj_list:
+            if host in self.unduplicated_host_obj_list:
+                print(f"get_unduplicated_host_obj_from_inspection_template:重复主机：{host.name} **********")
+                continue
+            else:
+                self.unduplicated_host_obj_list.append(host)
+        for host_group in self.inspection_template.host_group_obj_list:
+            self.get_unduplicated_host_obj_from_group(host_group)
 
     def start_job(self):
         print("开始巡检任务 ############################################################")
@@ -729,16 +756,32 @@ class LaunchInspectionJob:
             print("巡检模板为空")
             return
         start_time = time.time()
+        self.get_unduplicated_host_obj_from_inspection_template()  # 主机去重
         print("巡检模板名称：", self.inspection_template.name)
-        for host in self.inspection_template.host_obj_list:
-            print(f"巡检目标主机：{host.name}")
+        for host in self.unduplicated_host_obj_list:
+            print(f"\n>>>>>>>>>>>>>>>>>> 巡检目标主机：{host.name} <<<<<<<<<<<<<<<<<<")
             if host.login_protocol == "ssh":
                 cred = find_ssh_credential(host)
-                ssh_opt = cofnet.SSHOperator(hostname=host.address, port=host.ssh_port, username=cred.username,
-                                             password=cred.password,
-                                             command_list=self.inspection_template.inspection_code_obj_list[
-                                                 0].code_list)
-                ssh_opt.run_invoke_shell()
+                for inspection_code_obj in self.inspection_template.inspection_code_obj_list:  # 注意：巡检代码不去重
+                    ssh_opt = cofnet.SSHOperator(hostname=host.address, port=host.ssh_port, username=cred.username,
+                                                 password=cred.password,
+                                                 command_list=inspection_code_obj.code_list)
+                    ssh_opt.run_invoke_shell()
+                    max_timeout_index = 0
+                    while True:
+                        if max_timeout_index >= CODE_POST_WAIT_TIME_MAX_TIMEOUT_COUNT:
+                            break
+                        time.sleep(CODE_POST_WAIT_TIME_MAX_TIMEOUT_INTERVAL)
+                        max_timeout_index += 1
+                        if ssh_opt.is_finished:
+                            break
+                        else:
+                            time.sleep(CODE_POST_WAIT_TIME_DEFAULT)
+                    if max_timeout_index >= CODE_POST_WAIT_TIME_MAX_TIMEOUT_COUNT:
+                        print(f"inspection_code: {inspection_code_obj.name} 已达最大超时未完成")
+                    else:
+                        print(f"inspection_code: {inspection_code_obj.name} 已执行完成")
+            print(f"\n>>>>>>>>>>>>>>>>>> 目标主机：{host.name} 已巡检完成 <<<<<<<<<<<<<<<<<<")
         end_time = time.time()
         print("用时 {:<6.4f} 秒".format(end_time - start_time))
         print("巡检任务完成 ############################################################")
