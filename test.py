@@ -1,4 +1,3 @@
-import time
 import cofable
 import cofnet
 
@@ -12,20 +11,23 @@ def create_project():
     project_obj_list.append(pro_test1)
     # ★再创建资源
     # 创建登录凭据
-    cred_host1 = cofable.Credential(name='cred_host1', username='root', password='xxxxxx', project_oid=pro_test1.oid)
+    cred_host1 = cofable.Credential(name='cred_host1', username='root', password='xxxx', project_oid=pro_test1.oid)
     cred_host1.save_to_project(pro_test1)
 
-    cred_host2 = cofable.Credential(name='cred_host2', username='root', password='xxxxxx', project_oid=pro_test1.oid)
+    cred_host2 = cofable.Credential(name='cred_host2', username='root', password='xxxx', project_oid=pro_test1.oid)
     cred_host2.save_to_project(pro_test1)
     # 创建主机
     host_1 = cofable.Host(name='host_1', address='10.99.1.233', ssh_port='22', project_oid=pro_test1.oid)
     host_1.add_credential(cred_host1)  # 主机添加登录凭据
     host_1.add_credential(cred_host2)  # 主机添加登录凭据
     host_1.save_to_project(pro_test1)
-    host_1.save_to_project(pro_test1)
+    host_2 = cofable.Host(name='host_2', address='10.99.1.234', ssh_port='22', project_oid=pro_test1.oid)
+    host_2.add_credential(cred_host2)  # 主机添加登录凭据
+    host_2.save_to_project(pro_test1)
     # 创建主机组
     host_group1 = cofable.HostGroup(name='host_group1')
     host_group1.add_host(host_1)
+    host_group1.add_host(host_2)
     host_group1.save_to_project(pro_test1)
 
     host_group2 = cofable.HostGroup(name='host_group2')
@@ -36,26 +38,33 @@ def create_project():
     # 创建巡检代码
     inspect_code_test1 = cofable.InspectionCode(name='inspect_code_test1', code_source=cofable.CODE_SOURCE_LOCAL,
                                                 project_oid=pro_test1.oid)
-    codeline1 = cofnet.OneLineCode(code_content=r'lsblk')
+    inspect_code_test2 = cofable.InspectionCode(name='inspect_code_test2', code_source=cofable.CODE_SOURCE_LOCAL,
+                                                project_oid=pro_test1.oid)
+    codeline1 = cofnet.OneLineCode(code_content=r'hostname')
     codeline2 = cofnet.OneLineCode(code_content=r'df -Th')
+    codeline3 = cofnet.OneLineCode(code_content=r'lsblk')
     inspect_code_test1.add_code_line(codeline1)  # 巡检代码对象添加要执行的命令
     inspect_code_test1.add_code_line(codeline2)  # 巡检代码对象添加要执行的命令
-    inspect_code_test1.save_to_project(pro_test1)
+    inspect_code_test2.add_code_line(codeline3)  # 巡检代码对象添加要执行的命令
+    inspect_code_test2.save_to_project(pro_test1)
 
     # 创建巡检模板
     inspection_template_test1 = cofable.InspectionTemplate(name='template1',
                                                            execution_method=cofable.EXECUTION_METHOD_NONE,
                                                            project_oid=pro_test1.oid)
     inspection_template_test1.add_host(host_1)
+    inspection_template_test1.add_host(host_1)
+    inspection_template_test1.add_host_group(host_group2)
     inspection_template_test1.add_host_group(host_group2)
     inspection_template_test1.add_inspection_code(inspect_code_test1)
+    inspection_template_test1.add_inspection_code(inspect_code_test2)
     # 如果巡检模板创建了定时任务，则创建触发器
     if inspection_template_test1.execution_method != cofable.EXECUTION_METHOD_NONE:
         cron_trigger1 = cofable.LaunchTemplateTrigger(
             inspection_template_oid=inspection_template_test1.oid,
             project_oid=pro_test1.oid)
         inspection_template_test1.cron_detection_trigger_oid = cron_trigger1.oid  # 将触发器id添加到巡检模板对象上
-        # 开始执行监视任务，达到触发条件就执行相应巡检模板
+        # 开始执行监视任务，达到触发条件就执行相应巡检模板（由start_crontab_job函数触发）
         cron_trigger1.start_crontab_job()
     else:
         pass
