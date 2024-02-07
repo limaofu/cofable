@@ -17,7 +17,8 @@ def create_project():
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdzc2gtcn
 NhAAAAAwEAAQAAAYEA1at9EMtFIgsvfOXkUNU3C6d/XC4DTcvb1OR1cv8WI4eRBBLaLgtH
 kZYgt0+Qi+1iP4GBVmToLyVVyi2N0yffbityYymXlB8/hpVOxcf+x1KdJ2HKifkGNdzjkB
-SxoxUNf9o+w0cZwsIZSZ9wzwnkzjBdx2RyWj94PDWCyTabZ8POjGN4TiBRNmUO1hNkGvR7
+Omsz/LlJRbNdzaeYIaMKrqRJ6tOU/8gSbb6qG42VwUnB7Q7NgiGMWfZu0Yc/dGkT7rvF3v
+TJbXSiUbScHY0AM414+tE0W/ZwL3EBW97qkCc8NTT1RQRF6F8Ge1nyuyhdLTz7e4S7tL93
 QvMiUgh92RbTtHAAAAFHJvb3RAZWxrLmNvZi1sZWUuY29tAQIDBAUG
 -----END OPENSSH PRIVATE KEY-----
 '''
@@ -121,36 +122,15 @@ QvMiUgh92RbTtHAAAAFHJvb3RAZWxrLmNvZi1sZWUuY29tAQIDBAUG
     # job_2_switch.start_job()
 
 
-def load_project():
-    pro_list = cofable.load_projects_from_dbfile('pro_test1.db')
-    for pro in pro_list:
-        print(pro.name)
-    cred_list = cofable.load_credentials_from_dbfile('pro_test1.db')
-    for cred in cred_list:
-        print(cred.name)
-    host_list = cofable.load_hosts_from_dbfile('pro_test1.db')
-    for host in host_list:
-        print(host.name, host.credential_oid_list)
-    host_group_list = cofable.load_host_groups_from_dbfile('pro_test1.db')
-    for host_group in host_group_list:
-        print(host_group.name, host_group.host_oid_list, host_group.host_group_oid_list)
-    inspect_code_list = cofable.load_inspection_codes_from_dbfile('pro_test1.db')
-    for code in inspect_code_list:
-        print(code.name, code.code_list[0].code_content)
-
-    inspect_template_list = cofable.load_inspection_templates_from_dbfile('pro_test1.db')
-    for template in inspect_template_list:
-        print(template.name, template.host_oid_list, template.host_group_oid_list, template.inspection_code_oid_list)
-
-
 def test_window():
-    window = cofable.MainWindow(width=640, height=400, title='cofAble')
+    global_info = cofable.GlobalInfo()
+    # global_info.load_all_data_from_sqlite3()
+    window = cofable.MainWindow(width=640, height=400, title='cofAble', global_info=global_info)
     window.show()
 
 
 if __name__ == '__main__':
     # create_project()
-    # load_project()
     test_window()
 
 """
