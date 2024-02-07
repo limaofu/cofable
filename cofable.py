@@ -3,7 +3,8 @@
 # module name: cofable
 # dependence:  cofnet  (https://github.com/limaofu/cofnet)  &  paramiko
 # author: Cof-Lee
-# update: 2024-02-05
+# start_date: 2024-01-17
+# update: 2024-02-07
 # 本模块使用GPL-3.0开源协议
 
 import io
@@ -19,7 +20,7 @@ from multiprocessing.dummy import Pool as ThreadPool
 
 import paramiko
 
-# 全局常量
+# Here we go, 全局常量
 COF_TRUE = 1
 COF_FALSE = 0
 CRED_TYPE_SSH_PASS = 0
@@ -65,10 +66,13 @@ INSPECTION_CODE_JOB_EXEC_STATE_FAILED = 5
 # GUI_FOCUS_MAIN_CREDENTIAL_WINDOW = 2
 
 
-# 项目，是一个全局概念，一个项目包含若干资源（认证凭据，受管主机，巡检代码，巡检模板等）
-# 同一项目里的资源可互相引用/使用，不同项目之间的资源不可互用
 class Project:
-    def __init__(self, name='default', description='default', oid=None, create_timestamp=None):
+    """
+    项目，是一个全局概念，一个项目包含若干资源（认证凭据，受管主机，巡检代码，巡检模板等）
+    同一项目里的资源可互相引用/使用，不同项目之间的资源不可互用
+    """
+
+    def __init__(self, name='default', description='default', oid=None, create_timestamp=None, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>  project_oid
         else:
@@ -79,7 +83,11 @@ class Project:
             self.create_timestamp = time.time()  # <float>
         else:
             self.create_timestamp = create_timestamp
-        self.sqlite3_dbfile_name = self.name + ".db"  # 数据库所有数据存储在此文件中，默认数据库名称同文件名（不含.db后缀）
+        self.global_info = global_info
+        if self.global_info is None:
+            self.sqlite3_dbfile_name = self.name + '.db'
+        else:
+            self.sqlite3_dbfile_name = self.global_info.sqlite3_dbfile_name  # 数据库所有数据存储在此文件中
 
     def save(self):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
@@ -111,13 +119,16 @@ class Project:
         sqlite_conn.close()  # 关闭数据库连接
 
 
-# 认证凭据，telnet/ssh/sftp登录凭据，snmp团体字，container-registry认证凭据，git用户凭据，ftp用户凭据
 class Credential:
+    """
+    认证凭据，telnet/ssh/sftp登录凭据，snmp团体字，container-registry认证凭据，git用户凭据，ftp用户凭据
+    """
+
     def __init__(self, name='', description='', project_oid='', cred_type=CRED_TYPE_SSH_PASS,
                  username='', password='', private_key='',
                  privilege_escalation_method=PRIVILEGE_ESCALATION_METHOD_SUDO, privilege_escalation_username='',
                  privilege_escalation_password='',
-                 auth_url='', ssl_no_verify=COF_TRUE, last_modify_timestamp=0, oid=None, create_timestamp=None):
+                 auth_url='', ssl_no_verify=COF_TRUE, last_modify_timestamp=0, oid=None, create_timestamp=None, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
@@ -139,9 +150,10 @@ class Credential:
         self.auth_url = auth_url  # 含container-registry,git等
         self.ssl_no_verify = ssl_no_verify  # 默认为True，不校验ssl证书
         self.last_modify_timestamp = last_modify_timestamp  # <float>
+        self.global_info = global_info
 
-    def save_to_project(self, project):
-        sqlite_conn = sqlite3.connect(project.sqlite3_dbfile_name)  # 连接数据库文件
+    def save(self):
+        sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_credential'的表★
         sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_credential";'
@@ -206,8 +218,11 @@ class Credential:
         sqlite_conn.close()  # 关闭数据库连接
 
 
-# 目标主机，受管主机
 class Host:
+    """
+    目标主机，受管主机
+    """
+
     def __init__(self, name='default', description='default', project_oid='default', address='default',
                  ssh_port=22, telnet_port=23, last_modify_timestamp=0, oid=None, create_timestamp=None,
                  login_protocol='ssh', first_auth_method=FIRST_AUTH_METHOD_PRIKEY):
@@ -310,8 +325,11 @@ class Host:
         sqlite_conn.close()  # 关闭数据库连接
 
 
-# 目标主机组，受管主机组
 class HostGroup:
+    """
+    目标主机组，受管主机组
+    """
+
     def __init__(self, name='default', description='default', project_oid='default', last_modify_timestamp=0, oid=None,
                  create_timestamp=None):
         if oid is None:
@@ -423,8 +441,11 @@ class HostGroup:
         sqlite_conn.close()  # 关闭数据库连接
 
 
-# 巡检代码
 class InspectionCode:
+    """
+    巡检代码，一个巡检代码对象包含若干行命令，一行命令为一个<OneLineCode>对象
+    """
+
     def __init__(self, name='default', description='default', project_oid='default',
                  code_source=CODE_SOURCE_LOCAL, last_modify_timestamp=0, oid=None, create_timestamp=None):
         if oid is None:
@@ -525,10 +546,12 @@ class InspectionCode:
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
 
-        # 巡检模板，包含目标主机，可手动触发执行，可定时执行，可周期执行
-
 
 class InspectionTemplate:
+    """
+    巡检模板，包含目标主机，可手动触发执行，可定时执行，可周期执行
+    """
+
     def __init__(self, name='default', description='default', project_oid='default',
                  execution_method=EXECUTION_METHOD_NONE, execution_at_time=0,
                  execution_after_time=0, execution_crond_time='default', update_code_on_launch=COF_FALSE,
@@ -706,8 +729,11 @@ class InspectionTemplate:
         sqlite_conn.close()  # 关闭数据库连接
 
 
-# 巡检触发检测类，周期检查是否需要执行某巡检模板，每创建一个巡检模板就要求绑定一个巡检触发检测对象
 class LaunchTemplateTrigger:
+    """
+    巡检触发检测类，周期检查是否需要执行某巡检模板，每创建一个巡检模板就要求绑定一个巡检触发检测对象
+    """
+
     def __init__(self, name='default', description='default', project_oid='default',
                  inspection_template_oid='uuid', last_modify_timestamp=0, oid=None, create_timestamp=None):
         if oid is None:
@@ -735,131 +761,11 @@ class LaunchTemplateTrigger:
         pass
 
 
-# 执行巡检任务，一次性的，由巡检触发检测对象去创建并执行巡检工作，完成后输出日志
-def find_ssh_credential(host):
-    # if host.login_protocol == "ssh":
-    for cred in host.credential_obj_list:
-        if cred.cred_type == CRED_TYPE_SSH_PASS:
-            ssh_client = paramiko.client.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
-            try:
-                ssh_client.connect(hostname=host.address, port=host.ssh_port, username=cred.username,
-                                   password=cred.password,
-                                   timeout=LOGIN_AUTH_TIMEOUT)
-            except paramiko.AuthenticationException as e:
-                # print(f"Authentication Error: {e}")
-                raise e
-            ssh_client.close()
-            return cred
-        if cred.cred_type == CRED_TYPE_SSH_KEY:
-            ssh_client = paramiko.client.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
-            prikey_obj = io.StringIO(cred.private_key)
-            pri_key = paramiko.RSAKey.from_private_key(prikey_obj)
-            try:
-                ssh_client.connect(hostname=host.address, port=host.ssh_port, username=cred.username,
-                                   pkey=pri_key,
-                                   timeout=LOGIN_AUTH_TIMEOUT)
-            except paramiko.AuthenticationException as e:
-                # print(f"Authentication Error: {e}")
-                raise e
-            ssh_client.close()
-            return cred
-        else:
-            continue
-    return None
-
-
-def fmt_time(t):
-    if t < 10:
-        return "0" + str(t)
-    else:
-        return str(t)
-
-
-def save_ssh_operator_output_to_file(ssh_operator_output_obj_list, host, inspection_template):
-    localtime = time.localtime(time.time())
-    timestamp_list = [str(localtime.tm_year), fmt_time(localtime.tm_mon), fmt_time(localtime.tm_mday)]
-    # str(localtime.tm_hour), str(localtime.tm_min), str(localtime.tm_sec)
-    timestamp = "_".join(timestamp_list)  # 年月日，例：2024_01_25
-    file_name_list = [host.name, inspection_template.name, timestamp]
-    file_name = "-".join(file_name_list) + '.txt'  # 一台主机的所有巡检命令输出信息都保存在一个文件里：主机名-巡检模板名-日期.txt
-    with open(file_name, 'a', encoding='utf8') as file_obj:
-        for ssh_operator_output_obj in ssh_operator_output_obj_list:
-            if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_INVOKE_SHELL:
-                file_obj.write(ssh_operator_output_obj.invoke_shell_output_str)
-                if len(ssh_operator_output_obj.interactive_output_str_list) != 0:
-                    for interactive_output_str in ssh_operator_output_obj.interactive_output_str_list:
-                        file_obj.write(interactive_output_str)
-            if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_EXEC_COMMAND:
-                for exec_command_stderr_line in ssh_operator_output_obj.exec_command_stderr_line_list:
-                    file_obj.write(exec_command_stderr_line)
-                for exec_command_stdout_line in ssh_operator_output_obj.exec_command_stdout_line_list:
-                    file_obj.write(exec_command_stdout_line)
-
-
-def save_ssh_operator_invoke_shell_output_to_sqlite(job_oid, ssh_operator_output_obj_list, host, inspection_code_obj,
-                                                    sqlite3_dbfile_name):
-    sqlite_conn = sqlite3.connect(sqlite3_dbfile_name)  # 连接数据库文件
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_inspection_job_invoke_shell_output'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_invoke_shell_output"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则创建此表
-    if len(result) == 0:
-        sql_list = ["create table tb_inspection_job_invoke_shell_output  ( job_oid varchar(36),",
-                    "host_oid varchar(36),",
-                    "inspection_code_oid varchar(36),",
-                    "project_oid varchar(36),",
-                    "code_index int,",
-                    "code_exec_method int,",
-                    "code_invoke_shell_output_str_b64 varchar(8192),",
-                    "code_invoke_shell_output_last_line_b64 varchar(2048),",
-                    "code_interactive_output_str_lines_b64 varchar(8192) )"]
-        sqlite_cursor.execute(" ".join(sql_list))
-    # 开始插入数据，一条命令的输出为一行记录
-    for code_output in ssh_operator_output_obj_list:
-        sql_list = ["select * from tb_inspection_job_invoke_shell_output where",
-                    f"job_oid='{job_oid}' and host_oid='{host.oid}'",
-                    f"and inspection_code_oid='{inspection_code_obj.oid}'",
-                    f"and code_index='{code_output.code_index}' "]
-        sqlite_cursor.execute(" ".join(sql_list))
-        if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
-            code_invoke_shell_output_str_b64 = base64.b64encode(
-                code_output.invoke_shell_output_str.encode('utf8')).decode('utf8')
-            code_invoke_shell_output_last_line_b64 = base64.b64encode(
-                code_output.invoke_shell_output_last_line.encode('utf8')).decode('utf8')
-            code_interactive_output_str_lines_b64 = base64.b64encode(
-                "".join(code_output.interactive_output_str_list).encode('utf8')).decode('utf8')
-            sql_list = ["insert into tb_inspection_job_invoke_shell_output (job_oid,",
-                        "host_oid,",
-                        "inspection_code_oid,",
-                        "project_oid,",
-                        "code_index,",
-                        "code_exec_method,",
-                        "code_invoke_shell_output_str_b64,",
-                        "code_invoke_shell_output_last_line_b64,",
-                        "code_interactive_output_str_lines_b64 )  values ",
-                        f"( '{job_oid}',",
-                        f"'{host.oid}',",
-                        f"'{inspection_code_obj.oid}',",
-                        f"'{host.project_oid}',",
-                        f"{code_output.code_index},",
-                        f"{code_output.code_exec_method},",
-                        f"'{code_invoke_shell_output_str_b64}',",
-                        f"'{code_invoke_shell_output_last_line_b64}',",
-                        f"'{code_interactive_output_str_lines_b64}'",
-                        " )"]
-            print("######################## ", " ".join(sql_list))
-            sqlite_cursor.execute(" ".join(sql_list))
-    sqlite_cursor.close()
-    sqlite_conn.commit()  # 保存，提交
-    sqlite_conn.close()  # 关闭数据库连接
-
-
 class LaunchInspectionJob:
+    """
+    执行巡检任务，一次性的，由巡检触发检测类<LaunchTemplateTrigger>对象去创建并执行巡检工作，完成后输出日志
+    """
+
     def __init__(self, name='default', description='default', project=None, oid=None, create_timestamp=None,
                  inspection_template=None):
         if oid is None:
@@ -935,10 +841,9 @@ class LaunchInspectionJob:
                     break
             if len(ssh_opt.output_list) != 0:
                 # 输出信息保存到文件
-                save_ssh_operator_output_to_file(ssh_opt.output_list, host, self.inspection_template)
+                self.save_ssh_operator_output_to_file(ssh_opt.output_list, host)
                 # 输出信息保存到sqlite数据库
-                save_ssh_operator_invoke_shell_output_to_sqlite(self.oid, ssh_opt.output_list, host,
-                                                                inspection_code_obj, self.project.sqlite3_dbfile_name)
+                self.save_ssh_operator_invoke_shell_output_to_sqlite(ssh_opt.output_list, host, inspection_code_obj)
         print(f">>>>>>>>>>>>>>>>>> 目标主机：{host.name} 已巡检完成，远程方式: ssh <<<<<<<<<<<<<<<<<<")
 
     def operator_job_thread(self, host_index):
@@ -946,7 +851,7 @@ class LaunchInspectionJob:
         print(f"\n>>>>>>>>>>>>>>>>>> 目标主机：{host.name} 开始巡检 <<<<<<<<<<<<<<<<<<")
         if host.login_protocol == "ssh":
             try:
-                cred = find_ssh_credential(host)  # 查找可用的登录凭据，这里会登录一次目标主机
+                cred = self.find_ssh_credential(host)  # 查找可用的登录凭据，这里会登录一次目标主机
             except TimeoutError as e:
                 print("查找可用的凭据超时，", e)
                 self.job_find_credential_timeout_host_oid_list.append(host.oid)
@@ -959,6 +864,149 @@ class LaunchInspectionJob:
             pass
         else:
             pass
+
+    @staticmethod
+    def find_ssh_credential(host):
+        """
+        查找可用的ssh凭据，会登录一次目标主机
+        :param host:
+        :return:
+        """
+        # if host.login_protocol == "ssh":
+        for cred in host.credential_obj_list:
+            if cred.cred_type == CRED_TYPE_SSH_PASS:
+                ssh_client = paramiko.client.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
+                try:
+                    ssh_client.connect(hostname=host.address, port=host.ssh_port, username=cred.username,
+                                       password=cred.password,
+                                       timeout=LOGIN_AUTH_TIMEOUT)
+                except paramiko.AuthenticationException as e:
+                    # print(f"Authentication Error: {e}")
+                    raise e
+                ssh_client.close()
+                return cred
+            if cred.cred_type == CRED_TYPE_SSH_KEY:
+                ssh_client = paramiko.client.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
+                prikey_obj = io.StringIO(cred.private_key)
+                pri_key = paramiko.RSAKey.from_private_key(prikey_obj)
+                try:
+                    ssh_client.connect(hostname=host.address, port=host.ssh_port, username=cred.username,
+                                       pkey=pri_key,
+                                       timeout=LOGIN_AUTH_TIMEOUT)
+                except paramiko.AuthenticationException as e:
+                    # print(f"Authentication Error: {e}")
+                    raise e
+                ssh_client.close()
+                return cred
+            else:
+                continue
+        return None
+
+    def save_ssh_operator_output_to_file(self, ssh_operator_output_obj_list, host):
+        """
+        主机的所有巡检命令输出信息都保存在一个文件里
+        :param ssh_operator_output_obj_list:
+        :param host:
+        :return:
+        """
+        localtime = time.localtime(time.time())
+        timestamp_list = [str(localtime.tm_year), self.fmt_time(localtime.tm_mon), self.fmt_time(localtime.tm_mday)]
+        # str(localtime.tm_hour), str(localtime.tm_min), str(localtime.tm_sec)
+        timestamp = "_".join(timestamp_list)  # 年月日，例：2024_01_25
+        file_name_list = [host.name, self.inspection_template.name, timestamp]
+        file_name = "-".join(file_name_list) + '.txt'  # 一台主机的所有巡检命令输出信息都保存在一个文件里：主机名-巡检模板名-日期.txt
+        with open(file_name, 'a', encoding='utf8') as file_obj:
+            for ssh_operator_output_obj in ssh_operator_output_obj_list:
+                if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_INVOKE_SHELL:
+                    file_obj.write(ssh_operator_output_obj.invoke_shell_output_str)
+                    if len(ssh_operator_output_obj.interactive_output_str_list) != 0:
+                        for interactive_output_str in ssh_operator_output_obj.interactive_output_str_list:
+                            file_obj.write(interactive_output_str)
+                if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_EXEC_COMMAND:
+                    for exec_command_stderr_line in ssh_operator_output_obj.exec_command_stderr_line_list:
+                        file_obj.write(exec_command_stderr_line)
+                    for exec_command_stdout_line in ssh_operator_output_obj.exec_command_stdout_line_list:
+                        file_obj.write(exec_command_stdout_line)
+
+    @staticmethod
+    def fmt_time(t):
+        """
+        格式化时间，若不足2位数，则十位数补0，用0填充
+        :param t:
+        :return:
+        """
+        if t < 10:
+            return "0" + str(t)
+        else:
+            return str(t)
+
+    def save_ssh_operator_invoke_shell_output_to_sqlite(self, ssh_operator_output_obj_list, host, inspection_code_obj):
+        """
+        主机的所有巡检命令输出信息都保存到数据库里
+        :param ssh_operator_output_obj_list:
+        :param host:
+        :param inspection_code_obj:
+        :return:
+        """
+        sqlite_conn = sqlite3.connect(self.project.sqlite3_dbfile_name)  # 连接数据库文件
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_job_invoke_shell_output'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_invoke_shell_output"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则创建此表
+        if len(result) == 0:
+            sql_list = ["create table tb_inspection_job_invoke_shell_output  ( job_oid varchar(36),",
+                        "host_oid varchar(36),",
+                        "inspection_code_oid varchar(36),",
+                        "project_oid varchar(36),",
+                        "code_index int,",
+                        "code_exec_method int,",
+                        "code_invoke_shell_output_str_b64 varchar(8192),",
+                        "code_invoke_shell_output_last_line_b64 varchar(2048),",
+                        "code_interactive_output_str_lines_b64 varchar(8192) )"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        # 开始插入数据，一条命令的输出为一行记录
+        for code_output in ssh_operator_output_obj_list:
+            sql_list = ["select * from tb_inspection_job_invoke_shell_output where",
+                        f"job_oid='{self.oid}' and host_oid='{host.oid}'",
+                        f"and inspection_code_oid='{inspection_code_obj.oid}'",
+                        f"and code_index='{code_output.code_index}' "]
+            sqlite_cursor.execute(" ".join(sql_list))
+            if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
+                code_invoke_shell_output_str_b64 = base64.b64encode(
+                    code_output.invoke_shell_output_str.encode('utf8')).decode('utf8')
+                code_invoke_shell_output_last_line_b64 = base64.b64encode(
+                    code_output.invoke_shell_output_last_line.encode('utf8')).decode('utf8')
+                code_interactive_output_str_lines_b64 = base64.b64encode(
+                    "".join(code_output.interactive_output_str_list).encode('utf8')).decode('utf8')
+                sql_list = ["insert into tb_inspection_job_invoke_shell_output (job_oid,",
+                            "host_oid,",
+                            "inspection_code_oid,",
+                            "project_oid,",
+                            "code_index,",
+                            "code_exec_method,",
+                            "code_invoke_shell_output_str_b64,",
+                            "code_invoke_shell_output_last_line_b64,",
+                            "code_interactive_output_str_lines_b64 )  values ",
+                            f"( '{self.oid}',",
+                            f"'{host.oid}',",
+                            f"'{inspection_code_obj.oid}',",
+                            f"'{host.project_oid}',",
+                            f"{code_output.code_index},",
+                            f"{code_output.code_exec_method},",
+                            f"'{code_invoke_shell_output_str_b64}',",
+                            f"'{code_invoke_shell_output_last_line_b64}',",
+                            f"'{code_interactive_output_str_lines_b64}'",
+                            " )"]
+                print("######################## ", " ".join(sql_list))
+                sqlite_cursor.execute(" ".join(sql_list))
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
 
     def judge_completion_of_job(self):
         if len(self.job_exec_finished_host_oid_list) == len(self.unduplicated_host_obj_list):
@@ -1032,383 +1080,11 @@ class LaunchInspectionJob:
         self.save_to_sqlite(start_time, end_time)
 
 
-def load_projects_from_dbfile(dbfilepath):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出项目对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_project'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_project"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    sql = f"select * from tb_project"
-    sqlite_cursor.execute(sql)
-    search_result = sqlite_cursor.fetchall()
-    obj_list = []
-    for obj_info_tuple in search_result:
-        obj = Project(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
-                      create_timestamp=obj_info_tuple[3])
-        obj_list.append(obj)
-    sqlite_cursor.close()
-    sqlite_conn.commit()  # 保存，提交
-    sqlite_conn.close()  # 关闭数据库连接
-    return obj_list
-
-
-def load_credentials_from_dbfile(dbfilepath):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_credential'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_credential"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    sql = f"select * from tb_credential"
-    sqlite_cursor.execute(sql)
-    search_result = sqlite_cursor.fetchall()
-    obj_list = []
-    for obj_info_tuple in search_result:
-        # print('tuple: ', obj_info_tuple)
-        obj = Credential(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
-                         project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
-                         cred_type=obj_info_tuple[5],
-                         username=obj_info_tuple[6],
-                         password=obj_info_tuple[7],
-                         private_key=obj_info_tuple[8],
-                         privilege_escalation_method=obj_info_tuple[9],
-                         privilege_escalation_username=obj_info_tuple[10],
-                         privilege_escalation_password=obj_info_tuple[11],
-                         auth_url=obj_info_tuple[12],
-                         ssl_no_verify=obj_info_tuple[13],
-                         last_modify_timestamp=obj_info_tuple[14])
-        obj_list.append(obj)
-    sqlite_cursor.close()
-    sqlite_conn.commit()  # 保存，提交
-    sqlite_conn.close()  # 关闭数据库连接
-    return obj_list
-
-
-def load_hosts_from_dbfile(dbfilepath):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_host'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    sql = f"select * from tb_host"
-    sqlite_cursor.execute(sql)
-    search_result = sqlite_cursor.fetchall()
-    obj_list = []
-    for obj_info_tuple in search_result:
-        # print('tuple: ', obj_info_tuple)
-        obj = Host(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
-                   project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
-                   address=obj_info_tuple[5],
-                   ssh_port=obj_info_tuple[6],
-                   telnet_port=obj_info_tuple[7],
-                   last_modify_timestamp=obj_info_tuple[8],
-                   login_protocol=obj_info_tuple[9],
-                   first_auth_method=obj_info_tuple[10])
-        obj_list.append(obj)
-    sqlite_cursor.close()
-    sqlite_conn.commit()  # 保存，提交
-    sqlite_conn.close()  # 关闭数据库连接
-    load_hosts_include_creds_from_dbfile(dbfilepath, obj_list)
-    return obj_list
-
-
-def load_hosts_include_creds_from_dbfile(dbfilepath, host_list):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_host_include_credential_oid_list'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_include_credential_oid_list"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    for host in host_list:
-        sql = f"select * from tb_host_include_credential_oid_list where host_oid='{host.oid}'"
-        sqlite_cursor.execute(sql)
-        search_result = sqlite_cursor.fetchall()
-        for obj_info_tuple in search_result:
-            # print('tuple: ', obj_info_tuple)
-            host.credential_oid_list.append(obj_info_tuple[1])
-
-
-def load_host_groups_from_dbfile(dbfilepath):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_host_group'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    sql = f"select * from tb_host_group"
-    sqlite_cursor.execute(sql)
-    search_result = sqlite_cursor.fetchall()
-    obj_list = []
-    for obj_info_tuple in search_result:
-        # print('tuple: ', obj_info_tuple)
-        obj = HostGroup(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
-                        project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
-                        last_modify_timestamp=obj_info_tuple[5])
-        obj_list.append(obj)
-    sqlite_cursor.close()
-    sqlite_conn.commit()  # 保存，提交
-    sqlite_conn.close()  # 关闭数据库连接
-    load_host_groups_include_hosts_from_dbfile(dbfilepath, obj_list)
-    load_host_groups_include_groups_from_dbfile(dbfilepath, obj_list)
-    return obj_list
-
-
-def load_host_groups_include_hosts_from_dbfile(dbfilepath, host_group_list):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_host_group_include_host_list'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group_include_host_list"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    for host_group in host_group_list:
-        sql = f"select * from tb_host_group_include_host_list where host_group_oid='{host_group.oid}'"
-        sqlite_cursor.execute(sql)
-        search_result = sqlite_cursor.fetchall()
-        for obj_info_tuple in search_result:
-            # print('tuple: ', obj_info_tuple)
-            host_group.host_oid_list.append(obj_info_tuple[2])
-
-
-def load_host_groups_include_groups_from_dbfile(dbfilepath, host_group_list):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_host_group_include_group_list'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group_include_group_list"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    for host_group in host_group_list:
-        sql = f"select * from tb_host_group_include_group_list where host_group_oid='{host_group.oid}'"
-        sqlite_cursor.execute(sql)
-        search_result = sqlite_cursor.fetchall()
-        for obj_info_tuple in search_result:
-            # print('tuple: ', obj_info_tuple)
-            host_group.host_group_oid_list.append(obj_info_tuple[2])
-
-
-def load_inspection_codes_from_dbfile(dbfilepath):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_inspection_code'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_code"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    sql = f"select * from tb_inspection_code"
-    sqlite_cursor.execute(sql)
-    search_result = sqlite_cursor.fetchall()
-    obj_list = []
-    for obj_info_tuple in search_result:
-        # print('tuple: ', obj_info_tuple)
-        obj = InspectionCode(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
-                             project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
-                             code_source=obj_info_tuple[5],
-                             last_modify_timestamp=obj_info_tuple[6])
-        obj_list.append(obj)
-    sqlite_cursor.close()
-    sqlite_conn.commit()  # 保存，提交
-    sqlite_conn.close()  # 关闭数据库连接
-    load_inspection_code_lists_from_dbfile(dbfilepath, obj_list)
-    return obj_list
-
-
-def load_inspection_code_lists_from_dbfile(dbfilepath, inspection_code_list):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_inspection_code_list'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_code_list"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    for inspection_code in inspection_code_list:
-        sql = f"select * from tb_inspection_code_list where inspection_code_oid='{inspection_code.oid}'"
-        sqlite_cursor.execute(sql)
-        search_result = sqlite_cursor.fetchall()
-        for obj_info_tuple in search_result:
-            # print('tuple: ', obj_info_tuple)
-            code = OneLineCode(code_index=obj_info_tuple[1], code_content=obj_info_tuple[2],
-                               code_post_wait_time=obj_info_tuple[3], need_interactive=obj_info_tuple[4],
-                               interactive_question_keyword=obj_info_tuple[5],
-                               interactive_answer=obj_info_tuple[6],
-                               interactive_process_method=obj_info_tuple[7])
-            inspection_code.code_list.append(code)
-
-
-def load_inspection_templates_from_dbfile(dbfilepath):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_inspection_template'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    sql = f"select * from tb_inspection_template"
-    sqlite_cursor.execute(sql)
-    search_result = sqlite_cursor.fetchall()
-    obj_list = []
-    for obj_info_tuple in search_result:
-        # print('tuple: ', obj_info_tuple)
-        obj = InspectionTemplate(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
-                                 project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
-                                 execution_method=obj_info_tuple[5],
-                                 execution_at_time=obj_info_tuple[6],
-                                 execution_after_time=obj_info_tuple[7],
-                                 execution_crond_time=obj_info_tuple[8],
-                                 last_modify_timestamp=obj_info_tuple[9],
-                                 update_code_on_launch=obj_info_tuple[10],
-                                 forks=obj_info_tuple[11])
-        obj_list.append(obj)
-    sqlite_cursor.close()
-    sqlite_conn.commit()  # 保存，提交
-    sqlite_conn.close()  # 关闭数据库连接
-    load_inspection_templates_include_hosts_from_dbfile(dbfilepath, obj_list)
-    load_inspection_templates_include_groups_from_dbfile(dbfilepath, obj_list)
-    load_inspection_templates_include_codes_from_dbfile(dbfilepath, obj_list)
-    return obj_list
-
-
-def load_inspection_templates_include_hosts_from_dbfile(dbfilepath, inspection_template_list):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_inspection_template_include_host_list'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template_include_host_list"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    for inspection_template in inspection_template_list:
-        sql = f"select * from tb_inspection_template_include_host_list where \
-                inspection_template_oid='{inspection_template.oid}'"
-        sqlite_cursor.execute(sql)
-        search_result = sqlite_cursor.fetchall()
-        for obj_info_tuple in search_result:
-            # print('tuple: ', obj_info_tuple)
-            inspection_template.host_oid_list.append(obj_info_tuple[2])
-
-
-def load_inspection_templates_include_groups_from_dbfile(dbfilepath, inspection_template_list):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_inspection_template_include_group_list'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template_include_group_list"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    for inspection_template in inspection_template_list:
-        sql = f"select * from tb_inspection_template_include_group_list where \
-                inspection_template_oid='{inspection_template.oid}'"
-        sqlite_cursor.execute(sql)
-        search_result = sqlite_cursor.fetchall()
-        for obj_info_tuple in search_result:
-            # print('tuple: ', obj_info_tuple)
-            inspection_template.host_group_oid_list.append(obj_info_tuple[2])
-
-
-def load_inspection_templates_include_codes_from_dbfile(dbfilepath, inspection_template_list):
-    # input <str> , output <list>
-    # 输入数据库文件名，输出对象列表
-    sqlite_conn = sqlite3.connect(dbfilepath)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
-    sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-    # ★查询是否有名为'tb_inspection_template_include_inspection_code_list'的表★
-    sql = 'SELECT * FROM sqlite_master WHERE type="table" \
-                and tbl_name="tb_inspection_template_include_inspection_code_list"'
-    sqlite_cursor.execute(sql)
-    result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-    print("exist tables: ", result)
-    # 若未查询到有此表，则返回None
-    if len(result) == 0:
-        return None
-    # 读取数据
-    for inspection_template in inspection_template_list:
-        sql = f"select * from tb_inspection_template_include_group_list where \
-                inspection_template_oid='{inspection_template.oid}'"
-        sqlite_cursor.execute(sql)
-        search_result = sqlite_cursor.fetchall()
-        for obj_info_tuple in search_result:
-            # print('tuple: ', obj_info_tuple)
-            inspection_template.inspection_code_oid_list.append(obj_info_tuple[2])
-
-
 class OneLineCode:
+    """
+    <inspect_code>对象包含的元素，一行命令为一个<OneLineCode>对象
+    """
+
     def __init__(self, code_index=0, code_content='', code_post_wait_time=CODE_POST_WAIT_TIME_DEFAULT,
                  need_interactive=False, interactive_question_keyword='', interactive_answer='',
                  interactive_process_method=INTERACTIVE_PROCESS_METHOD_ONETIME):
@@ -1422,6 +1098,10 @@ class OneLineCode:
 
 
 class SSHOperatorOutput:
+    """
+    一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
+    """
+
     def __init__(self, code_index=0, code_content=None, code_exec_method=CODE_EXEC_METHOD_INVOKE_SHELL,
                  invoke_shell_output_str=None, invoke_shell_output_last_line=None, is_empty_output=False,
                  interactive_output_str_list=None,
@@ -1453,41 +1133,11 @@ class SSHOperatorOutput:
         self.is_empty_output = is_empty_output
 
 
-def process_code_interactive(code, output_last_line, ssh_shell, output, second_time=False):
-    ret = re.search(code.interactive_question_keyword, output_last_line, re.I)
-    if ret is not None:  # 如果匹配上需要交互的提问判断字符串
-        print(f"★★匹配到交互关键字 {ret} ，执行交互回答:")
-        ssh_shell.send(code.interactive_answer.encode('utf8'))
-        # ssh_shell.send("\n".encode('utf8'))  # 命令strip()后，不带\n换行，需要额外发送一个换行符
-        time.sleep(code.code_post_wait_time)  # 发送完命令后，要等待系统回复
-        try:
-            recv = ssh_shell.recv(65535)
-        except Exception as e:
-            print(e)
-            return
-        # interactive_output_str_list = recv.decode('utf8').split('\r\n')
-        # interactive_output_str = '\n'.join(interactive_output_str_list)  # 这与前面一行共同作用是去除'\r'
-        interactive_output_str = recv.decode('utf8').replace('\r', '')
-        print(interactive_output_str)
-        output.interactive_output_str_list.append(interactive_output_str)
-        if second_time is True:
-            print("上面输出为twice的★★★★★")
-            return
-        interactive_output_str_lines = interactive_output_str.split('\n')
-        interactive_output_last_line_index = len(interactive_output_str_lines) - 1
-        if code.interactive_process_method == INTERACTIVE_PROCESS_METHOD_LOOP and len(
-                interactive_output_str_lines) != 0:
-            process_code_interactive(code, interactive_output_str_lines[interactive_output_last_line_index],
-                                     ssh_shell, output)
-        if code.interactive_process_method == INTERACTIVE_PROCESS_METHOD_TWICE and len(
-                interactive_output_str_lines) != 0:
-            process_code_interactive(code, interactive_output_str_lines[interactive_output_last_line_index],
-                                     ssh_shell, output, second_time=True)
-    else:
-        return
+class SSHOperator:
+    """
+    一个<SSHOperator>对象操作一个<InspectionCode>巡检代码的所有命令
+    """
 
-
-class SSHOperator:  # 一个<SSHOperator>对象操作一个<InspectionCode>巡检代码的所有命令
     def __init__(self, hostname='', username='', password='', private_key='', port=22,
                  timeout=30, auth_method=AUTH_METHOD_SSH_PASS, command_list=None):
         self.oid = uuid.uuid4().__str__()  # <str>
@@ -1565,11 +1215,56 @@ class SSHOperator:  # 一个<SSHOperator>对象操作一个<InspectionCode>巡�
             print(invoke_shell_output_str)
             print(f"命令输出最后一行（shell提示符，不带换行符的）为:  {output_last_line.encode('utf8')}")  # 提示符末尾有个空格
             if code.need_interactive:  # 命令如果有交互，则判断交互提问关键词
-                process_code_interactive(code, output_last_line, ssh_shell, output)
+                self.process_code_interactive(code, output_last_line, ssh_shell, output)
             cmd_index += 1
         ssh_shell.close()
         ssh_client.close()
         self.is_finished = True
+
+    @staticmethod
+    def process_code_interactive(code, output_last_line, ssh_shell, output, second_time=False):
+        """
+        处理命令的交互式应答，有时执行某些命令执后，系统会提示输入[Y/N]?，要求回复
+        :param code:
+        :param output_last_line:
+        :param ssh_shell:
+        :param output:
+        :param second_time:
+        :return:
+        """
+        ret = re.search(code.interactive_question_keyword, output_last_line, re.I)
+        if ret is not None:  # 如果匹配上需要交互的提问判断字符串
+            print(f"★★匹配到交互关键字 {ret} ，执行交互回答:")
+            ssh_shell.send(code.interactive_answer.encode('utf8'))
+            # ssh_shell.send("\n".encode('utf8'))  # 命令strip()后，不带\n换行，需要额外发送一个换行符
+            time.sleep(code.code_post_wait_time)  # 发送完命令后，要等待系统回复
+            try:
+                recv = ssh_shell.recv(65535)
+            except Exception as e:
+                print(e)
+                return
+            # interactive_output_str_list = recv.decode('utf8').split('\r\n')
+            # interactive_output_str = '\n'.join(interactive_output_str_list)  # 这与前面一行共同作用是去除'\r'
+            interactive_output_str = recv.decode('utf8').replace('\r', '')
+            print(interactive_output_str)
+            output.interactive_output_str_list.append(interactive_output_str)
+            if second_time is True:
+                print("上面输出为twice的★★★★★")
+                return
+            interactive_output_str_lines = interactive_output_str.split('\n')
+            interactive_output_last_line_index = len(interactive_output_str_lines) - 1
+            if code.interactive_process_method == INTERACTIVE_PROCESS_METHOD_LOOP and len(
+                    interactive_output_str_lines) != 0:
+                SSHOperator.process_code_interactive(code,
+                                                     interactive_output_str_lines[interactive_output_last_line_index],
+                                                     ssh_shell, output)
+            if code.interactive_process_method == INTERACTIVE_PROCESS_METHOD_TWICE and len(
+                    interactive_output_str_lines) != 0:
+                SSHOperator.process_code_interactive(code,
+                                                     interactive_output_str_lines[interactive_output_last_line_index],
+                                                     ssh_shell, output, second_time=True)
+        else:
+            return
 
     def exec_command(self):
         if self.command_list is None:
@@ -1617,18 +1312,12 @@ class SSHOperator:  # 一个<SSHOperator>对象操作一个<InspectionCode>巡�
         self.is_finished = True
 
 
-def claer_tkinter_frame(frame):
-    for widget in frame.winfo_children():
-        widget.destroy()
-
-
-def claer_tkinter_window(window):
-    for widget in window.winfo_children():
-        widget.destroy()
-
-
 class MainWindow:
-    def __init__(self, width=640, height=400, title='', project=None):
+    """
+    CofAble主界面类，包含菜单栏及左右2个frame
+    """
+
+    def __init__(self, width=640, height=400, title='', current_project=None, global_info=None):
         self.title = title
         self.width = width
         self.height = height
@@ -1646,61 +1335,202 @@ class MainWindow:
         self.nav_frame_l_width = int(self.width * 0.2)
         self.nav_frame_r_width = int(self.width * 0.8)
         # self.gui_focus = GUI_FOCUS_MAIN_INIT_WINDOW
-        self.current_project = project
+        self.global_info = global_info  # <GlobalInfo>对象
+        self.current_project = current_project
         self.about_info = "CofAble，自动化巡检平台，版本: v1.0\n本软件使用GPL-v3.0协议开源，作者: Cof-Lee"
 
-    def click_menu_button_project(self):
-        # messagebox.showinfo("消息框名称", "这是消息框内容")
-        # self.gui_focus = GUI_FOCUS_MAIN_PROJECT_WINDOW
-        self.load_nav_frame_r_project_display()
-        # self.window_obj.after(0, self.refresh_window)
+    @staticmethod
+    def claer_tkinter_frame(frame):
+        for widget in frame.winfo_children():
+            widget.destroy()
 
-    def click_menu_button_credential(self):
-        # messagebox.showinfo("消息框名称", "这是消息框内容")
-        # self.gui_focus = GUI_FOCUS_MAIN_CREDENTIAL_WINDOW
-        self.load_nav_frame_r_credential_display()
+    @staticmethod
+    def claer_tkinter_window(window):
+        for widget in window.winfo_children():
+            widget.destroy()
 
-    def create_nav_frame_l(self):  # 创建导航框架1
-        nav_frame_l = tkinter.Frame(self.window_obj, bg="green", width=self.nav_frame_l_width, height=self.height)
-        nav_frame_l.grid_propagate(False)
-        nav_frame_l.pack_propagate(False)
-        nav_frame_l.grid(row=0, column=0)
-        # 在框架1中添加功能按钮
-        # claer_tkinter_frame(frame1)
-        label_current_time = tkinter.Label(nav_frame_l, text=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-        if self.current_project is None:
-            label2_content = "当前无项目"
+    def click_menu_button_project_of_nav_frame_l(self):
+        """
+        显示project主页面
+        :return:
+        """
+        self.nav_frame_r_project_page_display()
+
+    def click_menu_button_credential_of_nav_frame_l(self):
+        """
+        显示credential主页面
+        :return:
+        """
+        self.nav_frame_r_credential_page_display()
+
+    def click_button_save_of_create_project(self, sv_project_name, sv_project_description):  # 保存项目信息
+        project_name = sv_project_name.get()
+        project_description = sv_project_description.get()
+        print(project_name, project_description)
+        # 创建项目
+        if project_name == '':
+            messagebox.showinfo("创建项目-Error", f"项目名称不能为空")
+        elif len(project_name) > 128:
+            messagebox.showinfo("创建项目-Error", f"项目名称>128字符")
+        elif len(project_description) > 256:
+            messagebox.showinfo("创建项目-Error", f"项目描述>256字符")
+        elif self.global_info.is_project_name_existed(project_name):
+            messagebox.showinfo("创建项目-Error", f"项目名称 {project_name} 已存在")
         else:
-            label2_content = "当前项目-" + self.current_project.name
-        label2 = tkinter.Label(nav_frame_l, text=label2_content, width=self.nav_frame_l_width, height=2)
-        label_current_time.pack(padx=2, pady=2)
-        label_current_time.after(1000, self.refresh_label_current_time, label_current_time)
-        label2.pack(padx=2, pady=2)
-        menu_button_project = tkinter.Button(nav_frame_l, text="Project项目", width=self.nav_frame_l_width, height=2,
-                                             bg="#aaaaaa", command=self.click_menu_button_project)
-        menu_button_project.pack(padx=2, pady=2)
-        menu_button_credential = tkinter.Button(nav_frame_l, text="Credentials凭据", width=self.nav_frame_l_width,
-                                                height=2, bg="#aaaaaa",
-                                                command=self.click_menu_button_credential)
-        menu_button_credential.pack(padx=2, pady=2)
-        menu_button2 = tkinter.Button(nav_frame_l, text="Host主机管理", width=self.nav_frame_l_width,
-                                      bg="#bbbbaa")
-        menu_button2.pack(padx=2, pady=2)
-        menu_button3 = tkinter.Button(nav_frame_l, text="Inspection巡检代码", width=self.nav_frame_l_width,
-                                      bg="#f1f111")
-        menu_button3.pack(padx=2, pady=2)
-        menu_button4 = tkinter.Button(nav_frame_l, text="Template巡检作业模板", width=self.nav_frame_l_width,
-                                      bg="#acada3")
-        menu_button4.pack(padx=2, pady=2)
+            project = Project(name=project_name, description=project_description, global_info=self.global_info)
+            project.save()
+            self.global_info.project_obj_list.append(project)
+            self.nav_frame_r_project_page_display()  # 保存项目信息后，返回项目展示页面
 
-    def click_button_create_project(self):
+    def click_button_save_of_create_credential(self, sv_credential_name, sv_credential_description):  # 保存项目信息
+        credential_name = sv_credential_name.get()
+        credential_description = sv_credential_description.get()
+        print(credential_name, credential_description)
+        # 创建项目
+        if credential_name == '':
+            messagebox.showinfo("创建项目-Error", f"项目名称不能为空")
+        elif len(credential_name) > 128:
+            messagebox.showinfo("创建项目-Error", f"项目名称>128字符")
+        elif len(credential_description) > 256:
+            messagebox.showinfo("创建项目-Error", f"项目描述>256字符")
+        elif self.global_info.is_credential_name_existed(credential_name):
+            messagebox.showinfo("创建项目-Error", f"项目名称 {credential_name} 已存在")
+        else:
+            credential = Credential(name=credential_name, description=credential_description, global_info=self.global_info)
+            credential.save()
+            self.global_info.credential_obj_list.append(credential)
+            self.nav_frame_r_credential_page_display()  # 保存项目信息后，返回项目展示页面
+
+    def click_button_create_project_of_nav_frame_r_project_page(self):
+        """
+        创建项目页面
+        :return:
+        """
         # 更新导航框架2
         nav_frame_r = self.window_obj.winfo_children()[2]
         nav_frame_r.__setitem__("bg", "green")
         # 在框架2中添加控件
-        claer_tkinter_frame(nav_frame_r)
+        self.claer_tkinter_frame(nav_frame_r)
+        # ★project-名称
+        label_project_name = tkinter.Label(nav_frame_r, text="项目名称")
+        label_project_name.place(x=0, y=0, width=int(self.nav_frame_r_width * 0.2), height=int(self.height * 0.1))
+        sv_project_name = tkinter.StringVar()
+        entry_project_name = tkinter.Entry(nav_frame_r, textvariable=sv_project_name)
+        entry_project_name.place(x=int(self.nav_frame_r_width * 0.2) + 20, y=0, width=int(self.nav_frame_r_width * 0.2),
+                                 height=int(self.height * 0.1))
+        # ★project-描述
+        label_project_description = tkinter.Label(nav_frame_r, text="描述")
+        label_project_description.place(x=0, y=50, width=int(self.nav_frame_r_width * 0.2),
+                                        height=int(self.height * 0.1))
+        sv_project_description = tkinter.StringVar()
+        entry_project_description = tkinter.Entry(nav_frame_r, textvariable=sv_project_description)
+        entry_project_description.place(x=int(self.nav_frame_r_width * 0.2) + 20, y=50,
+                                        width=int(self.nav_frame_r_width * 0.2),
+                                        height=int(self.height * 0.1))
+        # ★创建“保存”按钮
+        button_save = tkinter.Button(nav_frame_r, text="保存",
+                                     command=lambda: self.click_button_save_of_create_project(
+                                         sv_project_name, sv_project_description))
+        button_save.place(x=0, y=150, width=int(self.nav_frame_r_width * 0.2), height=int(self.height * 0.1))
+        # ★创建“取消”按钮
+        button_cancel = tkinter.Button(nav_frame_r, text="取消", command=self.nav_frame_r_project_page_display)
+        button_cancel.place(x=int(self.nav_frame_r_width * 0.2) + 10, y=150, width=int(self.nav_frame_r_width * 0.2),
+                            height=int(self.height * 0.1))
 
-    def load_nav_frame_r_project_display(self):
+    def click_button_create_credential_of_nav_frame_r_credential_page(self):
+        """
+        创建凭据页面
+        :return:
+        """
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "green")
+        # 在框架2中添加控件
+        self.claer_tkinter_frame(nav_frame_r)
+        # ★credential-名称
+        label_credential_name = tkinter.Label(nav_frame_r, text="凭据名称")
+        label_credential_name.place(x=0, y=0, width=int(self.nav_frame_r_width * 0.2), height=int(self.height * 0.1))
+        sv_credential_name = tkinter.StringVar()
+        entry_credential_name = tkinter.Entry(nav_frame_r, textvariable=sv_credential_name)
+        entry_credential_name.place(x=int(self.nav_frame_r_width * 0.2) + 20, y=0, width=int(self.nav_frame_r_width * 0.2),
+                                    height=int(self.height * 0.1))
+        # ★credential-描述
+        label_credential_description = tkinter.Label(nav_frame_r, text="描述")
+        label_credential_description.place(x=0, y=50, width=int(self.nav_frame_r_width * 0.2),
+                                           height=int(self.height * 0.1))
+        sv_credential_description = tkinter.StringVar()
+        entry_credential_description = tkinter.Entry(nav_frame_r, textvariable=sv_credential_description)
+        entry_credential_description.place(x=int(self.nav_frame_r_width * 0.2) + 20, y=50,
+                                           width=int(self.nav_frame_r_width * 0.2),
+                                           height=int(self.height * 0.1))
+        # ★其他按钮，未完待续
+        # ★创建“保存”按钮
+        button_save = tkinter.Button(nav_frame_r, text="保存",
+                                     command=lambda: self.click_button_save_of_create_credential(
+                                         sv_credential_name, sv_credential_description))
+        button_save.place(x=0, y=150, width=int(self.nav_frame_r_width * 0.2), height=int(self.height * 0.1))
+        # ★创建“取消”按钮
+        button_cancel = tkinter.Button(nav_frame_r, text="取消", command=self.nav_frame_r_credential_page_display)
+        button_cancel.place(x=int(self.nav_frame_r_width * 0.2) + 10, y=150, width=int(self.nav_frame_r_width * 0.2),
+                            height=int(self.height * 0.1))
+
+    def click_button_display_project_of_nav_frame_r_project_page(self):
+        """
+        显示项目列表
+        :return:
+        """
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "green")
+        # 在框架2中添加控件
+        self.claer_tkinter_frame(nav_frame_r)
+        # 先更新global_info里的项目列表
+        # self.global_info.load_all_data_from_sqlite3()
+        index = 0
+        for pro_obj in self.global_info.project_obj_list:
+            print(pro_obj.name)
+            label_project = tkinter.Label(nav_frame_r, text=pro_obj.name)
+            label_project.place(x=10, y=index * 50, width=int(self.nav_frame_r_width * 0.2),
+                                height=int(self.height * 0.1))
+            index += 1
+
+    def click_button_display_credential_of_nav_frame_r_credential_page(self):
+        """
+        显示凭据列表
+        :return:
+        """
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "pink")
+        # 在框架2中添加控件
+        self.claer_tkinter_frame(nav_frame_r)
+        # 先更新global_info里的凭据列表
+        # self.global_info.load_all_data_from_sqlite3()
+        scrollbar = tkinter.Scrollbar(nav_frame_r)
+        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        canvas = tkinter.Canvas(nav_frame_r, width=self.nav_frame_r_width, height=self.height, yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        # text_box = tkinter.Text(nav_frame_r, yscrollcommand=scrollbar.set)
+        # text_box.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=canvas.yview)
+        frame1 = tkinter.Frame(canvas, bg="gray", width=self.nav_frame_r_width, height=self.height)
+        frame1.grid_propagate(False)
+        frame1.pack_propagate(False)
+        index = 0
+        for obj in self.global_info.credential_obj_list:
+            print(obj.name)
+            label = tkinter.Label(frame1, text=obj.name)
+            label.pack()
+            # label.place(x=10, y=index * 50, width=int(self.nav_frame_r_width * 0.2), height=int(self.height * 0.2))
+            # canvas.create_text(10, index * 50, text=obj.name, fill="pink")
+            # canvas.create_rectangle(10, index * 50,100, index * 50+10)
+            index += 1
+
+    def nav_frame_r_project_page_display(self):
+        """
+        显示project主页面
+        :return:
+        """
         # claer_tkinter_window(self.window_obj)
         # 创建导航框架1
         # self.create_nav_frame_l()
@@ -1708,11 +1538,19 @@ class MainWindow:
         nav_frame_r = self.window_obj.winfo_children()[2]
         nav_frame_r.__setitem__("bg", "gray")
         # 在框架2中添加控件
-        claer_tkinter_frame(nav_frame_r)
-        button_create_project = tkinter.Button(nav_frame_r, text="创建项目", command=self.click_button_create_project)
+        self.claer_tkinter_frame(nav_frame_r)
+        button_create_project = tkinter.Button(nav_frame_r, text="创建项目",
+                                               command=self.click_button_create_project_of_nav_frame_r_project_page)
         button_create_project.grid(row=0, column=1)
+        button_display_project = tkinter.Button(nav_frame_r, text="列出项目",
+                                                command=self.click_button_display_project_of_nav_frame_r_project_page)
+        button_display_project.grid(row=1, column=1)
 
-    def load_nav_frame_r_credential_display(self):
+    def nav_frame_r_credential_page_display(self):
+        """
+        显示credential主页面
+        :return:
+        """
         # claer_tkinter_window(self.window_obj)
         # 创建导航框架1
         # self.create_nav_frame_l()
@@ -1720,51 +1558,104 @@ class MainWindow:
         nav_frame_r = self.window_obj.winfo_children()[2]
         nav_frame_r.__setitem__("bg", "yellow")
         # 在框架2中添加控件
-        claer_tkinter_frame(nav_frame_r)
-        button_2 = tkinter.Button(nav_frame_r, text="凭据")
-        button_2.pack()
+        self.claer_tkinter_frame(nav_frame_r)
+        button_create_credential = tkinter.Button(nav_frame_r, text="创建凭据",
+                                                  command=self.click_button_create_credential_of_nav_frame_r_credential_page)
+        button_create_credential.grid(row=0, column=1)
+        button_display_credential = tkinter.Button(nav_frame_r, text="列出凭据",
+                                                   command=self.click_button_display_credential_of_nav_frame_r_credential_page)
+        button_display_credential.grid(row=1, column=1)
 
-    def load_main_window_init_widget(self):  # 加载主界面初始化界面控件
-        claer_tkinter_window(self.window_obj)
-        # 加载菜单项
-        self.load_menu_bar()
+    def load_main_window_init_widget(self):
+        """
+        加载主界面初始化界面控件
+        :return:
+        """
+        # 首先清空主window
+        self.claer_tkinter_window(self.window_obj)
+        # 加载菜单栏
+        self.create_menu_bar_init()
         # 创建导航框架1
-        self.create_nav_frame_l()
+        self.create_nav_frame_l_init()
         # 创建导航框架2
+        self.create_nav_frame_r_init()
+
+    def create_menu_bar_init(self):  # 创建菜单栏-init界面的
+        menu_bar = tkinter.Menu(self.window_obj)  # 创建一个菜单，做菜单栏
+        menu_open_db_file = tkinter.Menu(menu_bar, tearoff=1)  # 创建一个菜单，分窗，表示此菜单可拉出来变成一个可移动的独立弹窗
+        menu_about = tkinter.Menu(menu_bar, tearoff=0, activebackground="green", activeforeground="white",
+                                  background="white", foreground="black")  # 创建一个菜单，不分窗
+        menu_open_db_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file)
+        menu_about.add_command(label="About", command=self.click_menu_about)
+        menu_bar.add_cascade(label="File", menu=menu_open_db_file)
+        menu_bar.add_cascade(label="Help", menu=menu_about)
+        self.window_obj.config(menu=menu_bar)
+
+    def create_nav_frame_l_init(self):  # 创建导航框架1-init界面的
+        nav_frame_l = tkinter.Frame(self.window_obj, bg="green", width=self.nav_frame_l_width, height=self.height)
+        nav_frame_l.grid_propagate(False)
+        nav_frame_l.pack_propagate(False)
+        nav_frame_l.grid(row=0, column=0)
+        # 在框架1中添加功能按钮
+        label_current_time = tkinter.Label(nav_frame_l, text=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+        if self.global_info.current_project_obj is None:
+            label_current_project_content = "当前无项目"
+        else:
+            label_current_project_content = "当前项目-" + self.global_info.current_project_obj.name
+        label_current_project = tkinter.Label(nav_frame_l, text=label_current_project_content,
+                                              width=self.nav_frame_l_width, height=2)
+        label_current_time.pack(padx=2, pady=2)
+        label_current_time.after(1000, self.refresh_label_current_time, label_current_time)
+        label_current_project.pack(padx=2, pady=2)
+        # Project项目-选项按钮
+        menu_button_project = tkinter.Button(nav_frame_l, text="Project项目", width=self.nav_frame_l_width, height=2,
+                                             bg="#aaaaaa", command=self.click_menu_button_project_of_nav_frame_l)
+        menu_button_project.pack(padx=2, pady=2)
+        # Credentials凭据-选项按钮
+        menu_button_credential = tkinter.Button(nav_frame_l, text="Credentials凭据", width=self.nav_frame_l_width,
+                                                height=2, bg="#aaaaaa",
+                                                command=self.click_menu_button_credential_of_nav_frame_l)
+        menu_button_credential.pack(padx=2, pady=2)
+        # Host主机(组)管理-选项按钮
+        menu_button_host = tkinter.Button(nav_frame_l, text="Host主机(组)管理", width=self.nav_frame_l_width,
+                                          bg="#bbbbaa")
+        menu_button_host.pack(padx=2, pady=2)
+        # Inspect巡检代码-选项按钮
+        menu_button_inspect_code = tkinter.Button(nav_frame_l, text="Inspect巡检代码", width=self.nav_frame_l_width,
+                                                  bg="#f1f111")
+        menu_button_inspect_code.pack(padx=2, pady=2)
+        # Template巡检模板-选项按钮
+        menu_button_inspection_template = tkinter.Button(nav_frame_l, text="Template巡检模板",
+                                                         width=self.nav_frame_l_width, bg="#acada3")
+        menu_button_inspection_template.pack(padx=2, pady=2)
+
+    def create_nav_frame_r_init(self):  # 创建导航框架2-init界面的
         nav_frame_r = tkinter.Frame(self.window_obj, bg="blue", width=self.nav_frame_r_width, height=self.height)
         nav_frame_r.grid_propagate(False)
         nav_frame_r.pack_propagate(False)
         nav_frame_r.grid(row=0, column=1)
         # 在框架2中添加控件
-        # claer_tkinter_frame(frame2)
+        label = tkinter.Label(nav_frame_r, text="初始化界面")
         button_2 = tkinter.Button(nav_frame_r, text="按钮2")
+        label.pack()
         button_2.pack()
 
     def refresh_label_current_time(self, label):
         label.__setitem__('text', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-        # 继续调用回调函数更新window
+        # 继续调用回调函数更新label
         self.window_obj.after(1000, self.refresh_label_current_time, label)
 
     def click_menu_about(self):
         messagebox.showinfo("About", self.about_info)
 
-    def click_menu_file(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+    def click_menu_open_db_file(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.db"), ("All files", "*.*")])
         if not file_path:
             print("not choose a file")
         else:
             print(file_path)
-
-    def load_menu_bar(self):
-        menu_bar = tkinter.Menu(self.window_obj)  # 创建一个菜单，做菜单栏
-        menu_file = tkinter.Menu(menu_bar, tearoff=1)  # 创建一个菜单，分窗，表示此菜单可拉出来变成一个可移动的独立弹窗
-        menu_about = tkinter.Menu(menu_bar, tearoff=0, activebackground="green", activeforeground="white",
-                                  background="white", foreground="black")  # 创建一个菜单，不分窗
-        menu_file.add_command(label="File", command=self.click_menu_file)
-        menu_about.add_command(label="About", command=self.click_menu_about)
-        menu_bar.add_cascade(label="File", menu=menu_file)
-        menu_bar.add_cascade(label="Help", menu=menu_about)
-        self.window_obj.config(menu=menu_bar)
+            self.global_info.set_sqlite3_dbfile_name(file_path)
+            self.global_info.load_all_data_from_sqlite3()
 
     def reload_current_resized_window(self, event):  # 监听窗口大小变化事件，自动更新窗口内控件大小
         if event:
@@ -1791,7 +1682,7 @@ class MainWindow:
         self.window_obj.pack_propagate(True)  # True表示窗口内的控件大小自适应
         self.window_obj.configure(bg=self.background)  # 设置背景色，RGB
         # 加载初始化界面控件
-        self.load_main_window_init_widget()
+        self.load_main_window_init_widget()  # 接下来，所有的事情都在此界面操作
         print(f"当前window有{len(self.window_obj.winfo_children())}个子控件")
         for widget in self.window_obj.winfo_children():
             print(type(widget))
@@ -1800,3 +1691,445 @@ class MainWindow:
         self.window_obj.bind('<Configure>', self.reload_current_resized_window)
         # 运行窗口主循环
         self.window_obj.mainloop()
+
+
+class GlobalInfo:
+    """
+    全局变量类，包含所有资源类的实例信息
+    """
+
+    def __init__(self, sqlite3_dbfile_name="cofable_default.db"):
+        self.sqlite3_dbfile_name = sqlite3_dbfile_name  # 若未指定数据库文件名称，则默认为"cofable_default.db"
+        self.project_obj_list = []
+        self.credential_obj_list = []
+        self.host_obj_list = []
+        self.host_group_obj_list = []
+        self.inspect_code_obj_list = []
+        self.inspect_template_obj_list = []
+        self.current_project_obj = None
+
+    def set_sqlite3_dbfile_name(self, file_name):
+        self.sqlite3_dbfile_name = file_name
+
+    def load_all_data_from_sqlite3(self):  # 初始化global_info，从数据库加载所有数据到实例
+        if self.sqlite3_dbfile_name is None:
+            print("undefined sqlite3_dbfile_name")
+            return
+        elif self.sqlite3_dbfile_name == '':
+            print("undefined sqlite3_dbfile_name")
+            return
+        else:
+            self.project_obj_list = self.load_projects_from_dbfile()
+            self.credential_obj_list = self.load_credentials_from_dbfile()
+            self.host_obj_list = self.load_hosts_from_dbfile()
+            self.host_group_obj_list = self.load_host_groups_from_dbfile()
+            self.inspect_code_obj_list = self.load_inspection_codes_from_dbfile()
+            self.inspect_template_obj_list = self.load_inspection_templates_from_dbfile()
+
+    def load_projects_from_dbfile(self):
+        """
+        从sqlite3数据库文件，查找所有project，并输出project对象列表，output <list[Project]>
+        :return:
+        """
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_project'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_project"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        sql = f"select * from tb_project"
+        sqlite_cursor.execute(sql)
+        search_result = sqlite_cursor.fetchall()
+        obj_list = []
+        for obj_info_tuple in search_result:
+            obj = Project(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
+                          create_timestamp=obj_info_tuple[3])
+            obj_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+        return obj_list
+
+    def load_credentials_from_dbfile(self):
+        """
+        从sqlite3数据库文件，查找所有credential，并输出credential对象列表，output <list>
+        :return:
+        """
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_credential'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_credential"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        sql = f"select * from tb_credential"
+        sqlite_cursor.execute(sql)
+        search_result = sqlite_cursor.fetchall()
+        obj_list = []
+        for obj_info_tuple in search_result:
+            # print('tuple: ', obj_info_tuple)
+            obj = Credential(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
+                             project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
+                             cred_type=obj_info_tuple[5],
+                             username=obj_info_tuple[6],
+                             password=obj_info_tuple[7],
+                             private_key=obj_info_tuple[8],
+                             privilege_escalation_method=obj_info_tuple[9],
+                             privilege_escalation_username=obj_info_tuple[10],
+                             privilege_escalation_password=obj_info_tuple[11],
+                             auth_url=obj_info_tuple[12],
+                             ssl_no_verify=obj_info_tuple[13],
+                             last_modify_timestamp=obj_info_tuple[14])
+            obj_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+        return obj_list
+
+    def load_hosts_from_dbfile(self):
+        """
+        从sqlite3数据库文件，查找所有host，并输出host对象列表，output <list>
+        :return:
+        """
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_host'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        sql = f"select * from tb_host"
+        sqlite_cursor.execute(sql)
+        search_result = sqlite_cursor.fetchall()
+        obj_list = []
+        for obj_info_tuple in search_result:
+            # print('tuple: ', obj_info_tuple)
+            obj = Host(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
+                       project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
+                       address=obj_info_tuple[5],
+                       ssh_port=obj_info_tuple[6],
+                       telnet_port=obj_info_tuple[7],
+                       last_modify_timestamp=obj_info_tuple[8],
+                       login_protocol=obj_info_tuple[9],
+                       first_auth_method=obj_info_tuple[10])
+            obj_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+        self.load_hosts_include_creds_from_dbfile(obj_list)
+        return obj_list
+
+    def load_hosts_include_creds_from_dbfile(self, host_list):
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_host_include_credential_oid_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_include_credential_oid_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        for host in host_list:
+            sql = f"select * from tb_host_include_credential_oid_list where host_oid='{host.oid}'"
+            sqlite_cursor.execute(sql)
+            search_result = sqlite_cursor.fetchall()
+            for obj_info_tuple in search_result:
+                # print('tuple: ', obj_info_tuple)
+                host.credential_oid_list.append(obj_info_tuple[1])
+
+    def load_host_groups_from_dbfile(self):
+        """
+        从sqlite3数据库文件，查找所有host_group，并输出host_group对象列表，output <list>
+        :return:
+        """
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_host_group'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        sql = f"select * from tb_host_group"
+        sqlite_cursor.execute(sql)
+        search_result = sqlite_cursor.fetchall()
+        obj_list = []
+        for obj_info_tuple in search_result:
+            # print('tuple: ', obj_info_tuple)
+            obj = HostGroup(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
+                            project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
+                            last_modify_timestamp=obj_info_tuple[5])
+            obj_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+        self.load_host_groups_include_hosts_from_dbfile(obj_list)
+        self.load_host_groups_include_groups_from_dbfile(obj_list)
+        return obj_list
+
+    def load_host_groups_include_hosts_from_dbfile(self, host_group_list):
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_host_group_include_host_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group_include_host_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        for host_group in host_group_list:
+            sql = f"select * from tb_host_group_include_host_list where host_group_oid='{host_group.oid}'"
+            sqlite_cursor.execute(sql)
+            search_result = sqlite_cursor.fetchall()
+            for obj_info_tuple in search_result:
+                # print('tuple: ', obj_info_tuple)
+                host_group.host_oid_list.append(obj_info_tuple[2])
+
+    def load_host_groups_include_groups_from_dbfile(self, host_group_list):
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_host_group_include_group_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group_include_group_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        for host_group in host_group_list:
+            sql = f"select * from tb_host_group_include_group_list where host_group_oid='{host_group.oid}'"
+            sqlite_cursor.execute(sql)
+            search_result = sqlite_cursor.fetchall()
+            for obj_info_tuple in search_result:
+                # print('tuple: ', obj_info_tuple)
+                host_group.host_group_oid_list.append(obj_info_tuple[2])
+
+    def load_inspection_codes_from_dbfile(self):
+        """
+        从sqlite3数据库文件，查找所有inspection_code，并输出inspection_code对象列表，output <list>
+        :return:
+        """
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_code'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_code"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        sql = f"select * from tb_inspection_code"
+        sqlite_cursor.execute(sql)
+        search_result = sqlite_cursor.fetchall()
+        obj_list = []
+        for obj_info_tuple in search_result:
+            # print('tuple: ', obj_info_tuple)
+            obj = InspectionCode(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
+                                 project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
+                                 code_source=obj_info_tuple[5],
+                                 last_modify_timestamp=obj_info_tuple[6])
+            obj_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+        self.load_inspection_code_lists_from_dbfile(obj_list)
+        return obj_list
+
+    def load_inspection_code_lists_from_dbfile(self, inspection_code_list):
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_code_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_code_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        for inspection_code in inspection_code_list:
+            sql = f"select * from tb_inspection_code_list where inspection_code_oid='{inspection_code.oid}'"
+            sqlite_cursor.execute(sql)
+            search_result = sqlite_cursor.fetchall()
+            for obj_info_tuple in search_result:
+                # print('tuple: ', obj_info_tuple)
+                code = OneLineCode(code_index=obj_info_tuple[1], code_content=obj_info_tuple[2],
+                                   code_post_wait_time=obj_info_tuple[3], need_interactive=obj_info_tuple[4],
+                                   interactive_question_keyword=obj_info_tuple[5],
+                                   interactive_answer=obj_info_tuple[6],
+                                   interactive_process_method=obj_info_tuple[7])
+                inspection_code.code_list.append(code)
+
+    def load_inspection_templates_from_dbfile(self):
+        """
+        从sqlite3数据库文件，查找所有inspection_template，并输出inspection_template对象列表，output <list>
+        :return:
+        """
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_template'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        sql = f"select * from tb_inspection_template"
+        sqlite_cursor.execute(sql)
+        search_result = sqlite_cursor.fetchall()
+        obj_list = []
+        for obj_info_tuple in search_result:
+            # print('tuple: ', obj_info_tuple)
+            obj = InspectionTemplate(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
+                                     project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
+                                     execution_method=obj_info_tuple[5],
+                                     execution_at_time=obj_info_tuple[6],
+                                     execution_after_time=obj_info_tuple[7],
+                                     execution_crond_time=obj_info_tuple[8],
+                                     last_modify_timestamp=obj_info_tuple[9],
+                                     update_code_on_launch=obj_info_tuple[10],
+                                     forks=obj_info_tuple[11])
+            obj_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+        self.load_inspection_templates_include_hosts_from_dbfile(obj_list)
+        self.load_inspection_templates_include_groups_from_dbfile(obj_list)
+        self.load_inspection_templates_include_codes_from_dbfile(obj_list)
+        return obj_list
+
+    def load_inspection_templates_include_hosts_from_dbfile(self, inspection_template_list):
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_template_include_host_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template_include_host_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        for inspection_template in inspection_template_list:
+            sql = f"select * from tb_inspection_template_include_host_list where \
+                    inspection_template_oid='{inspection_template.oid}'"
+            sqlite_cursor.execute(sql)
+            search_result = sqlite_cursor.fetchall()
+            for obj_info_tuple in search_result:
+                # print('tuple: ', obj_info_tuple)
+                inspection_template.host_oid_list.append(obj_info_tuple[2])
+
+    def load_inspection_templates_include_groups_from_dbfile(self, inspection_template_list):
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_template_include_group_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template_include_group_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        for inspection_template in inspection_template_list:
+            sql = f"select * from tb_inspection_template_include_group_list where \
+                    inspection_template_oid='{inspection_template.oid}'"
+            sqlite_cursor.execute(sql)
+            search_result = sqlite_cursor.fetchall()
+            for obj_info_tuple in search_result:
+                # print('tuple: ', obj_info_tuple)
+                inspection_template.host_group_oid_list.append(obj_info_tuple[2])
+
+    def load_inspection_templates_include_codes_from_dbfile(self, inspection_template_list):
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_template_include_inspection_code_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" \
+                    and tbl_name="tb_inspection_template_include_inspection_code_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        for inspection_template in inspection_template_list:
+            sql = f"select * from tb_inspection_template_include_group_list where \
+                    inspection_template_oid='{inspection_template.oid}'"
+            sqlite_cursor.execute(sql)
+            search_result = sqlite_cursor.fetchall()
+            for obj_info_tuple in search_result:
+                # print('tuple: ', obj_info_tuple)
+                inspection_template.inspection_code_oid_list.append(obj_info_tuple[2])
+
+    def is_project_name_existed(self, project_name):  # 判断项目名称是否已存在项目obj_list里
+        for project in self.project_obj_list:
+            if project_name == project.name:
+                return True
+        return False
+
+    def is_credential_name_existed(self, credential_name):  # 判断名称是否已存在obj_list里
+        for credential in self.credential_obj_list:
+            if credential_name == credential.name:
+                return True
+        return False
+
+    def is_host_name_existed(self, host_name):  # 判断名称是否已存在obj_list里
+        for host in self.host_obj_list:
+            if host_name == host.name:
+                return True
+        return False
+
+    def is_host_group_name_existed(self, host_group_name):  # 判断名称是否已存在obj_list里
+        for host_group in self.host_group_obj_list:
+            if host_group_name == host_group.name:
+                return True
+        return False
+
+    def is_inspect_code_name_existed(self, inspect_code_name):  # 判断名称是否已存在obj_list里
+        for inspect_code in self.inspect_code_obj_list:
+            if inspect_code_name == inspect_code.name:
+                return True
+        return False
+
+    def is_inspect_template_name_existed(self, inspect_template_name):  # 判断名称是否已存在obj_list里
+        for inspect_template in self.inspect_template_obj_list:
+            if inspect_template_name == inspect_template.name:
+                return True
+        return False
+
+    def get_project_by_oid(self, oid):
+        """
+        根据项目oid<uuid>查找项目对象，找到时返回<Project>对象
+        :param oid:
+        :return:
+        """
+        for project in self.project_obj_list:
+            if project.oid == oid:
+                return project
+        return None
