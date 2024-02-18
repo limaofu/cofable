@@ -4,7 +4,7 @@
 # dependence:  cofnet  (https://github.com/limaofu/cofnet)  &  paramiko
 # author: Cof-Lee
 # start_date: 2024-01-17
-# update: 2024-02-07
+# update: 2024-02-18
 # 本模块使用GPL-3.0开源协议
 
 import io
@@ -1507,24 +1507,19 @@ class MainWindow:
         # 先更新global_info里的凭据列表
         # self.global_info.load_all_data_from_sqlite3()
         scrollbar = tkinter.Scrollbar(nav_frame_r)
+        # scrollbar.place(x=0, y=0, width=self.nav_frame_r_width, height=self.height)
         scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        canvas = tkinter.Canvas(nav_frame_r, width=self.nav_frame_r_width, height=self.height, yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        # text_box = tkinter.Text(nav_frame_r, yscrollcommand=scrollbar.set)
-        # text_box.pack(side="left", fill="both", expand=True)
-        scrollbar.config(command=canvas.yview)
-        frame1 = tkinter.Frame(canvas, bg="gray", width=self.nav_frame_r_width, height=self.height)
-        frame1.grid_propagate(False)
-        frame1.pack_propagate(False)
+        listbox = tkinter.Listbox(nav_frame_r, yscrollcommand=scrollbar.set)  # 创建列表框
+        listbox.pack(fill=tkinter.X, expand=tkinter.TRUE)
+        scrollbar.config(command=listbox.yview)
         index = 0
         for obj in self.global_info.credential_obj_list:
             print(obj.name)
-            label = tkinter.Label(frame1, text=obj.name)
-            label.pack()
-            # label.place(x=10, y=index * 50, width=int(self.nav_frame_r_width * 0.2), height=int(self.height * 0.2))
-            # canvas.create_text(10, index * 50, text=obj.name, fill="pink")
-            # canvas.create_rectangle(10, index * 50,100, index * 50+10)
+            listbox.insert(tkinter.END, "凭据 " + str(index) + "    " + obj.name)
             index += 1
+        # ★创建“返回”按钮
+        button_cancel = tkinter.Button(nav_frame_r, text="返回", command=self.nav_frame_r_credential_page_display)
+        button_cancel.pack()
 
     def nav_frame_r_project_page_display(self):
         """
@@ -2125,7 +2120,7 @@ class GlobalInfo:
 
     def get_project_by_oid(self, oid):
         """
-        根据项目oid<uuid>查找项目对象，找到时返回<Project>对象
+        根据项目oid/uuid<str>查找项目对象，找到时返回<Project>对象
         :param oid:
         :return:
         """
