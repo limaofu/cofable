@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # coding=utf-8
 # module name: cofable
-# dependence:  cofnet  (https://github.com/limaofu/cofnet)  &  paramiko
+# dependencies:  cofnet  (https://github.com/limaofu/cofnet)  &  paramiko
 # author: Cof-Lee
 # start_date: 2024-01-17
-# update: 2024-02-18
-# 本模块使用GPL-3.0开源协议
+# this module uses the GPL-3.0 open source protocol
+# update: 2024-02-26
 
 import io
 import uuid
@@ -16,6 +16,7 @@ import base64
 import tkinter
 from tkinter import messagebox
 from tkinter import filedialog
+from tkinter import ttk
 from multiprocessing.dummy import Pool as ThreadPool
 
 import paramiko
@@ -29,17 +30,17 @@ CRED_TYPE_TELNET = 2
 CRED_TYPE_FTP = 3
 CRED_TYPE_REGISTRY = 4
 CRED_TYPE_GIT = 5
-PRIVILEGE_ESCALATION_METHOD_SU = 1
-PRIVILEGE_ESCALATION_METHOD_SUDO = 2
-FIRST_AUTH_METHOD_PRIKEY = 1
-FIRST_AUTH_METHOD_PASSWORD = 2
-CODE_SOURCE_LOCAL = 1
-CODE_SOURCE_FILE = 2
-CODE_SOURCE_GIT = 3
-EXECUTION_METHOD_NONE = 1
-EXECUTION_METHOD_AT = 2
-EXECUTION_METHOD_CROND = 3
-EXECUTION_METHOD_AFTER = 4
+PRIVILEGE_ESCALATION_METHOD_SU = 0
+PRIVILEGE_ESCALATION_METHOD_SUDO = 1
+FIRST_AUTH_METHOD_PRIKEY = 0
+FIRST_AUTH_METHOD_PASSWORD = 1
+CODE_SOURCE_LOCAL = 0
+CODE_SOURCE_FILE = 1
+CODE_SOURCE_GIT = 2
+EXECUTION_METHOD_NONE = 0
+EXECUTION_METHOD_AT = 1
+EXECUTION_METHOD_CROND = 2
+EXECUTION_METHOD_AFTER = 3
 CODE_POST_WAIT_TIME_DEFAULT = 0.1  # 命令发送后等待的时间，秒
 CODE_POST_WAIT_TIME_MAX_TIMEOUT_INTERVAL = 0.1
 CODE_POST_WAIT_TIME_MAX_TIMEOUT_COUNT = 30
@@ -48,10 +49,10 @@ CODE_EXEC_METHOD_INVOKE_SHELL = 0
 CODE_EXEC_METHOD_EXEC_COMMAND = 1
 AUTH_METHOD_SSH_PASS = 0
 AUTH_METHOD_SSH_KEY = 1
-INTERACTIVE_PROCESS_METHOD_ONETIME = 1
-INTERACTIVE_PROCESS_METHOD_ONCE = 1
-INTERACTIVE_PROCESS_METHOD_TWICE = 2
-INTERACTIVE_PROCESS_METHOD_LOOP = 3
+INTERACTIVE_PROCESS_METHOD_ONETIME = 0
+INTERACTIVE_PROCESS_METHOD_ONCE = 0
+INTERACTIVE_PROCESS_METHOD_TWICE = 1
+INTERACTIVE_PROCESS_METHOD_LOOP = 2
 DEFAULT_JOB_FORKS = 5  # 巡检作业时，目标主机的巡检并发数（同时巡检几台主机）
 INSPECTION_CODE_JOB_EXEC_STATE_UNKNOWN = 0
 INSPECTION_CODE_JOB_EXEC_STATE_STARTED = 1
@@ -59,11 +60,12 @@ INSPECTION_CODE_JOB_EXEC_STATE_FINISHED = 2
 INSPECTION_CODE_JOB_EXEC_STATE_SUCCESSFUL = 3
 INSPECTION_CODE_JOB_EXEC_STATE_PART_SUCCESSFUL = 4
 INSPECTION_CODE_JOB_EXEC_STATE_FAILED = 5
-
-
-# GUI_FOCUS_MAIN_INIT_WINDOW = 0
-# GUI_FOCUS_MAIN_PROJECT_WINDOW = 1
-# GUI_FOCUS_MAIN_CREDENTIAL_WINDOW = 2
+RESOURCE_TYPE_PROJECT = 0
+RESOURCE_TYPE_CREDENTIAL = 1
+RESOURCE_TYPE_HOST = 2
+RESOURCE_TYPE_HOST_GROUP = 3
+RESOURCE_TYPE_INSPECT_CODE = 4
+RESOURCE_TYPE_INSPECT_TEMPLATE = 5
 
 
 class Project:
@@ -170,7 +172,7 @@ class Credential:
                         "cred_type int,"
                         "username varchar(128),",
                         "password varchar(256),",
-                        "private_key varchar(4096),",
+                        "private_key_b64 varchar(8192),",
                         "privilege_escalation_method int,",
                         "privilege_escalation_username varchar(128),",
                         "privilege_escalation_password varchar(256),",
@@ -182,6 +184,7 @@ class Credential:
         sql = f"select * from tb_credential where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
         if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
+            private_key_b64 = base64.b64encode(self.private_key.encode("utf8")).decode("utf8")
             sql_list = ["insert into tb_credential (oid,",
                         "name,",
                         "description,",
@@ -190,7 +193,7 @@ class Credential:
                         "cred_type,",
                         "username,",
                         "password,",
-                        "private_key,",
+                        "private_key_b64,",
                         "privilege_escalation_method,",
                         "privilege_escalation_username,",
                         "privilege_escalation_password,",
@@ -205,7 +208,7 @@ class Credential:
                         f"{self.cred_type},",
                         f"'{self.username}',",
                         f"'{self.password}',",
-                        f"'{self.private_key}',",
+                        f"'{private_key_b64}',",
                         f"{self.privilege_escalation_method},",
                         f"'{self.privilege_escalation_username}',",
                         f"'{self.privilege_escalation_password}',",
@@ -225,7 +228,7 @@ class Host:
 
     def __init__(self, name='default', description='default', project_oid='default', address='default',
                  ssh_port=22, telnet_port=23, last_modify_timestamp=0, oid=None, create_timestamp=None,
-                 login_protocol='ssh', first_auth_method=FIRST_AUTH_METHOD_PRIKEY):
+                 login_protocol='ssh', first_auth_method=FIRST_AUTH_METHOD_PRIKEY, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
@@ -245,13 +248,14 @@ class Host:
         self.first_auth_method = first_auth_method
         self.credential_oid_list = []  # 元素为 Credential对象的cred_oid
         self.credential_obj_list = []  # 元素为 Credential对象（此信息不保存到数据库）
+        self.global_info = global_info
 
     def add_credential(self, credential_object):  # 每台主机都会绑定一个或多个不同类型的登录/访问认证凭据
         self.credential_oid_list.append(credential_object.oid)
         self.credential_obj_list.append(credential_object)
 
-    def save_to_project(self, project):
-        sqlite_conn = sqlite3.connect(project.sqlite3_dbfile_name)  # 连接数据库文件
+    def save(self):
+        sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_host'的表★
         sql = f'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_host"'
@@ -331,7 +335,7 @@ class HostGroup:
     """
 
     def __init__(self, name='default', description='default', project_oid='default', last_modify_timestamp=0, oid=None,
-                 create_timestamp=None):
+                 create_timestamp=None, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
@@ -348,6 +352,7 @@ class HostGroup:
         self.host_group_oid_list = []  # 不能包含自己
         self.host_obj_list = []  # 元素为对象（此信息不保存到数据库）
         self.host_group_obj_list = []  # 元素为对象（此信息不保存到数据库）不能包含自己
+        self.global_info = global_info
 
     def add_host(self, host):
         self.host_oid_list.append(host.oid)
@@ -360,8 +365,8 @@ class HostGroup:
         else:
             pass
 
-    def save_to_project(self, project):
-        sqlite_conn = sqlite3.connect(project.sqlite3_dbfile_name)  # 连接数据库文件
+    def save(self):
+        sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_host_group'的表★
         sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_host_group"'
@@ -441,13 +446,13 @@ class HostGroup:
         sqlite_conn.close()  # 关闭数据库连接
 
 
-class InspectionCode:
+class InspectionCodeBlock:
     """
-    巡检代码，一个巡检代码对象包含若干行命令，一行命令为一个<OneLineCode>对象
+    巡检代码段，一个<InspectionCodeBlock>巡检代码段对象包含若干行命令，一行命令为一个<OneLineCode>对象
     """
 
-    def __init__(self, name='default', description='default', project_oid='default',
-                 code_source=CODE_SOURCE_LOCAL, last_modify_timestamp=0, oid=None, create_timestamp=None):
+    def __init__(self, name='default', description='default', project_oid='default', code_source=CODE_SOURCE_LOCAL,
+                 last_modify_timestamp=0, oid=None, create_timestamp=None, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
@@ -462,14 +467,15 @@ class InspectionCode:
         self.code_source = code_source  # <int> 可为本地的命令，也可为git仓库里的写有命令的某文件
         self.last_modify_timestamp = last_modify_timestamp  # <float>
         self.code_list = []  # 元素为 <OneLineCode> 对象，一条命令为一个元素，按顺序执行
+        self.global_info = global_info
 
     def add_code_line(self, one_line_code):
         if isinstance(one_line_code, OneLineCode):
             one_line_code.code_index = len(self.code_list)
             self.code_list.append(one_line_code)
 
-    def save_to_project(self, project):
-        sqlite_conn = sqlite3.connect(project.sqlite3_dbfile_name)  # 连接数据库文件
+    def save(self):
+        sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_code'的表★
         sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_code"'
@@ -478,7 +484,7 @@ class InspectionCode:
         print("exist tables: ", result)
         # 若未查询到有此表，则创建此表
         if len(result) == 0:
-            sql_list = ["create table tb_inspection_code  ( oid varchar(36) NOT NULL PRIMARY KEY,",
+            sql_list = ["create table tb_inspection_code_block  ( oid varchar(36) NOT NULL PRIMARY KEY,",
                         "name varchar(128),",
                         "description varchar(256),",
                         "project_oid varchar(36),",
@@ -487,10 +493,10 @@ class InspectionCode:
                         "last_modify_timestamp double )"]
             sqlite_cursor.execute(" ".join(sql_list))
         # 开始插入数据
-        sql = f"select * from tb_inspection_code where oid='{self.oid}'"
+        sql = f"select * from tb_inspection_code_block where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
         if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
-            sql_list = ["insert into tb_inspection_code (oid,",
+            sql_list = ["insert into tb_inspection_code_block (oid,",
                         "name,",
                         "description,",
                         "project_oid,",
@@ -555,7 +561,7 @@ class InspectionTemplate:
     def __init__(self, name='default', description='default', project_oid='default',
                  execution_method=EXECUTION_METHOD_NONE, execution_at_time=0,
                  execution_after_time=0, execution_crond_time='default', update_code_on_launch=COF_FALSE,
-                 last_modify_timestamp=0, oid=None, create_timestamp=None, forks=DEFAULT_JOB_FORKS):
+                 last_modify_timestamp=0, oid=None, create_timestamp=None, forks=DEFAULT_JOB_FORKS, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
@@ -582,6 +588,7 @@ class InspectionTemplate:
         self.host_obj_list = []  # 元素为对象（此信息不保存到数据库）
         self.host_group_obj_list = []  # 元素为对象（此信息不保存到数据库）
         self.inspection_code_obj_list = []  # 元素为InspectionCode对象（此信息不保存到数据库）
+        self.global_info = global_info
 
     def add_host(self, host):
         self.host_oid_list.append(host.oid)
@@ -595,8 +602,8 @@ class InspectionTemplate:
         self.inspection_code_oid_list.append(inspection_code.oid)
         self.inspection_code_obj_list.append(inspection_code)
 
-    def save_to_project(self, project):
-        sqlite_conn = sqlite3.connect(project.sqlite3_dbfile_name)  # 连接数据库文件
+    def save(self):
+        sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_template'的表★
         sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_template"'
@@ -735,7 +742,7 @@ class LaunchTemplateTrigger:
     """
 
     def __init__(self, name='default', description='default', project_oid='default',
-                 inspection_template_oid='uuid', last_modify_timestamp=0, oid=None, create_timestamp=None):
+                 inspection_template_oid='uuid', last_modify_timestamp=0, oid=None, create_timestamp=None, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
@@ -750,6 +757,7 @@ class LaunchTemplateTrigger:
         self.inspection_template_oid = inspection_template_oid
         self.last_modify_timestamp = last_modify_timestamp  # <float>
         self.is_time_up = False
+        self.global_info = global_info
 
     def start_crontab_job(self):
         if self.is_time_up:
@@ -767,7 +775,7 @@ class LaunchInspectionJob:
     """
 
     def __init__(self, name='default', description='default', project=None, oid=None, create_timestamp=None,
-                 inspection_template=None):
+                 inspection_template=None, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str> job_id
         else:
@@ -786,6 +794,7 @@ class LaunchInspectionJob:
         self.job_exec_timeout_host_oid_list = []
         self.job_exec_failed_host_oid_list = []
         self.job_find_credential_timeout_host_oid_list = []
+        self.global_info = global_info
 
     def get_unduplicated_host_obj_from_group(self, host_group):  # 从主机组中获取非重复主机
         for host in host_group.host_obj_list:
@@ -1312,385 +1321,9 @@ class SSHOperator:
         self.is_finished = True
 
 
-class MainWindow:
-    """
-    CofAble主界面类，包含菜单栏及左右2个frame
-    """
-
-    def __init__(self, width=640, height=400, title='', current_project=None, global_info=None):
-        self.title = title
-        self.width = width
-        self.height = height
-        self.position = "480x320+100+100"
-        self.resizable = True  # True 表示宽度和高度可由用户手动调整
-        self.minsize = (480, 320)
-        self.maxsize = (1920, 1080)
-        self.background = "#3A3A3A"  # 设置背景色，RGB
-        self.window_obj = tkinter.Tk()  # 创建窗口对象
-        self.screen_width = self.window_obj.winfo_screenwidth()
-        self.screen_height = self.window_obj.winfo_screenheight()
-        self.win_pos_x = self.screen_width // 2 - self.width // 2
-        self.win_pos_y = self.screen_height // 2 - self.height // 2
-        self.win_pos = f"{self.width}x{self.height}+{self.win_pos_x}+{self.win_pos_y}"
-        self.nav_frame_l_width = int(self.width * 0.2)
-        self.nav_frame_r_width = int(self.width * 0.8)
-        # self.gui_focus = GUI_FOCUS_MAIN_INIT_WINDOW
-        self.global_info = global_info  # <GlobalInfo>对象
-        self.current_project = current_project
-        self.about_info = "CofAble，自动化巡检平台，版本: v1.0\n本软件使用GPL-v3.0协议开源，作者: Cof-Lee"
-
-    @staticmethod
-    def claer_tkinter_frame(frame):
-        for widget in frame.winfo_children():
-            widget.destroy()
-
-    @staticmethod
-    def claer_tkinter_window(window):
-        for widget in window.winfo_children():
-            widget.destroy()
-
-    def click_menu_button_project_of_nav_frame_l(self):
-        """
-        显示project主页面
-        :return:
-        """
-        self.nav_frame_r_project_page_display()
-
-    def click_menu_button_credential_of_nav_frame_l(self):
-        """
-        显示credential主页面
-        :return:
-        """
-        self.nav_frame_r_credential_page_display()
-
-    def click_button_save_of_create_project(self, sv_project_name, sv_project_description):  # 保存项目信息
-        project_name = sv_project_name.get()
-        project_description = sv_project_description.get()
-        print(project_name, project_description)
-        # 创建项目
-        if project_name == '':
-            messagebox.showinfo("创建项目-Error", f"项目名称不能为空")
-        elif len(project_name) > 128:
-            messagebox.showinfo("创建项目-Error", f"项目名称>128字符")
-        elif len(project_description) > 256:
-            messagebox.showinfo("创建项目-Error", f"项目描述>256字符")
-        elif self.global_info.is_project_name_existed(project_name):
-            messagebox.showinfo("创建项目-Error", f"项目名称 {project_name} 已存在")
-        else:
-            project = Project(name=project_name, description=project_description, global_info=self.global_info)
-            project.save()
-            self.global_info.project_obj_list.append(project)
-            self.nav_frame_r_project_page_display()  # 保存项目信息后，返回项目展示页面
-
-    def click_button_save_of_create_credential(self, sv_credential_name, sv_credential_description):  # 保存项目信息
-        credential_name = sv_credential_name.get()
-        credential_description = sv_credential_description.get()
-        print(credential_name, credential_description)
-        # 创建项目
-        if credential_name == '':
-            messagebox.showinfo("创建项目-Error", f"项目名称不能为空")
-        elif len(credential_name) > 128:
-            messagebox.showinfo("创建项目-Error", f"项目名称>128字符")
-        elif len(credential_description) > 256:
-            messagebox.showinfo("创建项目-Error", f"项目描述>256字符")
-        elif self.global_info.is_credential_name_existed(credential_name):
-            messagebox.showinfo("创建项目-Error", f"项目名称 {credential_name} 已存在")
-        else:
-            credential = Credential(name=credential_name, description=credential_description, global_info=self.global_info)
-            credential.save()
-            self.global_info.credential_obj_list.append(credential)
-            self.nav_frame_r_credential_page_display()  # 保存项目信息后，返回项目展示页面
-
-    def click_button_create_project_of_nav_frame_r_project_page(self):
-        """
-        创建项目页面
-        :return:
-        """
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "green")
-        # 在框架2中添加控件
-        self.claer_tkinter_frame(nav_frame_r)
-        # ★project-名称
-        label_project_name = tkinter.Label(nav_frame_r, text="项目名称")
-        label_project_name.place(x=0, y=0, width=int(self.nav_frame_r_width * 0.2), height=int(self.height * 0.1))
-        sv_project_name = tkinter.StringVar()
-        entry_project_name = tkinter.Entry(nav_frame_r, textvariable=sv_project_name)
-        entry_project_name.place(x=int(self.nav_frame_r_width * 0.2) + 20, y=0, width=int(self.nav_frame_r_width * 0.2),
-                                 height=int(self.height * 0.1))
-        # ★project-描述
-        label_project_description = tkinter.Label(nav_frame_r, text="描述")
-        label_project_description.place(x=0, y=50, width=int(self.nav_frame_r_width * 0.2),
-                                        height=int(self.height * 0.1))
-        sv_project_description = tkinter.StringVar()
-        entry_project_description = tkinter.Entry(nav_frame_r, textvariable=sv_project_description)
-        entry_project_description.place(x=int(self.nav_frame_r_width * 0.2) + 20, y=50,
-                                        width=int(self.nav_frame_r_width * 0.2),
-                                        height=int(self.height * 0.1))
-        # ★创建“保存”按钮
-        button_save = tkinter.Button(nav_frame_r, text="保存",
-                                     command=lambda: self.click_button_save_of_create_project(
-                                         sv_project_name, sv_project_description))
-        button_save.place(x=0, y=150, width=int(self.nav_frame_r_width * 0.2), height=int(self.height * 0.1))
-        # ★创建“取消”按钮
-        button_cancel = tkinter.Button(nav_frame_r, text="取消", command=self.nav_frame_r_project_page_display)
-        button_cancel.place(x=int(self.nav_frame_r_width * 0.2) + 10, y=150, width=int(self.nav_frame_r_width * 0.2),
-                            height=int(self.height * 0.1))
-
-    def click_button_create_credential_of_nav_frame_r_credential_page(self):
-        """
-        创建凭据页面
-        :return:
-        """
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "green")
-        # 在框架2中添加控件
-        self.claer_tkinter_frame(nav_frame_r)
-        # ★credential-名称
-        label_credential_name = tkinter.Label(nav_frame_r, text="凭据名称")
-        label_credential_name.place(x=0, y=0, width=int(self.nav_frame_r_width * 0.2), height=int(self.height * 0.1))
-        sv_credential_name = tkinter.StringVar()
-        entry_credential_name = tkinter.Entry(nav_frame_r, textvariable=sv_credential_name)
-        entry_credential_name.place(x=int(self.nav_frame_r_width * 0.2) + 20, y=0, width=int(self.nav_frame_r_width * 0.2),
-                                    height=int(self.height * 0.1))
-        # ★credential-描述
-        label_credential_description = tkinter.Label(nav_frame_r, text="描述")
-        label_credential_description.place(x=0, y=50, width=int(self.nav_frame_r_width * 0.2),
-                                           height=int(self.height * 0.1))
-        sv_credential_description = tkinter.StringVar()
-        entry_credential_description = tkinter.Entry(nav_frame_r, textvariable=sv_credential_description)
-        entry_credential_description.place(x=int(self.nav_frame_r_width * 0.2) + 20, y=50,
-                                           width=int(self.nav_frame_r_width * 0.2),
-                                           height=int(self.height * 0.1))
-        # ★其他按钮，未完待续
-        # ★创建“保存”按钮
-        button_save = tkinter.Button(nav_frame_r, text="保存",
-                                     command=lambda: self.click_button_save_of_create_credential(
-                                         sv_credential_name, sv_credential_description))
-        button_save.place(x=0, y=150, width=int(self.nav_frame_r_width * 0.2), height=int(self.height * 0.1))
-        # ★创建“取消”按钮
-        button_cancel = tkinter.Button(nav_frame_r, text="取消", command=self.nav_frame_r_credential_page_display)
-        button_cancel.place(x=int(self.nav_frame_r_width * 0.2) + 10, y=150, width=int(self.nav_frame_r_width * 0.2),
-                            height=int(self.height * 0.1))
-
-    def click_button_display_project_of_nav_frame_r_project_page(self):
-        """
-        显示项目列表
-        :return:
-        """
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "green")
-        # 在框架2中添加控件
-        self.claer_tkinter_frame(nav_frame_r)
-        # 先更新global_info里的项目列表
-        # self.global_info.load_all_data_from_sqlite3()
-        index = 0
-        for pro_obj in self.global_info.project_obj_list:
-            print(pro_obj.name)
-            label_project = tkinter.Label(nav_frame_r, text=pro_obj.name)
-            label_project.place(x=10, y=index * 50, width=int(self.nav_frame_r_width * 0.2),
-                                height=int(self.height * 0.1))
-            index += 1
-
-    def click_button_display_credential_of_nav_frame_r_credential_page(self):
-        """
-        显示凭据列表
-        :return:
-        """
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "pink")
-        # 在框架2中添加控件
-        self.claer_tkinter_frame(nav_frame_r)
-        # 先更新global_info里的凭据列表
-        # self.global_info.load_all_data_from_sqlite3()
-        scrollbar = tkinter.Scrollbar(nav_frame_r)
-        # scrollbar.place(x=0, y=0, width=self.nav_frame_r_width, height=self.height)
-        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        listbox = tkinter.Listbox(nav_frame_r, yscrollcommand=scrollbar.set)  # 创建列表框
-        listbox.pack(fill=tkinter.X, expand=tkinter.TRUE)
-        scrollbar.config(command=listbox.yview)
-        index = 0
-        for obj in self.global_info.credential_obj_list:
-            print(obj.name)
-            listbox.insert(tkinter.END, "凭据 " + str(index) + "    " + obj.name)
-            index += 1
-        # ★创建“返回”按钮
-        button_cancel = tkinter.Button(nav_frame_r, text="返回", command=self.nav_frame_r_credential_page_display)
-        button_cancel.pack()
-
-    def nav_frame_r_project_page_display(self):
-        """
-        显示project主页面
-        :return:
-        """
-        # claer_tkinter_window(self.window_obj)
-        # 创建导航框架1
-        # self.create_nav_frame_l()
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "gray")
-        # 在框架2中添加控件
-        self.claer_tkinter_frame(nav_frame_r)
-        button_create_project = tkinter.Button(nav_frame_r, text="创建项目",
-                                               command=self.click_button_create_project_of_nav_frame_r_project_page)
-        button_create_project.grid(row=0, column=1)
-        button_display_project = tkinter.Button(nav_frame_r, text="列出项目",
-                                                command=self.click_button_display_project_of_nav_frame_r_project_page)
-        button_display_project.grid(row=1, column=1)
-
-    def nav_frame_r_credential_page_display(self):
-        """
-        显示credential主页面
-        :return:
-        """
-        # claer_tkinter_window(self.window_obj)
-        # 创建导航框架1
-        # self.create_nav_frame_l()
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "yellow")
-        # 在框架2中添加控件
-        self.claer_tkinter_frame(nav_frame_r)
-        button_create_credential = tkinter.Button(nav_frame_r, text="创建凭据",
-                                                  command=self.click_button_create_credential_of_nav_frame_r_credential_page)
-        button_create_credential.grid(row=0, column=1)
-        button_display_credential = tkinter.Button(nav_frame_r, text="列出凭据",
-                                                   command=self.click_button_display_credential_of_nav_frame_r_credential_page)
-        button_display_credential.grid(row=1, column=1)
-
-    def load_main_window_init_widget(self):
-        """
-        加载主界面初始化界面控件
-        :return:
-        """
-        # 首先清空主window
-        self.claer_tkinter_window(self.window_obj)
-        # 加载菜单栏
-        self.create_menu_bar_init()
-        # 创建导航框架1
-        self.create_nav_frame_l_init()
-        # 创建导航框架2
-        self.create_nav_frame_r_init()
-
-    def create_menu_bar_init(self):  # 创建菜单栏-init界面的
-        menu_bar = tkinter.Menu(self.window_obj)  # 创建一个菜单，做菜单栏
-        menu_open_db_file = tkinter.Menu(menu_bar, tearoff=1)  # 创建一个菜单，分窗，表示此菜单可拉出来变成一个可移动的独立弹窗
-        menu_about = tkinter.Menu(menu_bar, tearoff=0, activebackground="green", activeforeground="white",
-                                  background="white", foreground="black")  # 创建一个菜单，不分窗
-        menu_open_db_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file)
-        menu_about.add_command(label="About", command=self.click_menu_about)
-        menu_bar.add_cascade(label="File", menu=menu_open_db_file)
-        menu_bar.add_cascade(label="Help", menu=menu_about)
-        self.window_obj.config(menu=menu_bar)
-
-    def create_nav_frame_l_init(self):  # 创建导航框架1-init界面的
-        nav_frame_l = tkinter.Frame(self.window_obj, bg="green", width=self.nav_frame_l_width, height=self.height)
-        nav_frame_l.grid_propagate(False)
-        nav_frame_l.pack_propagate(False)
-        nav_frame_l.grid(row=0, column=0)
-        # 在框架1中添加功能按钮
-        label_current_time = tkinter.Label(nav_frame_l, text=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-        if self.global_info.current_project_obj is None:
-            label_current_project_content = "当前无项目"
-        else:
-            label_current_project_content = "当前项目-" + self.global_info.current_project_obj.name
-        label_current_project = tkinter.Label(nav_frame_l, text=label_current_project_content,
-                                              width=self.nav_frame_l_width, height=2)
-        label_current_time.pack(padx=2, pady=2)
-        label_current_time.after(1000, self.refresh_label_current_time, label_current_time)
-        label_current_project.pack(padx=2, pady=2)
-        # Project项目-选项按钮
-        menu_button_project = tkinter.Button(nav_frame_l, text="Project项目", width=self.nav_frame_l_width, height=2,
-                                             bg="#aaaaaa", command=self.click_menu_button_project_of_nav_frame_l)
-        menu_button_project.pack(padx=2, pady=2)
-        # Credentials凭据-选项按钮
-        menu_button_credential = tkinter.Button(nav_frame_l, text="Credentials凭据", width=self.nav_frame_l_width,
-                                                height=2, bg="#aaaaaa",
-                                                command=self.click_menu_button_credential_of_nav_frame_l)
-        menu_button_credential.pack(padx=2, pady=2)
-        # Host主机(组)管理-选项按钮
-        menu_button_host = tkinter.Button(nav_frame_l, text="Host主机(组)管理", width=self.nav_frame_l_width,
-                                          bg="#bbbbaa")
-        menu_button_host.pack(padx=2, pady=2)
-        # Inspect巡检代码-选项按钮
-        menu_button_inspect_code = tkinter.Button(nav_frame_l, text="Inspect巡检代码", width=self.nav_frame_l_width,
-                                                  bg="#f1f111")
-        menu_button_inspect_code.pack(padx=2, pady=2)
-        # Template巡检模板-选项按钮
-        menu_button_inspection_template = tkinter.Button(nav_frame_l, text="Template巡检模板",
-                                                         width=self.nav_frame_l_width, bg="#acada3")
-        menu_button_inspection_template.pack(padx=2, pady=2)
-
-    def create_nav_frame_r_init(self):  # 创建导航框架2-init界面的
-        nav_frame_r = tkinter.Frame(self.window_obj, bg="blue", width=self.nav_frame_r_width, height=self.height)
-        nav_frame_r.grid_propagate(False)
-        nav_frame_r.pack_propagate(False)
-        nav_frame_r.grid(row=0, column=1)
-        # 在框架2中添加控件
-        label = tkinter.Label(nav_frame_r, text="初始化界面")
-        button_2 = tkinter.Button(nav_frame_r, text="按钮2")
-        label.pack()
-        button_2.pack()
-
-    def refresh_label_current_time(self, label):
-        label.__setitem__('text', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-        # 继续调用回调函数更新label
-        self.window_obj.after(1000, self.refresh_label_current_time, label)
-
-    def click_menu_about(self):
-        messagebox.showinfo("About", self.about_info)
-
-    def click_menu_open_db_file(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.db"), ("All files", "*.*")])
-        if not file_path:
-            print("not choose a file")
-        else:
-            print(file_path)
-            self.global_info.set_sqlite3_dbfile_name(file_path)
-            self.global_info.load_all_data_from_sqlite3()
-
-    def reload_current_resized_window(self, event):  # 监听窗口大小变化事件，自动更新窗口内控件大小
-        if event:
-            if self.window_obj.winfo_width() == self.width and self.window_obj.winfo_height() == self.height:
-                return
-            else:
-                self.width = self.window_obj.winfo_width()
-                self.height = self.window_obj.winfo_height()
-                print("size changed")
-                self.window_obj.__setitem__('width', self.width)
-                self.window_obj.__setitem__('height', self.height)
-                self.window_obj.winfo_children()[1].__setitem__('width', self.width * 0.2)
-                self.window_obj.winfo_children()[1].__setitem__('height', self.height)
-                self.window_obj.winfo_children()[2].__setitem__('width', self.width * 0.8)
-                self.window_obj.winfo_children()[2].__setitem__('height', self.height)
-
-    def show(self):
-        self.window_obj.title(self.title)  # 设置窗口标题
-        # self.window_obj.iconbitmap(bitmap="D:\\test.ico")  # 设置窗口图标，默认为羽毛图标
-        self.window_obj.geometry(self.win_pos)  # 设置窗口大小及位置，居中
-        self.window_obj.resizable(width=self.resizable, height=self.resizable)  # True 表示宽度和高度可由用户手动调整
-        self.window_obj.minsize(*self.minsize)  # 可调整的最小宽度及高度
-        self.window_obj.maxsize(*self.maxsize)  # 可调整的最大宽度及高度
-        self.window_obj.pack_propagate(True)  # True表示窗口内的控件大小自适应
-        self.window_obj.configure(bg=self.background)  # 设置背景色，RGB
-        # 加载初始化界面控件
-        self.load_main_window_init_widget()  # 接下来，所有的事情都在此界面操作
-        print(f"当前window有{len(self.window_obj.winfo_children())}个子控件")
-        for widget in self.window_obj.winfo_children():
-            print(type(widget))
-            print(widget)
-        # 监听窗口大小变化事件，自动更新窗口内控件大小
-        self.window_obj.bind('<Configure>', self.reload_current_resized_window)
-        # 运行窗口主循环
-        self.window_obj.mainloop()
-
-
 class GlobalInfo:
     """
-    全局变量类，包含所有资源类的实例信息
+    全局变量类，用于存储所有资源类的实例信息
     """
 
     def __init__(self, sqlite3_dbfile_name="cofable_default.db"):
@@ -1701,7 +1334,7 @@ class GlobalInfo:
         self.host_group_obj_list = []
         self.inspect_code_obj_list = []
         self.inspect_template_obj_list = []
-        self.current_project_obj = None
+        self.current_project_obj = None  # 需要在项目界面将某个项目设置为当前项目，才会赋值
 
     def set_sqlite3_dbfile_name(self, file_name):
         self.sqlite3_dbfile_name = file_name
@@ -1711,7 +1344,7 @@ class GlobalInfo:
             print("undefined sqlite3_dbfile_name")
             return
         elif self.sqlite3_dbfile_name == '':
-            print("undefined sqlite3_dbfile_name")
+            print("sqlite3_dbfile_name is null")
             return
         else:
             self.project_obj_list = self.load_projects_from_dbfile()
@@ -1726,7 +1359,7 @@ class GlobalInfo:
         从sqlite3数据库文件，查找所有project，并输出project对象列表，output <list[Project]>
         :return:
         """
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_project'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_project"'
@@ -1755,7 +1388,7 @@ class GlobalInfo:
         从sqlite3数据库文件，查找所有credential，并输出credential对象列表，output <list>
         :return:
         """
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_credential'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_credential"'
@@ -1777,7 +1410,7 @@ class GlobalInfo:
                              cred_type=obj_info_tuple[5],
                              username=obj_info_tuple[6],
                              password=obj_info_tuple[7],
-                             private_key=obj_info_tuple[8],
+                             private_key=base64.b64decode(obj_info_tuple[8]).decode('utf8'),
                              privilege_escalation_method=obj_info_tuple[9],
                              privilege_escalation_username=obj_info_tuple[10],
                              privilege_escalation_password=obj_info_tuple[11],
@@ -1795,7 +1428,7 @@ class GlobalInfo:
         从sqlite3数据库文件，查找所有host，并输出host对象列表，output <list>
         :return:
         """
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_host'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host"'
@@ -1828,7 +1461,7 @@ class GlobalInfo:
         return obj_list
 
     def load_hosts_include_creds_from_dbfile(self, host_list):
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_host_include_credential_oid_list'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_include_credential_oid_list"'
@@ -1852,7 +1485,7 @@ class GlobalInfo:
         从sqlite3数据库文件，查找所有host_group，并输出host_group对象列表，output <list>
         :return:
         """
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_host_group'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group"'
@@ -1881,7 +1514,7 @@ class GlobalInfo:
         return obj_list
 
     def load_host_groups_include_hosts_from_dbfile(self, host_group_list):
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_host_group_include_host_list'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group_include_host_list"'
@@ -1901,7 +1534,7 @@ class GlobalInfo:
                 host_group.host_oid_list.append(obj_info_tuple[2])
 
     def load_host_groups_include_groups_from_dbfile(self, host_group_list):
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_host_group_include_group_list'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group_include_group_list"'
@@ -1925,7 +1558,7 @@ class GlobalInfo:
         从sqlite3数据库文件，查找所有inspection_code，并输出inspection_code对象列表，output <list>
         :return:
         """
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_code'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_code"'
@@ -1942,10 +1575,10 @@ class GlobalInfo:
         obj_list = []
         for obj_info_tuple in search_result:
             # print('tuple: ', obj_info_tuple)
-            obj = InspectionCode(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
-                                 project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
-                                 code_source=obj_info_tuple[5],
-                                 last_modify_timestamp=obj_info_tuple[6])
+            obj = InspectionCodeBlock(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
+                                      project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
+                                      code_source=obj_info_tuple[5],
+                                      last_modify_timestamp=obj_info_tuple[6])
             obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -1954,7 +1587,7 @@ class GlobalInfo:
         return obj_list
 
     def load_inspection_code_lists_from_dbfile(self, inspection_code_list):
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_code_list'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_code_list"'
@@ -1983,7 +1616,7 @@ class GlobalInfo:
         从sqlite3数据库文件，查找所有inspection_template，并输出inspection_template对象列表，output <list>
         :return:
         """
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_template'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template"'
@@ -2019,7 +1652,7 @@ class GlobalInfo:
         return obj_list
 
     def load_inspection_templates_include_hosts_from_dbfile(self, inspection_template_list):
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_template_include_host_list'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template_include_host_list"'
@@ -2040,7 +1673,7 @@ class GlobalInfo:
                 inspection_template.host_oid_list.append(obj_info_tuple[2])
 
     def load_inspection_templates_include_groups_from_dbfile(self, inspection_template_list):
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_template_include_group_list'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template_include_group_list"'
@@ -2061,7 +1694,7 @@ class GlobalInfo:
                 inspection_template.host_group_oid_list.append(obj_info_tuple[2])
 
     def load_inspection_templates_include_codes_from_dbfile(self, inspection_template_list):
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # dbfilepath is <str> 连接数据库文件，若文件不存在则新建
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_template_include_inspection_code_list'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" \
@@ -2128,3 +1761,807 @@ class GlobalInfo:
             if project.oid == oid:
                 return project
         return None
+
+    def delete_project_obj_by_oid(self, oid):
+        """
+        根据项目oid/uuid<str>删除项目对象
+        :param oid:
+        :return:
+        """
+        # ★先从数据库删除
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_project'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_project"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 删除数据
+        sql = f"delete from tb_project where oid='{oid}'"
+        sqlite_cursor.execute(sql)
+        sqlite_cursor.close()
+        sqlite_conn.commit()
+        sqlite_conn.close()
+        # ★最后再从内存obj_list删除
+        for project in self.project_obj_list:
+            if project.oid == oid:
+                self.project_obj_list.remove(project)
+
+    def delete_project_obj(self, obj):
+        """
+        直接删除 project 对象
+        :param obj:
+        :return:
+        """
+        # ★先从数据库删除
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_project'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_project"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        # print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return
+        # 删除数据
+        sql = f"delete from tb_project where oid='{obj.oid}'"
+        sqlite_cursor.execute(sql)
+        sqlite_cursor.close()
+        sqlite_conn.commit()
+        sqlite_conn.close()
+        # ★最后再从内存obj_list删除
+        self.project_obj_list.remove(obj)
+
+    def delete_credential_obj(self, obj):
+        """
+        直接删除 project 对象
+        :param obj:
+        :return:
+        """
+        # ★先从数据库删除
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_project'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_credential"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        # print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return
+        # 删除数据
+        sql = f"delete from tb_credential where oid='{obj.oid}'"
+        sqlite_cursor.execute(sql)
+        sqlite_cursor.close()
+        sqlite_conn.commit()
+        sqlite_conn.close()
+        # ★最后再从内存obj_list删除
+        self.credential_obj_list.remove(obj)
+
+
+class MainWindow:
+    """
+    CofAble主界面类，包含菜单栏及左右2个frame
+    """
+
+    def __init__(self, width=640, height=400, title='', current_project=None, global_info=None):
+        self.title = title
+        self.width = width
+        self.height = height
+        self.position = "480x320+100+100"
+        self.resizable = True  # True 表示宽度和高度可由用户手动调整
+        self.minsize = (480, 320)
+        self.maxsize = (1920, 1080)
+        self.background = "#3A3A3A"  # 设置背景色，RGB
+        self.window_obj = tkinter.Tk()  # ★★★创建窗口对象
+        self.screen_width = self.window_obj.winfo_screenwidth()
+        self.screen_height = self.window_obj.winfo_screenheight()
+        self.win_pos_x = self.screen_width // 2 - self.width // 2
+        self.win_pos_y = self.screen_height // 2 - self.height // 2
+        self.win_pos = f"{self.width}x{self.height}+{self.win_pos_x}+{self.win_pos_y}"
+        self.nav_frame_l = None
+        self.nav_frame_r = None
+        self.nav_frame_l_width = int(self.width * 0.2)
+        self.nav_frame_r_width = int(self.width * 0.8)
+        self.global_info = global_info  # <GlobalInfo>对象
+        self.current_project = current_project
+        self.about_info = "CofAble，自动化巡检平台，版本: v1.0\n本软件使用GPL-v3.0协议开源，作者: Cof-Lee"
+
+    @staticmethod
+    def clear_tkinter_frame(frame):
+        for widget in frame.winfo_children():
+            widget.destroy()
+
+    @staticmethod
+    def clear_tkinter_window(window):
+        for widget in window.winfo_children():
+            widget.destroy()
+
+    def create_project_of_nav_frame_r_project_page(self):
+        """
+        创建项目页面
+        :return:
+        """
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "green")
+        # 在框架2中添加控件
+        self.clear_tkinter_frame(nav_frame_r)
+        scrollbar = tkinter.Scrollbar(nav_frame_r)
+        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        canvas = tkinter.Canvas(nav_frame_r, yscrollcommand=scrollbar.set)  # 创建画布
+        canvas.place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        scrollbar.config(command=canvas.yview)
+        frame = tkinter.Frame(canvas)
+        frame.pack()
+        canvas.create_window((0, 0), window=frame, anchor='nw')
+        # 在canvas-frame滚动框内添加创建资源控件
+        create_obj = CreateResourceInFrame(frame, self.global_info, RESOURCE_TYPE_PROJECT)
+        create_obj.show()
+        # 更新Frame的尺寸
+        frame.update_idletasks()
+        canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
+
+        def proces_mouse_scroll(event):
+            nonlocal canvas
+            if event.delta > 0:
+                canvas.yview_scroll(-1, 'units')  # 向上移动
+            else:
+                canvas.yview_scroll(1, 'units')  # 向下移动
+
+        canvas.bind("<MouseWheel>", proces_mouse_scroll)
+        # ★创建“保存”按钮
+        save_obj = SaveResourceInMainWindow(self, create_obj.resource_info_dict, self.global_info, RESOURCE_TYPE_PROJECT)
+        button_save = tkinter.Button(nav_frame_r, text="保存", command=save_obj.save)
+        button_save.place(x=10, y=self.height - 40, width=50, height=25)
+        # ★创建“取消”按钮
+        button_cancel = tkinter.Button(nav_frame_r, text="取消", command=self.nav_frame_r_project_page_display)  # 返回“项目界面”
+        button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
+
+    def create_credential_of_nav_frame_r_credential_page(self):
+        """
+        创建凭据-页面
+        :return:
+        """
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "green")
+        # 在框架2中添加canvas-frame滚动框
+        self.clear_tkinter_frame(nav_frame_r)
+        scrollbar = tkinter.Scrollbar(nav_frame_r)
+        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        canvas = tkinter.Canvas(nav_frame_r, yscrollcommand=scrollbar.set)  # 创建画布
+        canvas.place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        scrollbar.config(command=canvas.yview)
+        frame = tkinter.Frame(canvas)
+        frame.pack()
+        canvas.create_window((0, 0), window=frame, anchor='nw')
+        # 在canvas - frame滚动框内添加创建资源控件
+        create_obj = CreateResourceInFrame(frame, self.global_info, RESOURCE_TYPE_CREDENTIAL)
+        create_obj.show()
+        # 更新Frame的尺寸
+        frame.update_idletasks()
+        canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
+
+        def proces_mouse_scroll(event):
+            nonlocal canvas
+            if event.delta > 0:
+                canvas.yview_scroll(-1, 'units')  # 向上移动
+            else:
+                canvas.yview_scroll(1, 'units')  # 向下移动
+
+        canvas.bind("<MouseWheel>", proces_mouse_scroll)
+        # ★创建“保存”按钮
+        save_obj = SaveResourceInMainWindow(self, create_obj.resource_info_dict, self.global_info, RESOURCE_TYPE_CREDENTIAL)
+        button_save = tkinter.Button(nav_frame_r, text="保存", command=save_obj.save)
+        button_save.place(x=10, y=self.height - 40, width=50, height=25)
+        # ★创建“取消”按钮
+        button_cancel = tkinter.Button(nav_frame_r, text="取消", command=self.nav_frame_r_credential_page_display)  # 返回“凭据”界面
+        button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
+
+    def display_project_of_nav_frame_r_project_page(self):
+        """
+        显示项目列表
+        :return:
+        """
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "green")
+        nav_frame_r_widget_dict = {}
+        # 在框架2中添加canvas-frame滚动框
+        self.clear_tkinter_frame(nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)  # 创建画布
+        # canvas.pack(fill=tkinter.X, expand=tkinter.TRUE)
+        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
+        nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
+        nav_frame_r_widget_dict["frame"].pack()
+        nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
+        # 在canvas-frame滚动框内添加资源列表控件
+        list_obj = ListResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, RESOURCE_TYPE_PROJECT)
+        list_obj.show()
+        # 信息控件添加完毕
+        nav_frame_r_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
+        nav_frame_r_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, nav_frame_r_widget_dict["frame"].winfo_width(), nav_frame_r_widget_dict["frame"].winfo_height()))
+
+        def proces_mouse_scroll(event):
+            nonlocal nav_frame_r_widget_dict
+            if event.delta > 0:
+                nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+            else:
+                nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+
+        nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", proces_mouse_scroll)
+        # ★创建“返回”按钮
+        button_cancel = tkinter.Button(nav_frame_r, text="返回", command=self.nav_frame_r_project_page_display)  # 返回“项目界面”
+        button_cancel.place(x=10, y=self.height - 40, width=50, height=25)
+
+    def display_credential_of_nav_frame_r_credential_page(self):
+        """
+        列出凭据，显示凭据列表
+        :return:
+        """
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "pink")
+        nav_frame_r_widget_dict = {}
+        # 在框架2中添加canvas-frame滚动框
+        self.clear_tkinter_frame(nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)  # 创建画布
+        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
+        nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
+        nav_frame_r_widget_dict["frame"].pack()
+        nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
+        # 在canvas-frame滚动框内添加资源列表控件
+        list_obj = ListResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, RESOURCE_TYPE_CREDENTIAL)
+        list_obj.show()
+        # 信息控件添加完毕
+        nav_frame_r_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
+        nav_frame_r_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, nav_frame_r_widget_dict["frame"].winfo_width(), nav_frame_r_widget_dict["frame"].winfo_height()))
+
+        def proces_mouse_scroll(event):
+            nonlocal nav_frame_r_widget_dict
+            if event.delta > 0:
+                nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+            else:
+                nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+
+        nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", proces_mouse_scroll)
+        # ★创建“返回”按钮
+        button_cancel = tkinter.Button(nav_frame_r, text="返回", command=self.nav_frame_r_credential_page_display)
+        button_cancel.place(x=10, y=self.height - 40, width=50, height=25)
+
+    def nav_frame_r_project_page_display(self):
+        """
+        显示project主页面
+        :return:
+        """
+        # claer_tkinter_window(self.window_obj)
+        # 更新导航框架1的当前选项卡背景色
+        widget_index = 0
+        for widget in self.nav_frame_l.winfo_children():
+            if widget_index == 0:
+                widget.config(bg="pink")
+            else:
+                widget.config(bg="white")
+            widget_index += 1
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "gray")
+        # 在框架2中添加功能控件
+        self.clear_tkinter_frame(nav_frame_r)
+        button_create_project = tkinter.Button(nav_frame_r, text="创建项目",
+                                               command=self.create_project_of_nav_frame_r_project_page)
+        button_create_project.grid(row=0, column=1)
+        button_display_project = tkinter.Button(nav_frame_r, text="列出项目",
+                                                command=self.display_project_of_nav_frame_r_project_page)
+        button_display_project.grid(row=1, column=1)
+
+    def nav_frame_r_credential_page_display(self):
+        """
+        显示credential主页面
+        :return:
+        """
+        # claer_tkinter_window(self.window_obj)
+        # 更新导航框架1的当前选项卡背景色
+        widget_index = 0
+        for widget in self.nav_frame_l.winfo_children():
+            if widget_index == 1:
+                widget.config(bg="pink")
+            else:
+                widget.config(bg="white")
+            widget_index += 1
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "yellow")
+        # 在框架2中添加功能控件
+        self.clear_tkinter_frame(nav_frame_r)
+        button_create_credential = tkinter.Button(nav_frame_r, text="创建凭据",
+                                                  command=self.create_credential_of_nav_frame_r_credential_page)
+        button_create_credential.grid(row=0, column=1)
+        button_display_credential = tkinter.Button(nav_frame_r, text="列出凭据",
+                                                   command=self.display_credential_of_nav_frame_r_credential_page)
+        button_display_credential.grid(row=1, column=1)
+
+    def load_main_window_init_widget(self):
+        """
+        加载程序初始化界面控件
+        :return:
+        """
+        # 首先清空主window
+        self.clear_tkinter_window(self.window_obj)
+        # 加载菜单栏
+        self.create_menu_bar_init()
+        # 创建导航框架1
+        self.create_nav_frame_l_init()
+        # 创建导航框架2
+        self.create_nav_frame_r_init()
+
+    def create_menu_bar_init(self):  # 创建菜单栏-init界面的
+        menu_bar = tkinter.Menu(self.window_obj)  # 创建一个菜单，做菜单栏
+        menu_open_db_file = tkinter.Menu(menu_bar, tearoff=1)  # 创建一个菜单，分窗，表示此菜单可拉出来变成一个可移动的独立弹窗
+        menu_about = tkinter.Menu(menu_bar, tearoff=0, activebackground="green", activeforeground="white",
+                                  background="white", foreground="black")  # 创建一个菜单，不分窗
+        menu_open_db_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file_of_menu_bar_init)
+        menu_about.add_command(label="About", command=self.click_menu_about_of_menu_bar_init)
+        menu_bar.add_cascade(label="File", menu=menu_open_db_file)
+        menu_bar.add_cascade(label="Help", menu=menu_about)
+        self.window_obj.config(menu=menu_bar)
+
+    def create_nav_frame_l_init(self):  # 创建导航框架1-init界面的
+        self.nav_frame_l = tkinter.Frame(self.window_obj, bg="green", width=self.nav_frame_l_width, height=self.height)
+        self.nav_frame_l.grid_propagate(False)
+        self.nav_frame_l.pack_propagate(False)
+        self.nav_frame_l.grid(row=0, column=0)
+        # ★ 在框架1中添加功能按钮 ★
+        # Project项目-选项按钮
+        menu_button_project = tkinter.Button(self.nav_frame_l, text="Project项目", width=self.nav_frame_l_width, height=2, bg="white",
+                                             command=self.nav_frame_r_project_page_display)
+        menu_button_project.pack(padx=2, pady=2)
+        # Credentials凭据-选项按钮
+        menu_button_credential = tkinter.Button(self.nav_frame_l, text="Credentials凭据", width=self.nav_frame_l_width, height=2,
+                                                bg="white", command=self.nav_frame_r_credential_page_display)
+        menu_button_credential.pack(padx=2, pady=2)
+        # Host主机(组)管理-选项按钮
+        menu_button_host = tkinter.Button(self.nav_frame_l, text="Host主机(组)管理", width=self.nav_frame_l_width, bg="white")
+        menu_button_host.pack(padx=2, pady=2)
+        # Inspect巡检代码-选项按钮
+        menu_button_inspect_code = tkinter.Button(self.nav_frame_l, text="Inspect巡检代码", width=self.nav_frame_l_width, bg="white")
+        menu_button_inspect_code.pack(padx=2, pady=2)
+        # Template巡检模板-选项按钮
+        menu_button_inspection_template = tkinter.Button(self.nav_frame_l, text="Template巡检模板", width=self.nav_frame_l_width,
+                                                         bg="white")
+        menu_button_inspection_template.pack(padx=2, pady=2)
+        # 时间
+        label_current_time = tkinter.Label(self.nav_frame_l, text=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+        if self.global_info.current_project_obj is None:
+            label_current_project_content = "当前无项目"
+        else:
+            label_current_project_content = "当前项目-" + self.global_info.current_project_obj.name
+        label_current_project = tkinter.Label(self.nav_frame_l, text=label_current_project_content,
+                                              width=self.nav_frame_l_width, height=2)
+        label_current_time.pack(padx=2, pady=2)
+        label_current_time.after(1000, self.refresh_label_current_time, label_current_time)
+        label_current_project.pack(padx=2, pady=2)
+
+    def create_nav_frame_r_init(self):  # 创建导航框架2-init界面的
+        self.nav_frame_r = tkinter.Frame(self.window_obj, bg="blue", width=self.nav_frame_r_width, height=self.height)
+        self.nav_frame_r.grid_propagate(False)
+        self.nav_frame_r.pack_propagate(False)
+        self.nav_frame_r.grid(row=0, column=1)
+        # 在框架2中添加canvas-frame滚动框
+        self.clear_tkinter_frame(self.nav_frame_r)
+        scrollbar = tkinter.Scrollbar(self.nav_frame_r)
+        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        canvas = tkinter.Canvas(self.nav_frame_r, yscrollcommand=scrollbar.set)  # 创建画布
+        # canvas.pack(fill=tkinter.X, expand=tkinter.TRUE)
+        canvas.place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        scrollbar.config(command=canvas.yview)
+        frame = tkinter.Frame(canvas)
+        frame.pack()
+        canvas.create_window((0, 0), window=frame, anchor='nw')
+        # 添加控件
+        label_init = tkinter.Label(self.nav_frame_r, text="初始化界面")
+        label_init.grid(row=0, column=0)
+        label_project_count = tkinter.Label(self.nav_frame_r, text="项目数量: " + str(len(self.global_info.project_obj_list)))
+        label_project_count.grid(row=1, column=0)
+        label_credential_count = tkinter.Label(self.nav_frame_r, text="凭据数量: " + str(len(self.global_info.credential_obj_list)))
+        label_credential_count.grid(row=2, column=0)
+        label_host_count = tkinter.Label(self.nav_frame_r, text="主机数量: " + str(len(self.global_info.host_obj_list)))
+        label_host_count.grid(row=3, column=0)
+        label_inspect_code_count = tkinter.Label(self.nav_frame_r,
+                                                 text="inspect_code数量: " + str(len(self.global_info.inspect_code_obj_list)))
+        label_inspect_code_count.grid(row=4, column=0)
+        label_inspect_template_count = tkinter.Label(self.nav_frame_r,
+                                                     text="inspect_template数量: " + str(len(self.global_info.inspect_template_obj_list)))
+        label_inspect_template_count.grid(row=5, column=0)
+
+    def refresh_label_current_time(self, label):
+        label.__setitem__('text', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+        # 继续调用回调函数更新label
+        self.window_obj.after(1000, self.refresh_label_current_time, label)
+
+    def click_menu_about_of_menu_bar_init(self):
+        messagebox.showinfo("About", self.about_info)
+
+    def click_menu_open_db_file_of_menu_bar_init(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.db"), ("All files", "*.*")])
+        if not file_path:
+            print("not choose a file")
+        else:
+            print(file_path)
+            self.global_info.set_sqlite3_dbfile_name(file_path)
+            self.global_info.load_all_data_from_sqlite3()  # 已有的obj_list会被清空，生成加载后的新的obj_list（要注意已有信息是否已保存到数据库）
+
+    def reload_current_resized_window(self, event):  # 监听窗口大小变化事件，自动更新窗口内控件大小
+        if event:
+            if self.window_obj.winfo_width() == self.width and self.window_obj.winfo_height() == self.height:
+                return
+            else:
+                self.width = self.window_obj.winfo_width()
+                self.height = self.window_obj.winfo_height()
+                print("size changed")
+                self.window_obj.__setitem__('width', self.width)
+                self.window_obj.__setitem__('height', self.height)
+                self.window_obj.winfo_children()[1].__setitem__('width', self.width * 0.2)
+                self.window_obj.winfo_children()[1].__setitem__('height', self.height)
+                self.window_obj.winfo_children()[2].__setitem__('width', self.width * 0.8)
+                self.window_obj.winfo_children()[2].__setitem__('height', self.height)
+
+    def show(self):
+        self.window_obj.title(self.title)  # 设置窗口标题
+        # self.window_obj.iconbitmap(bitmap="D:\\test.ico")  # 设置窗口图标，默认为羽毛图标
+        self.window_obj.geometry(self.win_pos)  # 设置窗口大小及位置，居中
+        self.window_obj.resizable(width=self.resizable, height=self.resizable)  # True 表示宽度和高度可由用户手动调整
+        self.window_obj.minsize(*self.minsize)  # 可调整的最小宽度及高度
+        self.window_obj.maxsize(*self.maxsize)  # 可调整的最大宽度及高度
+        self.window_obj.pack_propagate(True)  # True表示窗口内的控件大小自适应
+        self.window_obj.configure(bg=self.background)  # 设置背景色，RGB
+        # 加载初始化界面控件
+        self.load_main_window_init_widget()  # ★★★ 接下来，所有的事情都在此界面操作 ★★★
+        # 监听窗口大小变化事件，自动更新窗口内控件大小（未完善，暂时不搞这个）
+        self.window_obj.bind('<Configure>', self.reload_current_resized_window)
+        # 运行窗口主循环
+        self.window_obj.mainloop()
+
+
+class CreateResourceInFrame:
+    """
+    在主窗口的创建资源界面，添加用于输入资源信息的控件
+    """
+
+    def __init__(self, frame=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
+        self.frame = frame
+        self.global_info = global_info
+        self.resource_type = resource_type
+        self.resource_info_dict = {}  # 用于存储资源对象信息的diction
+
+    def show(self):
+        for widget in self.frame.winfo_children():
+            widget.destroy()
+        if self.resource_type == RESOURCE_TYPE_PROJECT:
+            self.create_project()
+        elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
+            self.create_credential()
+        else:
+            print("resource_type is Unknown")
+
+    def create_project(self):
+        # ★创建-project
+        label_create_project = tkinter.Label(self.frame, text="★★ 创建项目 ★★")
+        label_create_project.grid(row=0, column=0, padx=2, pady=5)
+        # ★project-名称
+        label_project_name = tkinter.Label(self.frame, text="项目名称")
+        label_project_name.grid(row=1, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_project_name = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_name"])
+        entry_project_name.grid(row=1, column=1, padx=2, pady=5)
+        # ★project-描述
+        label_project_description = tkinter.Label(self.frame, text="描述")
+        label_project_description.grid(row=2, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_project_description = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_description"])
+        entry_project_description.grid(row=2, column=1, padx=2, pady=5)
+
+    def create_credential(self):
+        # ★创建-credential
+        label_create_credential = tkinter.Label(self.frame, text="★★ 创建凭据 ★★")
+        label_create_credential.grid(row=0, column=0, padx=2, pady=5)
+        # ★credential-名称
+        label_credential_name = tkinter.Label(self.frame, text="凭据名称")
+        label_credential_name.grid(row=1, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_credential_name = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_name"])
+        entry_credential_name.grid(row=1, column=1, padx=2, pady=5)
+        # ★credential-描述
+        label_credential_description = tkinter.Label(self.frame, text="描述")
+        label_credential_description.grid(row=2, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_credential_description = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_description"])
+        entry_credential_description.grid(row=2, column=1, padx=2, pady=5)
+        # ★credential-项目
+        label_credential_project_oid = tkinter.Label(self.frame, text="项目")
+        label_credential_project_oid.grid(row=3, column=0, padx=2, pady=5)
+        project_obj_name_list = []
+        for obj in self.global_info.project_obj_list:
+            project_obj_name_list.append(obj.name)
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.frame, values=project_obj_name_list, state="readonly")
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=2, pady=5)
+        # ★credential-凭据类型
+        label_credential_type = tkinter.Label(self.frame, text="凭据类型")
+        label_credential_type.grid(row=4, column=0, padx=2, pady=5)
+        cred_type_name_list = ["ssh_password", "ssh_key", "telnet", "ftp", "registry", "git"]
+        self.resource_info_dict["combobox_cred_type"] = ttk.Combobox(self.frame, values=cred_type_name_list, state="readonly")
+        self.resource_info_dict["combobox_cred_type"].grid(row=4, column=1, padx=2, pady=5)
+        # ★credential-用户名
+        label_credential_username = tkinter.Label(self.frame, text="username")
+        label_credential_username.grid(row=5, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_username"] = tkinter.StringVar()
+        entry_credential_username = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_username"])
+        entry_credential_username.grid(row=5, column=1, padx=2, pady=5)
+        # ★credential-密码
+        label_credential_password = tkinter.Label(self.frame, text="password")
+        label_credential_password.grid(row=6, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_password"] = tkinter.StringVar()
+        entry_credential_password = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_password"])
+        entry_credential_password.grid(row=6, column=1, padx=2, pady=5)
+        # ★credential-密钥
+        label_credential_private_key = tkinter.Label(self.frame, text="ssh_private_key")
+        label_credential_private_key.grid(row=7, column=0, padx=2, pady=5)
+        self.resource_info_dict["text_private_key"] = tkinter.Text(master=self.frame, height=3, width=32)
+        self.resource_info_dict["text_private_key"].grid(row=7, column=1, padx=2, pady=5)
+        # ★credential-提权类型
+        label_credential_privilege_escalation_method = tkinter.Label(self.frame, text="privilege_escalation_method")
+        label_credential_privilege_escalation_method.grid(row=8, column=0, padx=2, pady=5)
+        privilege_escalation_method_list = ["su", "sudo"]
+        self.resource_info_dict["combobox_privilege_escalation_method"] = ttk.Combobox(self.frame, values=privilege_escalation_method_list,
+                                                                                       state="readonly")
+        self.resource_info_dict["combobox_privilege_escalation_method"].grid(row=8, column=1, padx=2, pady=5)
+
+
+class ListResourceInFrame:
+    """
+    在主窗口的查看资源界面，添加用于显示资源信息的控件
+    """
+
+    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
+        self.main_window = main_window
+        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.global_info = global_info
+        self.resource_type = resource_type
+
+    def show(self):  # 入口函数
+        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+            widget.destroy()
+        if self.resource_type == RESOURCE_TYPE_PROJECT:
+            self.list_project()
+        elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
+            self.list_credential()
+        else:
+            print("resource_type is Unknown")
+
+    def list_project(self):
+        label_display_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 项目列表 ★★")
+        label_display_project.grid(row=0, column=0, padx=2, pady=5)
+        index = 0
+        for obj in self.global_info.project_obj_list:
+            print(obj.name)
+            label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index) + " : ")
+            label_index.grid(row=index + 1, column=0, padx=2, pady=5)
+            label_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=obj.name)
+            label_name.grid(row=index + 1, column=1, padx=2, pady=5)
+            # 查看对象信息
+            view_obj = ViewResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
+                                           RESOURCE_TYPE_PROJECT)
+            button_view = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="查看", command=view_obj.show)
+            button_view.grid(row=index + 1, column=2, padx=2, pady=5)
+            # 编辑对象信息
+            button_edit = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑")
+            button_edit.grid(row=index + 1, column=3, padx=2, pady=5)
+            # 删除对象
+            delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
+                                               RESOURCE_TYPE_PROJECT)
+            button_delete = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="删除", command=delete_obj.show)
+            button_delete.grid(row=index + 1, column=4, padx=2, pady=5)
+            index += 1
+
+    def list_credential(self):
+        label_display_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 凭据列表 ★★")
+        label_display_project.grid(row=0, column=0, padx=2, pady=5)
+        index = 0
+        for obj in self.global_info.credential_obj_list:
+            print(obj.name)
+            label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index) + " : ")
+            label_index.grid(row=index + 1, column=0, padx=2, pady=5)
+            label_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=obj.name)
+            label_name.grid(row=index + 1, column=1, padx=2, pady=5)
+            # 查看对象信息
+            view_obj = ViewResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
+                                           RESOURCE_TYPE_CREDENTIAL)
+            button_view = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="查看", command=view_obj.show)
+            button_view.grid(row=index + 1, column=2, padx=2, pady=5)
+            # 编辑对象信息
+            button_edit = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑")
+            button_edit.grid(row=index + 1, column=3, padx=2, pady=5)
+            # 删除对象
+            delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
+                                               RESOURCE_TYPE_CREDENTIAL)
+            button_delete = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="删除", command=delete_obj.show)
+            button_delete.grid(row=index + 1, column=4, padx=2, pady=5)
+            index += 1
+
+
+class ViewResourceInFrame:
+    """
+    在主窗口的查看资源界面，添加用于显示资源信息的控件
+    """
+
+    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, resource_obj=None,
+                 resource_type=RESOURCE_TYPE_PROJECT):
+        self.main_window = main_window
+        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.global_info = global_info
+        self.resource_obj = resource_obj
+        self.resource_type = resource_type
+
+    def show(self):  # 入口函数
+        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+            widget.destroy()
+        if self.resource_type == RESOURCE_TYPE_PROJECT:
+            self.view_project()
+        elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
+            self.view_credential()
+        else:
+            print("resource_type is Unknown")
+
+    def view_project(self):
+        # ★查看-project
+        print("查看项目")
+        print(self.resource_obj)
+        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
+        obj_info_text.insert(tkinter.END, "★★ 查看项目 ★★\n")
+        # ★project-名称
+        project_name = "名称" + ": " + self.resource_obj.name + "\n"
+        print(project_name)
+        obj_info_text.insert(tkinter.END, project_name)
+        # ★project-描述
+        project_description = "描述" + ": " + self.resource_obj.description + "\n"
+        obj_info_text.insert(tkinter.END, project_description)
+        obj_info_text.pack()
+        # 滚动条移到最开头
+        self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+        # ★返回“项目列表”界面
+        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
+                                       command=self.main_window.display_project_of_nav_frame_r_project_page)  # 返回“项目列表”
+        button_return.pack()
+
+    def view_credential(self):
+        # ★查看-credential
+        print("查看项目")
+        print(self.resource_obj)
+        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
+        obj_info_text.insert(tkinter.END, "★★ 查看项目 ★★\n")
+        # ★credential-名称
+        credential_name = "名称" + ": " + self.resource_obj.name + "\n"
+        print(credential_name)
+        obj_info_text.insert(tkinter.END, credential_name)
+        # ★credential-描述
+        credential_description = "描述" + ": " + self.resource_obj.description + "\n"
+        obj_info_text.insert(tkinter.END, credential_description)
+        obj_info_text.pack()
+        # 滚动条移到最开头
+        self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+        # ★返回“项目列表”界面
+        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
+                                       command=self.main_window.display_credential_of_nav_frame_r_credential_page)  # 返回“项目列表”
+        button_return.pack()
+
+
+class DeleteResourceInFrame:
+    """
+    在主窗口的查看资源界面，删除选中的资源对象
+    """
+
+    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, resource_obj=None,
+                 resource_type=RESOURCE_TYPE_PROJECT):
+        self.main_window = main_window
+        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.global_info = global_info
+        self.resource_obj = resource_obj
+        self.resource_type = resource_type
+
+    def show(self):  # 入口函数
+        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+            widget.destroy()
+        if self.resource_type == RESOURCE_TYPE_PROJECT:
+            self.delete_project()
+        elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
+            self.delete_credential()
+        else:
+            print("resource_type is Unknown")
+
+    def delete_project(self):
+        self.global_info.delete_project_obj(self.resource_obj)
+        self.main_window.display_project_of_nav_frame_r_project_page()
+
+    def delete_credential(self):
+        self.global_info.delete_credential_obj(self.resource_obj)
+        self.main_window.display_credential_of_nav_frame_r_credential_page()
+
+
+class SaveResourceInMainWindow:
+    """
+    在主窗口的创建资源界面，点击“保存”按钮时，保存资源信息
+    """
+
+    def __init__(self, main_window=None, resource_info_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
+        self.main_window = main_window
+        self.resource_info_dict = resource_info_dict
+        self.global_info = global_info
+        self.resource_type = resource_type
+
+    def save(self):  # 入口函数
+        if self.resource_type == RESOURCE_TYPE_PROJECT:
+            self.save_project()
+        elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
+            self.save_credential()
+        else:
+            print("resource_type is Unknown")
+
+    def save_project(self):
+        project_name = self.resource_info_dict["sv_name"].get()
+        project_description = self.resource_info_dict["sv_description"].get()
+        print(project_name, project_description)
+        # 创建项目
+        if project_name == '':
+            messagebox.showinfo("创建项目-Error", f"项目名称不能为空")
+        elif len(project_name) > 128:
+            messagebox.showinfo("创建项目-Error", f"项目名称>128字符")
+        elif len(project_description) > 256:
+            messagebox.showinfo("创建项目-Error", f"项目描述>256字符")
+        elif self.global_info.is_project_name_existed(project_name):
+            messagebox.showinfo("创建项目-Error", f"项目名称 {project_name} 已存在")
+        else:
+            project = Project(name=project_name, description=project_description, global_info=self.global_info)
+            project.save()
+            self.global_info.project_obj_list.append(project)
+            self.main_window.nav_frame_r_project_page_display()  # 保存项目信息后，返回项目展示页面
+
+    def save_credential(self):
+        credential_name = self.resource_info_dict["sv_name"].get()
+        credential_description = self.resource_info_dict["sv_description"].get()
+        credential_project_oid = self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid
+        credential_cred_type = self.resource_info_dict["combobox_cred_type"].current()
+        credential_username = self.resource_info_dict["sv_username"].get()
+        credential_password = self.resource_info_dict["sv_password"].get()
+        credential_private_key = self.resource_info_dict["text_private_key"].get("1.0", tkinter.END)
+        credential_privilege_escalation_method = self.resource_info_dict["combobox_privilege_escalation_method"].current()
+        # print(credential_name, credential_description)
+        # 创建credential
+        if credential_name == '':
+            messagebox.showinfo("创建凭据-Error", f"凭据名称不能为空")
+        elif len(credential_name) > 128:
+            messagebox.showinfo("创建凭据-Error", f"凭据名称>128字符")
+        elif len(credential_description) > 256:
+            messagebox.showinfo("创建凭据-Error", f"凭据描述>256字符")
+        elif self.global_info.is_credential_name_existed(credential_name):
+            messagebox.showinfo("创建凭据-Error", f"凭据名称 {credential_name} 已存在")
+        else:
+            credential = Credential(name=credential_name, description=credential_description, project_oid=credential_project_oid,
+                                    cred_type=credential_cred_type,
+                                    username=credential_username, password=credential_password, private_key=credential_private_key,
+                                    privilege_escalation_method=credential_privilege_escalation_method, global_info=self.global_info)
+            credential.save()
+            self.global_info.credential_obj_list.append(credential)
+            self.main_window.nav_frame_r_credential_page_display()  # 保存credential信息后，返回credential展示页面
