@@ -7,6 +7,22 @@
 # this module uses the GPL-3.0 open source protocol
 # update: 2024-02-27
 
+"""
+解决问题：
+★. 执行命令时进行判断回复                                 2024年1月23日 基本完成
+★. 登录凭据的选择与多次尝试各同类凭据（当同类型凭据有多个时），只选择第一个能成功登录的cred     2024年1月23日 完成
+★. ssh密码登录，ssh密钥登录                              2024年1月23日 完成
+★. 所有输出整理到txt文件                                 2024年1月24日 完成
+★. 使用多线程，每台主机用一个线程去巡检，并发几个线程          2024年1月25日 完成
+★. 巡检作业执行完成情况的统计，执行完成，连接超时，认证失败     2024年1月28日 基本完成
+★. 程序运行后，所有类的对象都要分别加载到一个全局列表里
+★. 巡检命令输出保存到数据库                               2024年1月27日 基本完成
+★. 定时/周期触发巡检模板作业
+★. 本次作业命令输出与最近一次（上一次）输出做对比
+★. 巡检命令输出做基础信息提取与判断并触发告警，告警如何通知人类用户？
+★. Credential密钥保存时，会有换行符，sql语句不支持，需要修改，已将密钥字符串转为base64   2024年2月25日 完成
+"""
+
 import io
 import uuid
 import time
@@ -66,8 +82,9 @@ RESOURCE_TYPE_PROJECT = 0
 RESOURCE_TYPE_CREDENTIAL = 1
 RESOURCE_TYPE_HOST = 2
 RESOURCE_TYPE_HOST_GROUP = 3
-RESOURCE_TYPE_INSPECT_CODE = 4
-RESOURCE_TYPE_INSPECT_TEMPLATE = 5
+RESOURCE_TYPE_INSPECTION_CODE_BLOCK = 4
+RESOURCE_TYPE_INSPECTION_TEMPLATE = 5
+VIEW_WIDTH = 20
 
 
 class Project:
@@ -129,8 +146,9 @@ class Project:
                         f"last_modify_timestamp={self.last_modify_timestamp}",
                         "where",
                         f"oid='{self.oid}'"]
+            print(" ".join(sql_list))
             sqlite_cursor.execute(" ".join(sql_list))
-        # sqlite_cursor.close()
+        sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
 
@@ -1590,7 +1608,7 @@ class GlobalInfo:
         obj_list = []
         for obj_info_tuple in search_result:
             obj = Project(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
-                          create_timestamp=obj_info_tuple[3])
+                          create_timestamp=obj_info_tuple[3], last_modify_timestamp=obj_info_tuple[4], global_info=self)
             obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -1630,7 +1648,7 @@ class GlobalInfo:
                              privilege_escalation_password=obj_info_tuple[11],
                              auth_url=obj_info_tuple[12],
                              ssl_verify=obj_info_tuple[13],
-                             last_modify_timestamp=obj_info_tuple[14])
+                             last_modify_timestamp=obj_info_tuple[14], global_info=self)
             obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -1666,7 +1684,7 @@ class GlobalInfo:
                        telnet_port=obj_info_tuple[7],
                        last_modify_timestamp=obj_info_tuple[8],
                        login_protocol=obj_info_tuple[9],
-                       first_auth_method=obj_info_tuple[10])
+                       first_auth_method=obj_info_tuple[10], global_info=self)
             obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -1718,7 +1736,7 @@ class GlobalInfo:
             # print('tuple: ', obj_info_tuple)
             obj = HostGroup(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
                             project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
-                            last_modify_timestamp=obj_info_tuple[5])
+                            last_modify_timestamp=obj_info_tuple[5], global_info=self)
             obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -1792,7 +1810,7 @@ class GlobalInfo:
             obj = InspectionCodeBlock(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
                                       project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
                                       code_source=obj_info_tuple[5],
-                                      last_modify_timestamp=obj_info_tuple[6])
+                                      last_modify_timestamp=obj_info_tuple[6], global_info=self)
             obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -1855,7 +1873,7 @@ class GlobalInfo:
                                      execution_crond_time=obj_info_tuple[8],
                                      last_modify_timestamp=obj_info_tuple[9],
                                      update_code_on_launch=obj_info_tuple[10],
-                                     forks=obj_info_tuple[11])
+                                     forks=obj_info_tuple[11], global_info=self)
             obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -2216,219 +2234,6 @@ class MainWindow:
         for widget in window.winfo_children():
             widget.destroy()
 
-    def create_project_of_nav_frame_r_project_page(self):
-        """
-        创建项目页面
-        :return:
-        """
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "green")
-        # 在框架2中添加控件
-        self.clear_tkinter_frame(nav_frame_r)
-        scrollbar = tkinter.Scrollbar(nav_frame_r)
-        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        canvas = tkinter.Canvas(nav_frame_r, yscrollcommand=scrollbar.set)  # 创建画布
-        canvas.place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
-        scrollbar.config(command=canvas.yview)
-        frame = tkinter.Frame(canvas)
-        frame.pack()
-        canvas.create_window((0, 0), window=frame, anchor='nw')
-        # 在canvas-frame滚动框内添加创建资源控件
-        create_obj = CreateResourceInFrame(frame, self.global_info, RESOURCE_TYPE_PROJECT)
-        create_obj.show()
-        # 更新Frame的尺寸
-        frame.update_idletasks()
-        canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
-
-        def proces_mouse_scroll(event):
-            nonlocal canvas
-            if event.delta > 0:
-                canvas.yview_scroll(-1, 'units')  # 向上移动
-            else:
-                canvas.yview_scroll(1, 'units')  # 向下移动
-
-        canvas.bind("<MouseWheel>", proces_mouse_scroll)
-        # ★创建“保存”按钮
-        save_obj = SaveResourceInMainWindow(self, create_obj.resource_info_dict, self.global_info, RESOURCE_TYPE_PROJECT)
-        button_save = tkinter.Button(nav_frame_r, text="保存", command=save_obj.save)
-        button_save.place(x=10, y=self.height - 40, width=50, height=25)
-        # ★创建“取消”按钮
-        button_cancel = tkinter.Button(nav_frame_r, text="取消", command=self.nav_frame_r_project_page_display)  # 返回“项目界面”
-        button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
-
-    def create_credential_of_nav_frame_r_credential_page(self):
-        """
-        创建凭据-页面
-        :return:
-        """
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "green")
-        # 在框架2中添加canvas-frame滚动框
-        self.clear_tkinter_frame(nav_frame_r)
-        scrollbar = tkinter.Scrollbar(nav_frame_r)
-        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        canvas = tkinter.Canvas(nav_frame_r, yscrollcommand=scrollbar.set)  # 创建画布
-        canvas.place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
-        scrollbar.config(command=canvas.yview)
-        frame = tkinter.Frame(canvas)
-        frame.pack()
-        canvas.create_window((0, 0), window=frame, anchor='nw')
-        # ★在canvas - frame滚动框内添加创建资源控件
-        create_obj = CreateResourceInFrame(frame, self.global_info, RESOURCE_TYPE_CREDENTIAL)
-        create_obj.show()
-        # 更新Frame的尺寸
-        frame.update_idletasks()
-        canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
-
-        def proces_mouse_scroll(event):
-            nonlocal canvas
-            if event.delta > 0:
-                canvas.yview_scroll(-1, 'units')  # 向上移动
-            else:
-                canvas.yview_scroll(1, 'units')  # 向下移动
-
-        canvas.bind("<MouseWheel>", proces_mouse_scroll)
-        # ★创建“保存”按钮
-        save_obj = SaveResourceInMainWindow(self, create_obj.resource_info_dict, self.global_info, RESOURCE_TYPE_CREDENTIAL)
-        button_save = tkinter.Button(nav_frame_r, text="保存", command=save_obj.save)
-        button_save.place(x=10, y=self.height - 40, width=50, height=25)
-        # ★创建“取消”按钮
-        button_cancel = tkinter.Button(nav_frame_r, text="取消", command=self.nav_frame_r_credential_page_display)  # 返回credential界面
-        button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
-
-    def display_project_of_nav_frame_r_project_page(self):
-        """
-        显示项目列表
-        :return:
-        """
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "green")
-        nav_frame_r_widget_dict = {}
-        # 在框架2中添加canvas-frame滚动框
-        self.clear_tkinter_frame(nav_frame_r)
-        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
-        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
-        # canvas.pack(fill=tkinter.X, expand=tkinter.TRUE)
-        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
-        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
-        nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
-        nav_frame_r_widget_dict["frame"].pack()
-        nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
-        # 在canvas-frame滚动框内添加资源列表控件
-        list_obj = ListResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, RESOURCE_TYPE_PROJECT)
-        list_obj.show()
-        # 信息控件添加完毕
-        nav_frame_r_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
-        nav_frame_r_widget_dict["canvas"].configure(
-            scrollregion=(0, 0, nav_frame_r_widget_dict["frame"].winfo_width(), nav_frame_r_widget_dict["frame"].winfo_height()))
-
-        def proces_mouse_scroll(event):
-            nonlocal nav_frame_r_widget_dict
-            if event.delta > 0:
-                nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
-            else:
-                nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
-
-        nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", proces_mouse_scroll)
-        # ★创建“返回”按钮
-        button_cancel = tkinter.Button(nav_frame_r, text="返回", command=self.nav_frame_r_project_page_display)  # 返回“项目界面”
-        button_cancel.place(x=10, y=self.height - 40, width=50, height=25)
-
-    def display_credential_of_nav_frame_r_credential_page(self):
-        """
-        列出凭据，显示凭据列表
-        :return:
-        """
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "pink")
-        nav_frame_r_widget_dict = {}
-        # 在框架2中添加canvas-frame滚动框
-        self.clear_tkinter_frame(nav_frame_r)
-        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
-        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
-        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
-        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
-        nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
-        nav_frame_r_widget_dict["frame"].pack()
-        nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
-        # 在canvas-frame滚动框内添加资源列表控件
-        list_obj = ListResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, RESOURCE_TYPE_CREDENTIAL)
-        list_obj.show()
-        # 信息控件添加完毕
-        nav_frame_r_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
-        nav_frame_r_widget_dict["canvas"].configure(
-            scrollregion=(0, 0, nav_frame_r_widget_dict["frame"].winfo_width(), nav_frame_r_widget_dict["frame"].winfo_height()))
-
-        def proces_mouse_scroll(event):
-            nonlocal nav_frame_r_widget_dict
-            if event.delta > 0:
-                nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
-            else:
-                nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
-
-        nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", proces_mouse_scroll)
-        # ★创建“返回”按钮
-        button_cancel = tkinter.Button(nav_frame_r, text="返回", command=self.nav_frame_r_credential_page_display)
-        button_cancel.place(x=10, y=self.height - 40, width=50, height=25)
-
-    def nav_frame_r_project_page_display(self):
-        """
-        显示project主页面
-        :return:
-        """
-        # claer_tkinter_window(self.window_obj)
-        # 更新导航框架1的当前选项卡背景色
-        widget_index = 0
-        for widget in self.nav_frame_l.winfo_children():
-            if widget_index == 0:
-                widget.config(bg="pink")
-            else:
-                widget.config(bg="white")
-            widget_index += 1
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "gray")
-        # 在框架2中添加功能控件
-        self.clear_tkinter_frame(nav_frame_r)
-        button_create_project = tkinter.Button(nav_frame_r, text="创建项目",
-                                               command=self.create_project_of_nav_frame_r_project_page)
-        button_create_project.grid(row=0, column=1)
-        button_display_project = tkinter.Button(nav_frame_r, text="列出项目",
-                                                command=self.display_project_of_nav_frame_r_project_page)
-        button_display_project.grid(row=1, column=1)
-
-    def nav_frame_r_credential_page_display(self):
-        """
-        显示credential主页面
-        :return:
-        """
-        # claer_tkinter_window(self.window_obj)
-        # 更新导航框架1的当前选项卡背景色
-        widget_index = 0
-        for widget in self.nav_frame_l.winfo_children():
-            if widget_index == 1:
-                widget.config(bg="pink")
-            else:
-                widget.config(bg="white")
-            widget_index += 1
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "yellow")
-        # 在框架2中添加功能控件
-        self.clear_tkinter_frame(nav_frame_r)
-        button_create_credential = tkinter.Button(nav_frame_r, text="创建凭据",
-                                                  command=self.create_credential_of_nav_frame_r_credential_page)
-        button_create_credential.grid(row=0, column=1)
-        button_display_credential = tkinter.Button(nav_frame_r, text="列出凭据",
-                                                   command=self.display_credential_of_nav_frame_r_credential_page)
-        button_display_credential.grid(row=1, column=1)
-
     def load_main_window_init_widget(self):
         """
         加载程序初始化界面控件
@@ -2454,7 +2259,7 @@ class MainWindow:
         menu_bar.add_cascade(label="Help", menu=menu_about)
         self.window_obj.config(menu=menu_bar)
 
-    def create_nav_frame_l_init(self):  # 创建导航框架1-init界面的
+    def create_nav_frame_l_init(self):  # 创建导航框架1-init界面的 ★★★★★
         self.nav_frame_l = tkinter.Frame(self.window_obj, bg="green", width=self.nav_frame_l_width, height=self.height)
         self.nav_frame_l.grid_propagate(False)
         self.nav_frame_l.pack_propagate(False)
@@ -2462,32 +2267,45 @@ class MainWindow:
         # ★ 在框架1中添加功能按钮 ★
         # Project项目-选项按钮
         menu_button_project = tkinter.Button(self.nav_frame_l, text="Project项目", width=self.nav_frame_l_width, height=2, bg="white",
-                                             command=self.nav_frame_r_project_page_display)
+                                             command=lambda: self.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_PROJECT))
         menu_button_project.pack(padx=2, pady=2)
         # Credentials凭据-选项按钮
         menu_button_credential = tkinter.Button(self.nav_frame_l, text="Credentials凭据", width=self.nav_frame_l_width, height=2,
-                                                bg="white", command=self.nav_frame_r_credential_page_display)
+                                                bg="white",
+                                                command=lambda: self.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_CREDENTIAL))
         menu_button_credential.pack(padx=2, pady=2)
-        # Host主机(组)管理-选项按钮
-        menu_button_host = tkinter.Button(self.nav_frame_l, text="Host主机(组)管理", width=self.nav_frame_l_width, bg="white")
+        # Host主机管理-选项按钮
+        menu_button_host = tkinter.Button(self.nav_frame_l, text="Host主机管理", width=self.nav_frame_l_width, height=2, bg="white",
+                                          command=lambda: self.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST))
+        menu_button_host.pack(padx=2, pady=2)
+        # Host_group主机组管理-选项按钮
+        menu_button_host = tkinter.Button(self.nav_frame_l, text="HostGroup管理", width=self.nav_frame_l_width, height=2, bg="white",
+                                          command=lambda: self.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST_GROUP))
         menu_button_host.pack(padx=2, pady=2)
         # Inspect巡检代码-选项按钮
-        menu_button_inspect_code = tkinter.Button(self.nav_frame_l, text="Inspect巡检代码", width=self.nav_frame_l_width, bg="white")
+        menu_button_inspect_code = tkinter.Button(self.nav_frame_l, text="Inspect巡检代码", width=self.nav_frame_l_width, height=2,
+                                                  bg="white",
+                                                  command=lambda: self.nav_frame_r_resource_top_page_display(
+                                                      RESOURCE_TYPE_INSPECTION_CODE_BLOCK))
         menu_button_inspect_code.pack(padx=2, pady=2)
         # Template巡检模板-选项按钮
         menu_button_inspection_template = tkinter.Button(self.nav_frame_l, text="Template巡检模板", width=self.nav_frame_l_width,
-                                                         bg="white")
+                                                         height=2, bg="white",
+                                                         command=lambda: self.nav_frame_r_resource_top_page_display(
+                                                             RESOURCE_TYPE_INSPECTION_TEMPLATE))
         menu_button_inspection_template.pack(padx=2, pady=2)
-        # 时间
+        # 时间-标签
         label_current_time = tkinter.Label(self.nav_frame_l, text=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+        label_current_time.pack(padx=2, pady=2)
+        label_current_time.after(1000, self.refresh_label_current_time, label_current_time)
+        # 当前项目-标签
         if self.global_info.current_project_obj is None:
             label_current_project_content = "当前无项目"
         else:
             label_current_project_content = "当前项目-" + self.global_info.current_project_obj.name
         label_current_project = tkinter.Label(self.nav_frame_l, text=label_current_project_content,
                                               width=self.nav_frame_l_width, height=2)
-        label_current_time.pack(padx=2, pady=2)
-        label_current_time.after(1000, self.refresh_label_current_time, label_current_time)
+
         label_current_project.pack(padx=2, pady=2)
 
     def create_nav_frame_r_init(self):  # 创建导航框架2-init界面的
@@ -2509,17 +2327,22 @@ class MainWindow:
         # 添加控件
         label_init = tkinter.Label(self.nav_frame_r, text="初始化界面")
         label_init.grid(row=0, column=0)
-        label_project_count = tkinter.Label(self.nav_frame_r, text="项目数量: " + str(len(self.global_info.project_obj_list)))
+        label_project_count_str = "项目数量".ljust(VIEW_WIDTH, " ") + ": " + str(len(self.global_info.project_obj_list))
+        label_project_count = tkinter.Label(self.nav_frame_r, text=label_project_count_str)
         label_project_count.grid(row=1, column=0)
-        label_credential_count = tkinter.Label(self.nav_frame_r, text="凭据数量: " + str(len(self.global_info.credential_obj_list)))
+        label_credential_count_str = "凭据数量".ljust(VIEW_WIDTH, " ") + ": " + str(len(self.global_info.credential_obj_list))
+        label_credential_count = tkinter.Label(self.nav_frame_r, text=label_credential_count_str)
         label_credential_count.grid(row=2, column=0)
-        label_host_count = tkinter.Label(self.nav_frame_r, text="主机数量: " + str(len(self.global_info.host_obj_list)))
+        label_host_count_str = "主机数量".ljust(VIEW_WIDTH, " ") + ": " + str(len(self.global_info.host_obj_list))
+        label_host_count = tkinter.Label(self.nav_frame_r, text=label_host_count_str)
         label_host_count.grid(row=3, column=0)
-        label_inspect_code_count = tkinter.Label(self.nav_frame_r,
-                                                 text="巡检代码块数量: " + str(len(self.global_info.inspection_code_block_obj_list)))
+        label_inspect_code_count_str = "巡检代码块数量".ljust(VIEW_WIDTH - 6, " ") \
+                                       + ": " + str(len(self.global_info.inspection_code_block_obj_list))
+        label_inspect_code_count = tkinter.Label(self.nav_frame_r, text=label_inspect_code_count_str)
         label_inspect_code_count.grid(row=4, column=0)
-        label_inspect_template_count = tkinter.Label(self.nav_frame_r,
-                                                     text="巡检模板数量: " + str(len(self.global_info.inspection_template_obj_list)))
+        label_inspect_template_count_str = "巡检模板数量".ljust(VIEW_WIDTH - 4, " ") + ": " \
+                                           + str(len(self.global_info.inspection_template_obj_list))
+        label_inspect_template_count = tkinter.Label(self.nav_frame_r, text=label_inspect_template_count_str)
         label_inspect_template_count.grid(row=5, column=0)
 
     def refresh_label_current_time(self, label):
@@ -2553,6 +2376,137 @@ class MainWindow:
                 self.window_obj.winfo_children()[1].__setitem__('height', self.height)
                 self.window_obj.winfo_children()[2].__setitem__('width', self.width * 0.8)
                 self.window_obj.winfo_children()[2].__setitem__('height', self.height)
+
+    def create_resource_of_nav_frame_r_page(self, resource_type):
+        """
+        ★★★★★ 创建资源-页面 ★★★★★
+        :return:
+        """
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "green")
+        # 在框架2中添加canvas-frame滚动框
+        self.clear_tkinter_frame(nav_frame_r)
+        scrollbar = tkinter.Scrollbar(nav_frame_r)
+        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        canvas = tkinter.Canvas(nav_frame_r, yscrollcommand=scrollbar.set)  # 创建画布
+        canvas.place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        scrollbar.config(command=canvas.yview)
+        frame = tkinter.Frame(canvas)
+        frame.pack()
+        canvas.create_window((0, 0), window=frame, anchor='nw')
+        # ★在canvas - frame滚动框内添加创建资源控件
+        create_obj = CreateResourceInFrame(frame, self.global_info, resource_type)
+        create_obj.show()
+        # 更新Frame的尺寸
+        frame.update_idletasks()
+        canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
+
+        def proces_mouse_scroll(event):
+            nonlocal canvas
+            if event.delta > 0:
+                canvas.yview_scroll(-1, 'units')  # 向上移动
+            else:
+                canvas.yview_scroll(1, 'units')  # 向下移动
+
+        canvas.bind("<MouseWheel>", proces_mouse_scroll)
+        # ★创建“保存”按钮
+        save_obj = SaveResourceInMainWindow(self, create_obj.resource_info_dict, self.global_info, resource_type)
+        button_save = tkinter.Button(nav_frame_r, text="保存", command=save_obj.save)
+        button_save.place(x=10, y=self.height - 40, width=50, height=25)
+        # ★创建“取消”按钮
+        button_cancel = tkinter.Button(nav_frame_r, text="取消",
+                                       command=lambda: self.nav_frame_r_resource_top_page_display(resource_type))  # 返回资源选项卡主界面
+        button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
+
+    def display_resource_of_nav_frame_r_page(self, resource_type):
+        """
+        ★★★★★ 显示资源-页面 ★★★★★
+        :return:
+        """
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "green")
+        nav_frame_r_widget_dict = {}
+        # 在框架2中添加canvas-frame滚动框
+        self.clear_tkinter_frame(nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
+        # canvas.pack(fill=tkinter.X, expand=tkinter.TRUE)
+        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
+        nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
+        nav_frame_r_widget_dict["frame"].pack()
+        nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
+        # 在canvas-frame滚动框内添加资源列表控件
+        list_obj = ListResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, resource_type)
+        list_obj.show()
+        # 信息控件添加完毕
+        nav_frame_r_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
+        nav_frame_r_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, nav_frame_r_widget_dict["frame"].winfo_width(), nav_frame_r_widget_dict["frame"].winfo_height()))
+
+        def proces_mouse_scroll(event):
+            nonlocal nav_frame_r_widget_dict
+            if event.delta > 0:
+                nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+            else:
+                nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+
+        nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", proces_mouse_scroll)
+        # ★创建“返回”按钮
+        button_cancel = tkinter.Button(nav_frame_r, text="返回",
+                                       command=lambda: self.nav_frame_r_resource_top_page_display(resource_type))  # 返回资源选项卡主界面
+        button_cancel.place(x=10, y=self.height - 40, width=50, height=25)
+
+    def nav_frame_r_resource_top_page_display(self, resource_type):
+        """
+        ★★★★★ 资源选项卡-主页面 ★★★★★
+        :return:
+        """
+        # claer_tkinter_window(self.window_obj)
+        # 更新导航框架1的当前选项卡背景色
+        widget_index = 0
+        for widget in self.nav_frame_l.winfo_children():
+            if widget_index == resource_type:
+                widget.config(bg="pink")
+            else:
+                widget.config(bg="white")
+            widget_index += 1
+        # 更新导航框架2
+        nav_frame_r = self.window_obj.winfo_children()[2]
+        nav_frame_r.__setitem__("bg", "gray")
+        # 在框架2中添加功能控件
+        self.clear_tkinter_frame(nav_frame_r)
+        if resource_type == RESOURCE_TYPE_PROJECT:
+            text_create = "创建项目"
+            text_display = "列出项目"
+        elif resource_type == RESOURCE_TYPE_CREDENTIAL:
+            text_create = "创建凭据"
+            text_display = "列出凭据"
+        elif resource_type == RESOURCE_TYPE_HOST:
+            text_create = "创建主机"
+            text_display = "列出主机"
+        elif resource_type == RESOURCE_TYPE_HOST_GROUP:
+            text_create = "创建主机组"
+            text_display = "列出主机组"
+        elif resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+            text_create = "创建巡检代码块"
+            text_display = "列出巡检代码块"
+        elif resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
+            text_create = "创建巡检模板"
+            text_display = "列出巡检模板"
+        else:
+            print("unknown resource type")
+            text_create = "创建项目"
+            text_display = "列出项目"
+        button_create_project = tkinter.Button(nav_frame_r, text=text_create,
+                                               command=lambda: self.create_resource_of_nav_frame_r_page(resource_type))
+        button_create_project.grid(row=0, column=1)
+        button_display_project = tkinter.Button(nav_frame_r, text=text_display,
+                                                command=lambda: self.display_resource_of_nav_frame_r_page(resource_type))
+        button_display_project.grid(row=1, column=1)
 
     def show(self):
         self.window_obj.title(self.title)  # 设置窗口标题
@@ -2705,18 +2659,33 @@ class ListResourceInFrame:
     def show(self):  # 入口函数
         for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
             widget.destroy()
+        # 列出资源
         if self.resource_type == RESOURCE_TYPE_PROJECT:
-            self.list_project()
+            resource_display_frame_title = "★★ 项目列表 ★★"
+            resource_obj_list = self.global_info.project_obj_list
         elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
-            self.list_credential()
+            resource_display_frame_title = "★★ 凭据列表 ★★"
+            resource_obj_list = self.global_info.credential_obj_list
+        elif self.resource_type == RESOURCE_TYPE_HOST:
+            resource_display_frame_title = "★★ 主机列表 ★★"
+            resource_obj_list = self.global_info.host_obj_list
+        elif self.resource_type == RESOURCE_TYPE_HOST_GROUP:
+            resource_display_frame_title = "★★ 主机组列表 ★★"
+            resource_obj_list = self.global_info.host_group_obj_list
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+            resource_display_frame_title = "★★ 巡检代码块列表 ★★"
+            resource_obj_list = self.global_info.inspection_code_block_obj_list
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
+            resource_display_frame_title = "★★ 巡检模板列表 ★★"
+            resource_obj_list = self.global_info.inspection_template_obj_list
         else:
-            print("resource_type is Unknown")
-
-    def list_project(self):
-        label_display_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 项目列表 ★★")
-        label_display_project.grid(row=0, column=0, padx=2, pady=5)
+            print("unknown resource type")
+            resource_display_frame_title = "★★ 项目列表 ★★"
+            resource_obj_list = self.global_info.project_obj_list
+        label_display_resource = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=resource_display_frame_title)
+        label_display_resource.grid(row=0, column=0, padx=2, pady=5)
         index = 0
-        for obj in self.global_info.project_obj_list:
+        for obj in resource_obj_list:
             print(obj.name)
             label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index) + " : ")
             label_index.grid(row=index + 1, column=0, padx=2, pady=5)
@@ -2724,44 +2693,17 @@ class ListResourceInFrame:
             label_name.grid(row=index + 1, column=1, padx=2, pady=5)
             # 查看对象信息
             view_obj = ViewResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
-                                           RESOURCE_TYPE_PROJECT)
+                                           self.resource_type)
             button_view = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="查看", command=view_obj.show)
             button_view.grid(row=index + 1, column=2, padx=2, pady=5)
             # 编辑对象信息
             edit_obj = EditResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
-                                           RESOURCE_TYPE_PROJECT)
+                                           self.resource_type)
             button_edit = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑", command=edit_obj.show)
             button_edit.grid(row=index + 1, column=3, padx=2, pady=5)
             # 删除对象
             delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
-                                               RESOURCE_TYPE_PROJECT)
-            button_delete = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="删除", command=delete_obj.show)
-            button_delete.grid(row=index + 1, column=4, padx=2, pady=5)
-            index += 1
-
-    def list_credential(self):
-        label_display_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 凭据列表 ★★")
-        label_display_project.grid(row=0, column=0, padx=2, pady=5)
-        index = 0
-        for obj in self.global_info.credential_obj_list:
-            print(obj.name)
-            label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index) + " : ")
-            label_index.grid(row=index + 1, column=0, padx=2, pady=5)
-            label_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=obj.name)
-            label_name.grid(row=index + 1, column=1, padx=2, pady=5)
-            # 查看对象信息
-            view_obj = ViewResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
-                                           RESOURCE_TYPE_CREDENTIAL)
-            button_view = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="查看", command=view_obj.show)
-            button_view.grid(row=index + 1, column=2, padx=2, pady=5)
-            # 编辑对象信息
-            edit_obj = EditResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
-                                           RESOURCE_TYPE_CREDENTIAL)
-            button_edit = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑", command=edit_obj.show)
-            button_edit.grid(row=index + 1, column=3, padx=2, pady=5)
-            # 删除对象
-            delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
-                                               RESOURCE_TYPE_CREDENTIAL)
+                                               self.resource_type)
             button_delete = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="删除", command=delete_obj.show)
             button_delete.grid(row=index + 1, column=4, padx=2, pady=5)
             index += 1
@@ -2815,29 +2757,31 @@ class ViewResourceInFrame:
         obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
         obj_info_text.insert(tkinter.END, "★★ 查看项目 ★★\n")
         # ★project-名称
-        project_name = "名称" + ": " + self.resource_obj.name + "\n"
+        project_name = "名称".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.name + "\n"
         print(project_name)
         obj_info_text.insert(tkinter.END, project_name)
         # ★project-描述
-        project_description = "描述" + ": " + self.resource_obj.description + "\n"
+        project_description = "描述".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.description + "\n"
         obj_info_text.insert(tkinter.END, project_description)
         # ★credential-create_timestamp
-        credential_create_timestamp = "create_timestamp" + ": " \
+        credential_create_timestamp = "create_time".ljust(VIEW_WIDTH, " ") + ": " \
                                       + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.create_timestamp)) + "\n"
         obj_info_text.insert(tkinter.END, credential_create_timestamp)
         # ★credential-last_modify_timestamp
-        if self.resource_obj.last_modify_timestamp < 1:
+        if abs(self.resource_obj.last_modify_timestamp) < 1:
             last_modify_timestamp = self.resource_obj.create_timestamp
         else:
             last_modify_timestamp = self.resource_obj.last_modify_timestamp
-        credential_last_modify_timestamp = "last_modify_timestamp" + ": " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(
-            last_modify_timestamp)) + "\n"
+        credential_last_modify_timestamp = "last_modify_time".ljust(VIEW_WIDTH, " ") + ": " \
+                                           + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_modify_timestamp)) + "\n"
+        print(last_modify_timestamp)
         obj_info_text.insert(tkinter.END, credential_last_modify_timestamp)
         # 显示info Text文本框
         obj_info_text.pack()
         # ★★添加返回“项目列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
-                                       command=self.main_window.display_project_of_nav_frame_r_project_page)  # 返回“项目列表”
+                                       command=lambda: self.main_window.display_resource_of_nav_frame_r_page(
+                                           RESOURCE_TYPE_PROJECT))  # 返回“项目列表”
         button_return.pack()
 
     def view_credential(self):
@@ -2845,59 +2789,58 @@ class ViewResourceInFrame:
         obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
         obj_info_text.insert(tkinter.END, "★★ 查看凭据 ★★\n")
         # ★credential-名称
-        credential_name = "名称" + ": " + self.resource_obj.name + "\n"
-        print(credential_name)
+        credential_name = "名称".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.name + "\n"
         obj_info_text.insert(tkinter.END, credential_name)
         # ★credential-id
-        credential_oid = "凭据id" + ": " + self.resource_obj.oid + "\n"
+        credential_oid = "凭据id".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.oid + "\n"
         obj_info_text.insert(tkinter.END, credential_oid)
         # ★credential-描述
-        credential_description = "描述" + ": " + self.resource_obj.description + "\n"
+        credential_description = "描述".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.description + "\n"
         obj_info_text.insert(tkinter.END, credential_description)
         # ★credential-所属项目
         if self.global_info.get_project_by_oid(self.resource_obj.project_oid) is None:  # ★凡是有根据oid查找资源对象的，都要处理None的情况
             project_name = "Unknown!"
         else:
             project_name = self.global_info.get_project_by_oid(self.resource_obj.project_oid).name
-        credential_project_name = "所属项目" + ": " + project_name + "\n"
+        credential_project_name = "所属项目".ljust(VIEW_WIDTH - 4, " ") + ": " + project_name + "\n"
         obj_info_text.insert(tkinter.END, credential_project_name)
-        credential_project_oid = "项目id" + ": " + self.resource_obj.project_oid + "\n"
+        credential_project_oid = "项目id".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.project_oid + "\n"
         obj_info_text.insert(tkinter.END, credential_project_oid)
         # ★credential-cred_type
         cred_type_name_list = ["ssh_password", "ssh_key", "telnet", "ftp", "registry", "git"]
-        credential_cred_type = "凭据类型" + ": " + cred_type_name_list[self.resource_obj.cred_type] + "\n"
+        credential_cred_type = "凭据类型".ljust(VIEW_WIDTH - 4, " ") + ": " + cred_type_name_list[self.resource_obj.cred_type] + "\n"
         obj_info_text.insert(tkinter.END, credential_cred_type)
         # ★credential-username
-        credential_username = "username" + ": " + self.resource_obj.username + "\n"
+        credential_username = "username".ljust(VIEW_WIDTH, " ") + ": " + self.resource_obj.username + "\n"
         obj_info_text.insert(tkinter.END, credential_username)
         # ★credential-password
-        credential_password = "password" + ": " + self.resource_obj.password + "\n"
+        credential_password = "password".ljust(VIEW_WIDTH, " ") + ": " + self.resource_obj.password + "\n"
         obj_info_text.insert(tkinter.END, credential_password)
         # ★credential-private_key
-        credential_private_key = "private_key" + ": " + self.resource_obj.private_key + "\n"
+        credential_private_key = "private_key".ljust(VIEW_WIDTH, " ") + ": " + self.resource_obj.private_key + "\n"
         obj_info_text.insert(tkinter.END, credential_private_key)
         # ★credential-privilege_escalation_method
         privilege_escalation_method_list = ["su", "sudo"]
-        credential_privilege_escalation_method = "privilege_escalation_method" + ": " + privilege_escalation_method_list[
+        credential_privilege_escalation_method = "提权_method".ljust(VIEW_WIDTH - 2, " ") + ": " + privilege_escalation_method_list[
             self.resource_obj.privilege_escalation_method] + "\n"
         obj_info_text.insert(tkinter.END, credential_privilege_escalation_method)
         # ★credential-privilege_escalation_username
-        credential_privilege_escalation_username = "privilege_escalation_username" \
+        credential_privilege_escalation_username = "提权_username".ljust(VIEW_WIDTH - 2, " ") \
                                                    + ": " + self.resource_obj.privilege_escalation_username + "\n"
         obj_info_text.insert(tkinter.END, credential_privilege_escalation_username)
         # ★credential-privilege_escalation_password
-        credential_privilege_escalation_password = "privilege_escalation_password" \
+        credential_privilege_escalation_password = "提权_password".ljust(VIEW_WIDTH - 2, " ") \
                                                    + ": " + self.resource_obj.privilege_escalation_password + "\n"
         obj_info_text.insert(tkinter.END, credential_privilege_escalation_password)
         # ★credential-auth_url
-        credential_auth_url = "auth_url" + ": " + self.resource_obj.auth_url + "\n"
+        credential_auth_url = "auth_url".ljust(VIEW_WIDTH, " ") + ": " + self.resource_obj.auth_url + "\n"
         obj_info_text.insert(tkinter.END, credential_auth_url)
         # ★credential-ssl_verify
-        ssl_verify_list = ["su", "sudo"]
-        credential_ssl_verify = "ssl_verify" + ": " + ssl_verify_list[self.resource_obj.ssl_verify] + "\n"
+        ssl_verify_list = ["NO", "YES"]
+        credential_ssl_verify = "ssl_verify".ljust(VIEW_WIDTH, " ") + ": " + ssl_verify_list[self.resource_obj.ssl_verify] + "\n"
         obj_info_text.insert(tkinter.END, credential_ssl_verify)
         # ★credential-create_timestamp
-        credential_create_timestamp = "create_timestamp" + ": " \
+        credential_create_timestamp = "create_time".ljust(VIEW_WIDTH, " ") + ": " \
                                       + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.create_timestamp)) + "\n"
         obj_info_text.insert(tkinter.END, credential_create_timestamp)
         # ★credential-last_modify_timestamp
@@ -2905,14 +2848,15 @@ class ViewResourceInFrame:
             last_modify_timestamp = self.resource_obj.create_timestamp
         else:
             last_modify_timestamp = self.resource_obj.last_modify_timestamp
-        credential_last_modify_timestamp = "last_modify_timestamp" + ": " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(
-            last_modify_timestamp)) + "\n"
+        credential_last_modify_timestamp = "last_modify_time".ljust(VIEW_WIDTH, " ") + ": " \
+                                           + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_modify_timestamp)) + "\n"
         obj_info_text.insert(tkinter.END, credential_last_modify_timestamp)
         # 显示info Text文本框
         obj_info_text.pack()
         # ★★添加“返回项目列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
-                                       command=self.main_window.display_credential_of_nav_frame_r_credential_page)  # 返回项目列表
+                                       command=lambda: self.main_window.display_resource_of_nav_frame_r_page(
+                                           RESOURCE_TYPE_CREDENTIAL))  # 返回凭据列表
         button_return.pack()
 
 
@@ -2984,7 +2928,8 @@ class EditResourceInFrame:
         button_save.grid(row=13, column=0, padx=2, pady=5)
         # ★★添加“返回项目列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
-                                       command=self.main_window.display_project_of_nav_frame_r_project_page)  # 返回项目列表
+                                       command=lambda: self.main_window.display_resource_of_nav_frame_r_page(
+                                           RESOURCE_TYPE_PROJECT))  # 返回项目列表
         button_return.grid(row=13, column=1, padx=2, pady=5)
 
     def edit_credential(self):
@@ -3050,7 +2995,7 @@ class EditResourceInFrame:
         label_credential_private_key = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssh_private_key")
         label_credential_private_key.grid(row=7, column=0, padx=2, pady=5)
         self.resource_info_dict["text_private_key"] = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], height=3, width=32)
-        self.resource_info_dict["text_private_key"].insert(1.0, self.resource_obj.password)  # 显示初始值，可编辑
+        self.resource_info_dict["text_private_key"].insert(1.0, self.resource_obj.private_key)  # 显示初始值，可编辑
         self.resource_info_dict["text_private_key"].grid(row=7, column=1, padx=2, pady=5)
         # ★credential-提权类型
         label_credential_privilege_escalation_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
@@ -3107,7 +3052,8 @@ class EditResourceInFrame:
         button_save.grid(row=13, column=0, padx=2, pady=5)
         # ★★添加“返回凭据列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回凭据列表",
-                                       command=self.main_window.display_credential_of_nav_frame_r_credential_page)  # 返回凭据列表
+                                       command=lambda: self.main_window.display_resource_of_nav_frame_r_page(
+                                           RESOURCE_TYPE_CREDENTIAL))  # 返回凭据列表
         button_return.grid(row=13, column=1, padx=2, pady=5)
 
 
@@ -3145,7 +3091,7 @@ class UpdateResourceInFrame:
             messagebox.showinfo("创建项目-Error", f"项目描述>256字符")
         else:
             self.resource_obj.update(name=project_name, description=project_description, global_info=self.global_info)
-            self.main_window.display_project_of_nav_frame_r_project_page()  # 保存项目信息后，返回项目展示页面
+            self.main_window.display_resource_of_nav_frame_r_page(RESOURCE_TYPE_PROJECT)  # 保存项目信息后，返回项目展示页面
 
     def update_credential(self):
         credential_name = self.resource_info_dict["sv_name"].get()
@@ -3190,7 +3136,7 @@ class UpdateResourceInFrame:
                                      auth_url=credential_auth_url,
                                      ssl_verify=credential_ssl_verify,
                                      global_info=self.global_info)
-            self.main_window.display_credential_of_nav_frame_r_credential_page()  # 保存credential信息后，返回“显示credential列表”页面
+            self.main_window.display_resource_of_nav_frame_r_page(RESOURCE_TYPE_CREDENTIAL)  # 保存credential信息后，返回“显示credential列表”页面
 
 
 class DeleteResourceInFrame:
@@ -3218,11 +3164,11 @@ class DeleteResourceInFrame:
 
     def delete_project(self):
         self.global_info.delete_project_obj(self.resource_obj)
-        self.main_window.display_project_of_nav_frame_r_project_page()
+        self.main_window.display_resource_of_nav_frame_r_page(RESOURCE_TYPE_PROJECT)
 
     def delete_credential(self):
         self.global_info.delete_credential_obj(self.resource_obj)
-        self.main_window.display_credential_of_nav_frame_r_credential_page()
+        self.main_window.display_resource_of_nav_frame_r_page(RESOURCE_TYPE_CREDENTIAL)
 
 
 class SaveResourceInMainWindow:
@@ -3261,7 +3207,7 @@ class SaveResourceInMainWindow:
             project = Project(name=project_name, description=project_description, global_info=self.global_info)
             project.save()
             self.global_info.project_obj_list.append(project)
-            self.main_window.nav_frame_r_project_page_display()  # 保存项目信息后，返回项目展示页面
+            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_PROJECT)  # 保存项目信息后，返回项目展示页面
 
     def save_credential(self):
         credential_name = self.resource_info_dict["sv_name"].get()
@@ -3311,4 +3257,11 @@ class SaveResourceInMainWindow:
                                     global_info=self.global_info)
             credential.save()
             self.global_info.credential_obj_list.append(credential)
-            self.main_window.nav_frame_r_credential_page_display()  # 保存credential信息后，返回credential展示页面
+            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_CREDENTIAL)  # 保存credential信息后，返回credential展示页面
+
+
+if __name__ == '__main__':
+    global_info_obj = GlobalInfo()  # 创建全局信息类，用于存储所有资源类的对象
+    global_info_obj.load_all_data_from_sqlite3()  # 首先加载数据库，加载所有资源（若未指定数据库文件名称，则默认为"cofable_default.db"）
+    main_window_obj = MainWindow(width=640, height=400, title='cofAble', global_info=global_info_obj)  # 创建程序主界面
+    main_window_obj.show()
