@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-02-26
+# update: 2024-02-27
 
 import io
 import uuid
@@ -24,6 +24,8 @@ import paramiko
 # Here we go, 全局常量
 COF_TRUE = 1
 COF_FALSE = 0
+COF_YES = 1
+COF_NO = 0
 CRED_TYPE_SSH_PASS = 0
 CRED_TYPE_SSH_KEY = 1
 CRED_TYPE_TELNET = 2
@@ -74,7 +76,7 @@ class Project:
     同一项目里的资源可互相引用/使用，不同项目之间的资源不可互用
     """
 
-    def __init__(self, name='default', description='default', oid=None, create_timestamp=None, global_info=None):
+    def __init__(self, name='default', description='default', last_modify_timestamp=0, oid=None, create_timestamp=None, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>  project_oid
         else:
@@ -90,6 +92,7 @@ class Project:
             self.sqlite3_dbfile_name = self.name + '.db'
         else:
             self.sqlite3_dbfile_name = self.global_info.sqlite3_dbfile_name  # 数据库所有数据存储在此文件中
+        self.last_modify_timestamp = last_modify_timestamp  # <float>
 
     def save(self):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
@@ -104,21 +107,48 @@ class Project:
             sql_list = ["create table tb_project (oid varchar(36) NOT NULL PRIMARY KEY,",
                         "name varchar(128),",
                         "description varchar(256),",
-                        "create_timestamp double)"]
+                        "create_timestamp double,",
+                        "last_modify_timestamp double )"]
             sqlite_cursor.execute(" ".join(sql_list))
         # 开始插入数据
         sql = f"select * from tb_project where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
-        if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
-            sql_list = [f"insert into tb_project (oid,name,description,create_timestamp) values",
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
+            sql_list = [f"insert into tb_project (oid,name,description,create_timestamp,last_modify_timestamp) values",
                         f"('{self.oid}',",
                         f"'{self.name}',",
                         f"'{self.description}',",
-                        f"{self.create_timestamp})"]
+                        f"{self.create_timestamp},",
+                        f"{self.last_modify_timestamp} )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        sqlite_cursor.close()
+        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+            sql_list = [f"update tb_project set ",
+                        f"name='{self.name}',",
+                        f"description='{self.description}',",
+                        f"create_timestamp={self.create_timestamp},",
+                        f"last_modify_timestamp={self.last_modify_timestamp}",
+                        "where",
+                        f"oid='{self.oid}'"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        # sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
+
+    def update(self, name='default', description='default', last_modify_timestamp=None, create_timestamp=None, global_info=None):
+        if name is not None:
+            self.name = name
+        if description is not None:
+            self.description = description
+        if last_modify_timestamp is not None:
+            self.last_modify_timestamp = last_modify_timestamp
+        else:
+            self.last_modify_timestamp = time.time()  # 更新last_modify时间
+        if create_timestamp is not None:
+            self.create_timestamp = create_timestamp
+        if global_info is not None:
+            self.global_info = global_info
+        # 最后更新数据库
+        self.save()
 
 
 class Credential:
@@ -130,7 +160,7 @@ class Credential:
                  username='', password='', private_key='',
                  privilege_escalation_method=PRIVILEGE_ESCALATION_METHOD_SUDO, privilege_escalation_username='',
                  privilege_escalation_password='',
-                 auth_url='', ssl_no_verify=COF_TRUE, last_modify_timestamp=0, oid=None, create_timestamp=None, global_info=None):
+                 auth_url='', ssl_verify=COF_TRUE, last_modify_timestamp=0, oid=None, create_timestamp=None, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
@@ -150,7 +180,7 @@ class Credential:
         self.privilege_escalation_username = privilege_escalation_username
         self.privilege_escalation_password = privilege_escalation_password
         self.auth_url = auth_url  # 含container-registry,git等
-        self.ssl_no_verify = ssl_no_verify  # 默认为True，不校验ssl证书
+        self.ssl_verify = ssl_verify  # 默认为True，不校验ssl证书
         self.last_modify_timestamp = last_modify_timestamp  # <float>
         self.global_info = global_info
 
@@ -162,7 +192,7 @@ class Credential:
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         print("exist tables: ", result)
-        # 若未查询到有此表，则创建此表
+        # ★若未查询到有此表，则创建此表★
         if len(result) == 0:
             sql_list = ["create table tb_credential  ( oid varchar(36) NOT NULL PRIMARY KEY,",
                         "name varchar(128),",
@@ -177,14 +207,14 @@ class Credential:
                         "privilege_escalation_username varchar(128),",
                         "privilege_escalation_password varchar(256),",
                         "auth_url varchar(2048),",
-                        "ssl_no_verify int,",
+                        "ssl_verify int,",
                         "last_modify_timestamp double )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        # 开始插入数据
+        # ★开始插入数据/更新数据
         sql = f"select * from tb_credential where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
-        if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
-            private_key_b64 = base64.b64encode(self.private_key.encode("utf8")).decode("utf8")
+        private_key_b64 = base64.b64encode(self.private_key.encode("utf8")).decode("utf8")
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
             sql_list = ["insert into tb_credential (oid,",
                         "name,",
                         "description,",
@@ -198,7 +228,7 @@ class Credential:
                         "privilege_escalation_username,",
                         "privilege_escalation_password,",
                         "auth_url,",
-                        "ssl_no_verify,",
+                        "ssl_verify,",
                         "last_modify_timestamp ) values",
                         f"('{self.oid}',",
                         f"'{self.name}',",
@@ -213,12 +243,90 @@ class Credential:
                         f"'{self.privilege_escalation_username}',",
                         f"'{self.privilege_escalation_password}',",
                         f"'{self.auth_url}',",
-                        f"{self.ssl_no_verify},",
+                        f"{self.ssl_verify},",
                         f"{self.last_modify_timestamp} )"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+            sql_list = ["update tb_credential  set ",
+                        f"description='{self.name}',",
+                        f"description='{self.description}',",
+                        f"project_oid='{self.project_oid}',",
+                        f"create_timestamp={self.create_timestamp},",
+                        f"cred_type={self.cred_type},",
+                        f"username='{self.username}',",
+                        f"password='{self.password}',",
+                        f"private_key_b64='{private_key_b64}',",
+                        f"privilege_escalation_method={self.privilege_escalation_method},",
+                        f"privilege_escalation_username='{self.privilege_escalation_username}',",
+                        f"privilege_escalation_password='{self.privilege_escalation_password}',",
+                        f"auth_url='{self.auth_url}',",
+                        f"ssl_verify={self.ssl_verify},",
+                        f"last_modify_timestamp={self.last_modify_timestamp}",
+                        "where",
+                        f"oid='{self.oid}'"]
             sqlite_cursor.execute(" ".join(sql_list))
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
+
+    def update(self, name=None, description=None, project_oid=None, cred_type=None,
+               username=None, password=None, private_key=None,
+               privilege_escalation_method=None, privilege_escalation_username=None,
+               privilege_escalation_password=None,
+               auth_url=None, ssl_verify=None, last_modify_timestamp=None, create_timestamp=None, global_info=None):
+        """
+        ★★ 资源对象的oid不能更新，oid不能变 ★★
+        :param name:
+        :param description:
+        :param project_oid:
+        :param cred_type:
+        :param username:
+        :param password:
+        :param private_key:
+        :param privilege_escalation_method:
+        :param privilege_escalation_username:
+        :param privilege_escalation_password:
+        :param auth_url:
+        :param ssl_verify:
+        :param last_modify_timestamp:
+        :param create_timestamp:
+        :param global_info:
+        :return:
+        """
+        if name is not None:
+            self.name = name
+        if description is not None:
+            self.description = description
+        if project_oid is not None:
+            self.project_oid = project_oid
+        if cred_type is not None:
+            self.cred_type = cred_type
+        if username is not None:
+            self.username = username
+        if password is not None:
+            self.password = password
+        if private_key is not None:
+            self.private_key = private_key
+        if privilege_escalation_method is not None:
+            self.privilege_escalation_method = privilege_escalation_method
+        if privilege_escalation_username is not None:
+            self.privilege_escalation_username = privilege_escalation_username
+        if privilege_escalation_password is not None:
+            self.privilege_escalation_password = privilege_escalation_password
+        if auth_url is not None:
+            self.auth_url = auth_url
+        if ssl_verify is not None:
+            self.ssl_verify = ssl_verify
+        if last_modify_timestamp is not None:
+            self.last_modify_timestamp = last_modify_timestamp
+        else:
+            self.last_modify_timestamp = time.time()  # 更新last_modify时间
+        if create_timestamp is not None:
+            self.create_timestamp = create_timestamp
+        if global_info is not None:
+            self.global_info = global_info
+        # 最后更新数据库
+        self.save()
 
 
 class Host:
@@ -279,7 +387,7 @@ class Host:
         # 开始插入数据
         sql = f"select * from tb_host where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
-        if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
             sql_list = [f"insert into tb_host (oid,",
                         "name,",
                         "description,",
@@ -303,6 +411,21 @@ class Host:
                         f"'{self.login_protocol}',"
                         f"{self.first_auth_method} )"]
             sqlite_cursor.execute(" ".join(sql_list))
+        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+            sql_list = [f"update tb_host set ",
+                        f"name='{self.name}',",
+                        f"description='{self.description}',",
+                        f"project_oid='{self.project_oid}',",
+                        f"create_timestamp={self.create_timestamp},",
+                        f"address='{self.address}',",
+                        f"ssh_port={self.ssh_port},",
+                        f"telnet_port={self.telnet_port},",
+                        f"last_modify_timestamp={self.last_modify_timestamp},"
+                        f"login_protocol='{self.login_protocol}',"
+                        f"first_auth_method={self.first_auth_method}",
+                        "where",
+                        f"oid='{self.oid}'"]
+            sqlite_cursor.execute(" ".join(sql_list))
         # ★查询是否有名为'tb_host_credential_oid_list'的表★
         sql = 'SELECT * FROM sqlite_master WHERE \
                 "type"="table" and "tbl_name"="tb_host_include_credential_oid_list"'
@@ -310,14 +433,14 @@ class Host:
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         print("exist tables: ", result)
         if len(result) == 0:  # 若未查询到有此表，则创建此表
-            sql = "create table tb_host_include_credential_oid_list  ( host_oid varchar(36),\
-                            credential_oid varchar(36) );"
+            sql = "create table tb_host_include_credential_oid_list  (host_oid varchar(36), credential_oid varchar(36) );"
             sqlite_cursor.execute(sql)
         # 开始插入数据
+        sql = f"delete from tb_host_include_credential_oid_list where host_oid='{self.oid}'"
+        sqlite_cursor.execute(sql)  # ★先清空Host所有的凭据，再重新插入（既可用于新建，又可用于更新）
         for cred_oid in self.credential_oid_list:
-            sql = f"select * from tb_host_include_credential_oid_list where \
-                    host_oid='{self.oid}' and credential_oid='{cred_oid}'"
-            sqlite_cursor.execute(sql)
+            # sql = f"select * from tb_host_include_credential_oid_list where host_oid='{self.oid}' and credential_oid='{cred_oid}'"
+            # sqlite_cursor.execute(sql)
             if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
                 sql_list = [f"insert into tb_host_include_credential_oid_list (host_oid,",
                             "credential_oid ) values ",
@@ -327,6 +450,36 @@ class Host:
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
+
+    def update(self, name=None, description=None, project_oid=None, address=None,
+               ssh_port=None, telnet_port=None, last_modify_timestamp=None, create_timestamp=None,
+               login_protocol=None, first_auth_method=None, global_info=None):
+        if name is not None:
+            self.name = name
+        if description is not None:
+            self.description = description
+        if project_oid is not None:
+            self.project_oid = project_oid
+        if address is not None:
+            self.address = address
+        if ssh_port is not None:
+            self.ssh_port = ssh_port
+        if telnet_port is not None:
+            self.telnet_port = telnet_port
+        if last_modify_timestamp is not None:
+            self.last_modify_timestamp = last_modify_timestamp
+        else:
+            self.last_modify_timestamp = time.time()  # 更新last_modify时间
+        if create_timestamp is not None:
+            self.create_timestamp = create_timestamp
+        if global_info is not None:
+            self.global_info = global_info
+        if login_protocol is not None:
+            self.login_protocol = login_protocol
+        if first_auth_method is not None:
+            self.first_auth_method = first_auth_method
+        # 最后更新数据库
+        self.save()
 
 
 class HostGroup:
@@ -385,7 +538,7 @@ class HostGroup:
         # 开始插入数据
         sql = f"select * from tb_host_group where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
-        if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
             sql_list = ["insert into tb_host_group (oid,",
                         "name,",
                         "description,",
@@ -399,6 +552,16 @@ class HostGroup:
                         f"{self.create_timestamp},",
                         f"{self.last_modify_timestamp} )"]
             sqlite_cursor.execute(" ".join(sql_list))
+        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+            sql_list = ["update tb_host_group set ",
+                        f"name='{self.name}',",
+                        f"description='{self.description}',",
+                        f"project_oid='{self.project_oid}',",
+                        f"create_timestamp={self.create_timestamp},",
+                        f"last_modify_timestamp={self.last_modify_timestamp}",
+                        "where",
+                        f"oid='{self.oid}'"]
+            sqlite_cursor.execute(" ".join(sql_list))
         # ★查询是否有名为'tb_host_group_include_host_list'的表★
         sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_host_group_include_host_list"'
         sqlite_cursor.execute(sql)
@@ -408,10 +571,9 @@ class HostGroup:
             sql = "create table tb_host_group_include_host_list  ( host_group_oid varchar(36),\
                             host_index int, host_oid varchar(36) );"
             sqlite_cursor.execute(sql)
-        # 每次保存host前，先删除所有host内容，再去重新插入
-        sql = f"delete from tb_host_group_include_host_list where host_group_oid='{self.oid}' "
-        sqlite_cursor.execute(sql)
         # 开始插入数据
+        sql = f"delete from tb_host_group_include_host_list where host_group_oid='{self.oid}' "
+        sqlite_cursor.execute(sql)  # 每次保存host前，先删除所有host内容，再去重新插入（既可用于新建，又可用于更新）
         host_index = 0
         for host_oid in self.host_oid_list:
             sql_list = ["insert into tb_host_group_include_host_list (host_group_oid,",
@@ -420,22 +582,21 @@ class HostGroup:
                         f"{host_index},",
                         f"'{host_oid}' )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        # ★查询是否有名为'tb_host_group_include_group_list'的表★
-        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_host_group_include_group_list"'
+        # ★查询是否有名为'tb_host_group_include_host_group_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_host_group_include_host_group_list"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         print("exist tables: ", result)
         if len(result) == 0:  # 若未查询到有此表，则创建此表
-            sql = "create table tb_host_group_include_group_list  ( host_group_oid varchar(36),\
+            sql = "create table tb_host_group_include_host_group_list  ( host_group_oid varchar(36),\
                                 group_index int, group_oid varchar(36) );"
             sqlite_cursor.execute(sql)
-        # 每次保存group前，先删除所有group内容，再去重新插入
-        sql = f"delete from tb_host_group_include_group_list where host_group_oid='{self.oid}' "
-        sqlite_cursor.execute(sql)
         # 开始插入数据
+        sql = f"delete from tb_host_group_include_host_group_list where host_group_oid='{self.oid}' "
+        sqlite_cursor.execute(sql)  # 每次保存group前，先删除所有group内容，再去重新插入（既可用于新建，又可用于更新）
         group_index = 0
         for group_oid in self.host_group_oid_list:
-            sql_list = ["insert into tb_host_group_include_group_list (host_group_oid,",
+            sql_list = ["insert into tb_host_group_include_host_group_list (host_group_oid,",
                         "group_index, group_oid )  values ",
                         f"('{self.oid}',",
                         f"{group_index},",
@@ -444,6 +605,25 @@ class HostGroup:
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
+
+    def update(self, name=None, description=None, project_oid=None, last_modify_timestamp=None,
+               create_timestamp=None, global_info=None):
+        if name is not None:
+            self.name = name
+        if description is not None:
+            self.description = description
+        if project_oid is not None:
+            self.project_oid = project_oid
+        if last_modify_timestamp is not None:
+            self.last_modify_timestamp = last_modify_timestamp
+        else:
+            self.last_modify_timestamp = time.time()  # 更新last_modify时间
+        if create_timestamp is not None:
+            self.create_timestamp = create_timestamp
+        if global_info is not None:
+            self.global_info = global_info
+        # 最后更新数据库
+        self.save()
 
 
 class InspectionCodeBlock:
@@ -495,7 +675,7 @@ class InspectionCodeBlock:
         # 开始插入数据
         sql = f"select * from tb_inspection_code_block where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
-        if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
             sql_list = ["insert into tb_inspection_code_block (oid,",
                         "name,",
                         "description,",
@@ -511,13 +691,24 @@ class InspectionCodeBlock:
                         f"{self.code_source},",
                         f"{self.last_modify_timestamp} )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        # ★查询是否有名为'tb_inspection_code_list'的表★
-        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_code_list"'
+        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+            sql_list = ["update tb_inspection_code_block set ",
+                        f"name='{self.name}',",
+                        f"description='{self.description}',",
+                        f"project_oid='{self.project_oid}',",
+                        f"create_timestamp={self.create_timestamp},",
+                        f"code_source={self.code_source},",
+                        f"last_modify_timestamp={self.last_modify_timestamp}",
+                        "where",
+                        f"oid='{self.oid}'"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        # ★查询是否有名为'tb_inspection_code_block_include_code_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_code_block_include_code_list"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         print("exist tables: ", result)
         if len(result) == 0:  # 若未查询到有此表，则创建此表
-            sql_list = ["create table tb_inspection_code_list  ( inspection_code_oid varchar(36),",
+            sql_list = ["create table tb_inspection_code_block_include_code_list  ( inspection_code_block_oid varchar(36),",
                         "code_index int,",
                         "code_content varchar(512),",
                         "code_post_wait_time double,",
@@ -526,12 +717,11 @@ class InspectionCodeBlock:
                         "interactive_answer varchar(32),",
                         "interactive_process_method int )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        # 每次保存代码前，先删除所有code内容，再去重新插入
-        sql = f"delete from tb_inspection_code_list where inspection_code_oid='{self.oid}' "
-        sqlite_cursor.execute(sql)
         # 开始插入数据
+        sql = f"delete from tb_inspection_code_block_include_code_list where inspection_code_oid='{self.oid}'"  # 每次保存代码前，先删除所有code内容，再去重新插入
+        sqlite_cursor.execute(sql)
         for code in self.code_list:
-            sql_list = ["insert into tb_inspection_code_list (inspection_code_oid,",
+            sql_list = ["insert into tb_inspection_code_block_include_code_list (inspection_code_block_oid,",
                         "code_index,",
                         "code_content,",
                         "code_post_wait_time,",
@@ -551,6 +741,27 @@ class InspectionCodeBlock:
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
+
+    def update(self, name=None, description=None, project_oid=None, code_source=None,
+               last_modify_timestamp=None, create_timestamp=None, global_info=None):
+        if name is not None:
+            self.name = name
+        if description is not None:
+            self.description = description
+        if project_oid is not None:
+            self.project_oid = project_oid
+        if code_source is not None:
+            self.code_source = code_source
+        if last_modify_timestamp is not None:
+            self.last_modify_timestamp = last_modify_timestamp
+        else:
+            self.last_modify_timestamp = time.time()  # 更新last_modify时间
+        if create_timestamp is not None:
+            self.create_timestamp = create_timestamp
+        if global_info is not None:
+            self.global_info = global_info
+        # 最后更新数据库
+        self.save()
 
 
 class InspectionTemplate:
@@ -585,22 +796,16 @@ class InspectionTemplate:
         self.update_code_on_launch = update_code_on_launch  # <int> 是否在执行项目任务时自动更新巡检代码
         self.forks = forks
         self.launch_template_trigger_oid = ''  # <str> CronDetectionTrigger对象的oid，此信息不保存到数据库
-        self.host_obj_list = []  # 元素为对象（此信息不保存到数据库）
-        self.host_group_obj_list = []  # 元素为对象（此信息不保存到数据库）
-        self.inspection_code_obj_list = []  # 元素为InspectionCode对象（此信息不保存到数据库）
         self.global_info = global_info
 
     def add_host(self, host):
         self.host_oid_list.append(host.oid)
-        self.host_obj_list.append(host)
 
     def add_host_group(self, host_group):
         self.host_group_oid_list.append(host_group.oid)
-        self.host_group_obj_list.append(host_group)
 
     def add_inspection_code(self, inspection_code):
         self.inspection_code_oid_list.append(inspection_code.oid)
-        self.inspection_code_obj_list.append(inspection_code)
 
     def save(self):
         sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
@@ -628,7 +833,7 @@ class InspectionTemplate:
         # 开始插入数据
         sql = f"select * from tb_inspection_template where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
-        if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
             sql_list = ["insert into tb_inspection_template (oid,",
                         "name,",
                         "description,",
@@ -645,18 +850,33 @@ class InspectionTemplate:
                         f"'{self.name}',",
                         f"'{self.description}',",
                         f"'{self.project_oid}',",
+                        f"{self.create_timestamp},",
                         f"{self.execution_method},",
                         f"{self.execution_at_time},",
                         f"{self.execution_after_time},",
                         f"'{self.execution_crond_time}',",
-                        f"{self.create_timestamp},",
                         f"{self.last_modify_timestamp},",
                         f"{self.update_code_on_launch},",
                         f"{self.forks} )"]
             sqlite_cursor.execute(" ".join(sql_list))
+        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+            sql_list = ["update tb_inspection_template set ",
+                        f"name='{self.name}',",
+                        f"description='{self.description}',",
+                        f"project_oid='{self.project_oid}',",
+                        f"create_timestamp={self.create_timestamp},",
+                        f"execution_method={self.execution_method},",
+                        f"execution_at_time={self.execution_at_time},",
+                        f"execution_after_time={self.execution_after_time},",
+                        f"execution_crond_time='{self.execution_crond_time}',",
+                        f"last_modify_timestamp={self.last_modify_timestamp},",
+                        f"update_code_on_launch={self.update_code_on_launch},",
+                        f"forks={self.forks}",
+                        "where",
+                        f"oid='{self.oid}'"]
+            sqlite_cursor.execute(" ".join(sql_list))
         # ★查询是否有名为'tb_inspection_template_include_host_list'的表★
-        sql = 'SELECT * FROM sqlite_master WHERE \
-                    "type"="table" and "tbl_name"="tb_inspection_template_include_host_list"'
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_template_include_host_list"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         print("exist tables: ", result)
@@ -666,10 +886,9 @@ class InspectionTemplate:
                         "host_index int,",
                         "host_oid varchar(36) )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        # 每次保存host前，先删除所有host内容，再去重新插入
-        sql = f"delete from tb_inspection_template_include_host_list where inspection_template_oid='{self.oid}' "
-        sqlite_cursor.execute(sql)
         # 开始插入数据
+        sql = f"delete from tb_inspection_template_include_host_list where inspection_template_oid='{self.oid}' "
+        sqlite_cursor.execute(sql)  # 每次保存host前，先删除所有host内容，再去重新插入（既可用于新建，又可用于更新）
         host_index = 0
         for host_oid in self.host_oid_list:
             sql_list = ["insert into tb_inspection_template_include_host_list (inspection_template_oid,",
@@ -679,8 +898,7 @@ class InspectionTemplate:
                         f"'{host_oid}' )"]
             sqlite_cursor.execute(" ".join(sql_list))
         # ★查询是否有名为'tb_inspection_template_include_group_list'的表★
-        sql = (f'SELECT * FROM sqlite_master WHERE \
-                    "type"="table" and "tbl_name"="tb_inspection_template_include_group_list"')
+        sql = f'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_template_include_group_list"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         print("exist tables: ", result)
@@ -690,10 +908,9 @@ class InspectionTemplate:
                 "group_index int,",
                 "group_oid varchar(36) )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        # 每次保存group前，先删除所有group内容，再去重新插入
-        sql = f"delete from tb_inspection_template_include_group_list where inspection_template_oid='{self.oid}' "
-        sqlite_cursor.execute(sql)
         # 开始插入数据
+        sql = f"delete from tb_inspection_template_include_group_list where inspection_template_oid='{self.oid}' "
+        sqlite_cursor.execute(sql)  # 每次保存group前，先删除所有group内容，再去重新插入（既可用于新建，又可用于更新）
         group_index = 0
         for group_oid in self.host_group_oid_list:
             sql_list = ["insert into tb_inspection_template_include_group_list"
@@ -705,8 +922,7 @@ class InspectionTemplate:
                         f"'{group_oid}' )"]
             sqlite_cursor.execute(" ".join(sql_list))
         # ★查询是否有名为'tb_inspection_template_include_inspection_code_list'的表★
-        sql = (f'SELECT * FROM sqlite_master WHERE \
-                    type="table" and tbl_name="tb_inspection_template_include_inspection_code_list"')
+        sql = f'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template_include_inspection_code_list"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         print("exist tables: ", result)
@@ -716,11 +932,9 @@ class InspectionTemplate:
                         "inspection_code_index int, ",
                         "inspection_code_oid varchar(36) )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        # 每次保存group前，先删除所有group内容，再去重新插入
-        sql = (f"delete from tb_inspection_template_include_inspection_code_list where \
-                    inspection_template_oid='{self.oid}' ")
-        sqlite_cursor.execute(sql)
         # 开始插入数据
+        sql = f"delete from tb_inspection_template_include_inspection_code_list where inspection_template_oid='{self.oid}' "
+        sqlite_cursor.execute(sql)  # 每次保存inspection_code前，先删除所有inspection_code内容，再去重新插入（既可用于新建，又可用于更新）
         inspection_code_index = 0
         for inspection_code_oid in self.inspection_code_oid_list:
             sql_list = ["insert into tb_inspection_template_include_inspection_code_list ",
@@ -774,7 +988,7 @@ class LaunchInspectionJob:
     执行巡检任务，一次性的，由巡检触发检测类<LaunchTemplateTrigger>对象去创建并执行巡检工作，完成后输出日志
     """
 
-    def __init__(self, name='default', description='default', project=None, oid=None, create_timestamp=None,
+    def __init__(self, name='default', description='default', oid=None, create_timestamp=None, project_oid='',
                  inspection_template=None, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str> job_id
@@ -782,11 +996,11 @@ class LaunchInspectionJob:
             self.oid = oid
         self.name = name  # <str>
         self.description = description  # <str>
-        self.project = project  # <str>
         if create_timestamp is None:
             self.create_timestamp = time.time()  # <float>
         else:
             self.create_timestamp = create_timestamp
+        self.project_oid = project_oid
         self.inspection_template = inspection_template  # InspectionTemplate对象
         self.unduplicated_host_obj_list = []  # <Host>对象，无重复项
         self.job_state = INSPECTION_CODE_JOB_EXEC_STATE_UNKNOWN
@@ -959,7 +1173,7 @@ class LaunchInspectionJob:
         :param inspection_code_obj:
         :return:
         """
-        sqlite_conn = sqlite3.connect(self.project.sqlite3_dbfile_name)  # 连接数据库文件
+        sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_job_invoke_shell_output'的表★
         sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_invoke_shell_output"'
@@ -1026,7 +1240,7 @@ class LaunchInspectionJob:
             self.job_state = INSPECTION_CODE_JOB_EXEC_STATE_FAILED
 
     def save_to_sqlite(self, start_time, end_time):
-        sqlite_conn = sqlite3.connect(self.project.sqlite3_dbfile_name)  # 连接数据库文件
+        sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_job'的表★
         sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job"'
@@ -1058,7 +1272,7 @@ class LaunchInspectionJob:
                         f"( '{self.oid}',",
                         f"'{self.name}',",
                         f"'{self.inspection_template.oid}',",
-                        f"'{self.project.oid}',",
+                        f"'{self.project_oid}',",
                         f"{start_time},",
                         f"{end_time},",
                         f"{self.job_state} )"]
@@ -1332,8 +1546,8 @@ class GlobalInfo:
         self.credential_obj_list = []
         self.host_obj_list = []
         self.host_group_obj_list = []
-        self.inspect_code_obj_list = []
-        self.inspect_template_obj_list = []
+        self.inspection_code_block_obj_list = []
+        self.inspection_template_obj_list = []
         self.current_project_obj = None  # 需要在项目界面将某个项目设置为当前项目，才会赋值
 
     def set_sqlite3_dbfile_name(self, file_name):
@@ -1347,14 +1561,14 @@ class GlobalInfo:
             print("sqlite3_dbfile_name is null")
             return
         else:
-            self.project_obj_list = self.load_projects_from_dbfile()
-            self.credential_obj_list = self.load_credentials_from_dbfile()
-            self.host_obj_list = self.load_hosts_from_dbfile()
-            self.host_group_obj_list = self.load_host_groups_from_dbfile()
-            self.inspect_code_obj_list = self.load_inspection_codes_from_dbfile()
-            self.inspect_template_obj_list = self.load_inspection_templates_from_dbfile()
+            self.project_obj_list = self.load_project_from_dbfile()
+            self.credential_obj_list = self.load_credential_from_dbfile()
+            self.host_obj_list = self.load_host_from_dbfile()
+            self.host_group_obj_list = self.load_host_group_from_dbfile()
+            self.inspection_code_block_obj_list = self.load_inspection_code_block_from_dbfile()
+            self.inspection_template_obj_list = self.load_inspection_template_from_dbfile()
 
-    def load_projects_from_dbfile(self):
+    def load_project_from_dbfile(self):
         """
         从sqlite3数据库文件，查找所有project，并输出project对象列表，output <list[Project]>
         :return:
@@ -1383,7 +1597,7 @@ class GlobalInfo:
         sqlite_conn.close()  # 关闭数据库连接
         return obj_list
 
-    def load_credentials_from_dbfile(self):
+    def load_credential_from_dbfile(self):
         """
         从sqlite3数据库文件，查找所有credential，并输出credential对象列表，output <list>
         :return:
@@ -1415,7 +1629,7 @@ class GlobalInfo:
                              privilege_escalation_username=obj_info_tuple[10],
                              privilege_escalation_password=obj_info_tuple[11],
                              auth_url=obj_info_tuple[12],
-                             ssl_no_verify=obj_info_tuple[13],
+                             ssl_verify=obj_info_tuple[13],
                              last_modify_timestamp=obj_info_tuple[14])
             obj_list.append(obj)
         sqlite_cursor.close()
@@ -1423,7 +1637,7 @@ class GlobalInfo:
         sqlite_conn.close()  # 关闭数据库连接
         return obj_list
 
-    def load_hosts_from_dbfile(self):
+    def load_host_from_dbfile(self):
         """
         从sqlite3数据库文件，查找所有host，并输出host对象列表，output <list>
         :return:
@@ -1457,10 +1671,10 @@ class GlobalInfo:
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
-        self.load_hosts_include_creds_from_dbfile(obj_list)
+        self.load_host_include_credential_from_dbfile(obj_list)
         return obj_list
 
-    def load_hosts_include_creds_from_dbfile(self, host_list):
+    def load_host_include_credential_from_dbfile(self, host_list):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_host_include_credential_oid_list'的表★
@@ -1480,7 +1694,7 @@ class GlobalInfo:
                 # print('tuple: ', obj_info_tuple)
                 host.credential_oid_list.append(obj_info_tuple[1])
 
-    def load_host_groups_from_dbfile(self):
+    def load_host_group_from_dbfile(self):
         """
         从sqlite3数据库文件，查找所有host_group，并输出host_group对象列表，output <list>
         :return:
@@ -1509,11 +1723,11 @@ class GlobalInfo:
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
-        self.load_host_groups_include_hosts_from_dbfile(obj_list)
-        self.load_host_groups_include_groups_from_dbfile(obj_list)
+        self.load_host_group_include_host_from_dbfile(obj_list)
+        self.load_host_group_include_host_group_from_dbfile(obj_list)
         return obj_list
 
-    def load_host_groups_include_hosts_from_dbfile(self, host_group_list):
+    def load_host_group_include_host_from_dbfile(self, host_group_list):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_host_group_include_host_list'的表★
@@ -1533,11 +1747,11 @@ class GlobalInfo:
                 # print('tuple: ', obj_info_tuple)
                 host_group.host_oid_list.append(obj_info_tuple[2])
 
-    def load_host_groups_include_groups_from_dbfile(self, host_group_list):
+    def load_host_group_include_host_group_from_dbfile(self, host_group_list):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-        # ★查询是否有名为'tb_host_group_include_group_list'的表★
-        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group_include_group_list"'
+        # ★查询是否有名为'tb_host_group_include_host_group_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group_include_host_group_list"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         print("exist tables: ", result)
@@ -1546,14 +1760,14 @@ class GlobalInfo:
             return []
         # 读取数据
         for host_group in host_group_list:
-            sql = f"select * from tb_host_group_include_group_list where host_group_oid='{host_group.oid}'"
+            sql = f"select * from tb_host_group_include_host_group_list where host_group_oid='{host_group.oid}'"
             sqlite_cursor.execute(sql)
             search_result = sqlite_cursor.fetchall()
             for obj_info_tuple in search_result:
                 # print('tuple: ', obj_info_tuple)
                 host_group.host_group_oid_list.append(obj_info_tuple[2])
 
-    def load_inspection_codes_from_dbfile(self):
+    def load_inspection_code_block_from_dbfile(self):
         """
         从sqlite3数据库文件，查找所有inspection_code，并输出inspection_code对象列表，output <list>
         :return:
@@ -1583,14 +1797,14 @@ class GlobalInfo:
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
-        self.load_inspection_code_lists_from_dbfile(obj_list)
+        self.load_inspection_code_list_from_dbfile(obj_list)
         return obj_list
 
-    def load_inspection_code_lists_from_dbfile(self, inspection_code_list):
+    def load_inspection_code_list_from_dbfile(self, inspection_code_list):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-        # ★查询是否有名为'tb_inspection_code_list'的表★
-        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_code_list"'
+        # ★查询是否有名为'tb_inspection_code_block_include_code_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_code_block_include_code_list"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         print("exist tables: ", result)
@@ -1599,7 +1813,7 @@ class GlobalInfo:
             return []
         # 读取数据
         for inspection_code in inspection_code_list:
-            sql = f"select * from tb_inspection_code_list where inspection_code_oid='{inspection_code.oid}'"
+            sql = f"select * from tb_inspection_code_block_include_code_list where inspection_code_oid='{inspection_code.oid}'"
             sqlite_cursor.execute(sql)
             search_result = sqlite_cursor.fetchall()
             for obj_info_tuple in search_result:
@@ -1611,7 +1825,7 @@ class GlobalInfo:
                                    interactive_process_method=obj_info_tuple[7])
                 inspection_code.code_list.append(code)
 
-    def load_inspection_templates_from_dbfile(self):
+    def load_inspection_template_from_dbfile(self):
         """
         从sqlite3数据库文件，查找所有inspection_template，并输出inspection_template对象列表，output <list>
         :return:
@@ -1646,12 +1860,12 @@ class GlobalInfo:
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
-        self.load_inspection_templates_include_hosts_from_dbfile(obj_list)
-        self.load_inspection_templates_include_groups_from_dbfile(obj_list)
-        self.load_inspection_templates_include_codes_from_dbfile(obj_list)
+        self.load_inspection_template_include_host_from_dbfile(obj_list)
+        self.load_inspection_template_include_host_group_from_dbfile(obj_list)
+        self.load_inspection_template_include_inspection_code_block_from_dbfile(obj_list)
         return obj_list
 
-    def load_inspection_templates_include_hosts_from_dbfile(self, inspection_template_list):
+    def load_inspection_template_include_host_from_dbfile(self, inspection_template_list):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_template_include_host_list'的表★
@@ -1672,7 +1886,7 @@ class GlobalInfo:
                 # print('tuple: ', obj_info_tuple)
                 inspection_template.host_oid_list.append(obj_info_tuple[2])
 
-    def load_inspection_templates_include_groups_from_dbfile(self, inspection_template_list):
+    def load_inspection_template_include_host_group_from_dbfile(self, inspection_template_list):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_template_include_group_list'的表★
@@ -1693,7 +1907,7 @@ class GlobalInfo:
                 # print('tuple: ', obj_info_tuple)
                 inspection_template.host_group_oid_list.append(obj_info_tuple[2])
 
-    def load_inspection_templates_include_codes_from_dbfile(self, inspection_template_list):
+    def load_inspection_template_include_inspection_code_block_from_dbfile(self, inspection_template_list):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_template_include_inspection_code_list'的表★
@@ -1707,7 +1921,7 @@ class GlobalInfo:
             return []
         # 读取数据
         for inspection_template in inspection_template_list:
-            sql = f"select * from tb_inspection_template_include_group_list where \
+            sql = f"select * from tb_inspection_template_include_inspection_code_list where \
                     inspection_template_oid='{inspection_template.oid}'"
             sqlite_cursor.execute(sql)
             search_result = sqlite_cursor.fetchall()
@@ -1739,15 +1953,15 @@ class GlobalInfo:
                 return True
         return False
 
-    def is_inspect_code_name_existed(self, inspect_code_name):  # 判断名称是否已存在obj_list里
-        for inspect_code in self.inspect_code_obj_list:
-            if inspect_code_name == inspect_code.name:
+    def is_inspection_code_block_name_existed(self, inspect_code_name):  # 判断名称是否已存在obj_list里
+        for inspection_code in self.inspection_code_block_obj_list:
+            if inspect_code_name == inspection_code.name:
                 return True
         return False
 
-    def is_inspect_template_name_existed(self, inspect_template_name):  # 判断名称是否已存在obj_list里
-        for inspect_template in self.inspect_template_obj_list:
-            if inspect_template_name == inspect_template.name:
+    def is_inspection_template_name_existed(self, inspect_template_name):  # 判断名称是否已存在obj_list里
+        for inspection_template in self.inspection_template_obj_list:
+            if inspect_template_name == inspection_template.name:
                 return True
         return False
 
@@ -1775,13 +1989,9 @@ class GlobalInfo:
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_project"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-        print("exist tables: ", result)
-        # 若未查询到有此表，则返回None
-        if len(result) == 0:
-            return []
-        # 删除数据
-        sql = f"delete from tb_project where oid='{oid}'"
-        sqlite_cursor.execute(sql)
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_project where oid='{oid}'"
+            sqlite_cursor.execute(sql)
         sqlite_cursor.close()
         sqlite_conn.commit()
         sqlite_conn.close()
@@ -1804,12 +2014,9 @@ class GlobalInfo:
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         # print("exist tables: ", result)
-        # 若未查询到有此表，则返回None
-        if len(result) == 0:
-            return
-        # 删除数据
-        sql = f"delete from tb_project where oid='{obj.oid}'"
-        sqlite_cursor.execute(sql)
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_project where oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
         sqlite_cursor.close()
         sqlite_conn.commit()
         sqlite_conn.close()
@@ -1818,29 +2025,157 @@ class GlobalInfo:
 
     def delete_credential_obj(self, obj):
         """
-        直接删除 project 对象
+        直接删除 credential 对象
         :param obj:
         :return:
         """
         # ★先从数据库删除
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-        # ★查询是否有名为'tb_project'的表★
+        # ★查询是否有名为'tb_credential'的表★
         sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_credential"'
         sqlite_cursor.execute(sql)
-        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-        # print("exist tables: ", result)
-        # 若未查询到有此表，则返回None
-        if len(result) == 0:
-            return
-        # 删除数据
-        sql = f"delete from tb_credential where oid='{obj.oid}'"
-        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_credential where oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
         sqlite_cursor.close()
         sqlite_conn.commit()
         sqlite_conn.close()
         # ★最后再从内存obj_list删除
         self.credential_obj_list.remove(obj)
+
+    def delete_host_obj(self, obj):
+        """
+        直接删除 host 对象
+        :param obj:
+        :return:
+        """
+        # ★先从数据库删除
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_host'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_host where oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
+        sqlite_cursor.close()
+        sqlite_conn.commit()
+        sqlite_conn.close()
+        # ★最后再从内存obj_list删除
+        self.host_obj_list.remove(obj)
+
+    def delete_host_group_obj(self, obj):
+        """
+        直接删除 host_group 对象
+        :param obj:
+        :return:
+        """
+        # ★先从数据库删除
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_host_group'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_host_group"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_host_group where oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_host_group_include_host_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_host_group_include_host_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        print("exist tables: ", result)
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_host_group_include_host_list where host_group_oid='{obj.oid}' "
+            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_host_group_include_host_group_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_host_group_include_host_group_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        print("exist tables: ", result)
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_host_group_include_host_group_list where host_group_oid='{obj.oid}' "
+            sqlite_cursor.execute(sql)
+        sqlite_cursor.close()
+        sqlite_conn.commit()
+        sqlite_conn.close()
+        # ★最后再从内存obj_list删除
+        self.host_group_obj_list.remove(obj)
+
+    def delete_inspection_code_block_obj(self, obj):
+        """
+        直接删除 inspection_code_block 对象
+        :param obj:
+        :return:
+        """
+        # ★先从数据库删除
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_code_block'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_code_block"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_inspection_code_block where oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_inspection_code_block_include_code_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_code_block_include_code_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_inspection_code_list where inspection_code_block_oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
+        sqlite_cursor.close()
+        sqlite_conn.commit()
+        sqlite_conn.close()
+        # ★最后再从内存obj_list删除
+        self.inspection_code_block_obj_list.remove(obj)
+
+    def delete_inspection_template_obj(self, obj):
+        """
+        直接删除 inspection_template 对象
+        :param obj:
+        :return:
+        """
+        # ★先从数据库删除
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_template'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_inspection_template where oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_inspection_template_include_host_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_template_include_host_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_inspection_template_include_host_list where inspection_template_oid='{obj.oid}' "
+            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_inspection_template_include_group_list'的表★
+        sql = f'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_template_include_group_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_inspection_template_include_group_list where inspection_template_oid='{obj.oid}' "
+            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_inspection_template_include_inspection_code_list'的表★
+        sql = f'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template_include_inspection_code_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_inspection_template_include_inspection_code_list where inspection_template_oid='{obj.oid}' "
+            sqlite_cursor.execute(sql)
+        sqlite_cursor.close()
+        sqlite_conn.commit()
+        sqlite_conn.close()
+        # ★最后再从内存obj_list删除
+        self.inspection_template_obj_list.remove(obj)
 
 
 class MainWindow:
@@ -1940,7 +2275,7 @@ class MainWindow:
         frame = tkinter.Frame(canvas)
         frame.pack()
         canvas.create_window((0, 0), window=frame, anchor='nw')
-        # 在canvas - frame滚动框内添加创建资源控件
+        # ★在canvas - frame滚动框内添加创建资源控件
         create_obj = CreateResourceInFrame(frame, self.global_info, RESOURCE_TYPE_CREDENTIAL)
         create_obj.show()
         # 更新Frame的尺寸
@@ -1960,7 +2295,7 @@ class MainWindow:
         button_save = tkinter.Button(nav_frame_r, text="保存", command=save_obj.save)
         button_save.place(x=10, y=self.height - 40, width=50, height=25)
         # ★创建“取消”按钮
-        button_cancel = tkinter.Button(nav_frame_r, text="取消", command=self.nav_frame_r_credential_page_display)  # 返回“凭据”界面
+        button_cancel = tkinter.Button(nav_frame_r, text="取消", command=self.nav_frame_r_credential_page_display)  # 返回credential界面
         button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
 
     def display_project_of_nav_frame_r_project_page(self):
@@ -1976,7 +2311,7 @@ class MainWindow:
         self.clear_tkinter_frame(nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)  # 创建画布
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
         # canvas.pack(fill=tkinter.X, expand=tkinter.TRUE)
         nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
         nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
@@ -2016,7 +2351,7 @@ class MainWindow:
         self.clear_tkinter_frame(nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)  # 创建画布
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
         nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
         nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
         nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
@@ -2181,10 +2516,10 @@ class MainWindow:
         label_host_count = tkinter.Label(self.nav_frame_r, text="主机数量: " + str(len(self.global_info.host_obj_list)))
         label_host_count.grid(row=3, column=0)
         label_inspect_code_count = tkinter.Label(self.nav_frame_r,
-                                                 text="inspect_code数量: " + str(len(self.global_info.inspect_code_obj_list)))
+                                                 text="巡检代码块数量: " + str(len(self.global_info.inspection_code_block_obj_list)))
         label_inspect_code_count.grid(row=4, column=0)
         label_inspect_template_count = tkinter.Label(self.nav_frame_r,
-                                                     text="inspect_template数量: " + str(len(self.global_info.inspect_template_obj_list)))
+                                                     text="巡检模板数量: " + str(len(self.global_info.inspection_template_obj_list)))
         label_inspect_template_count.grid(row=5, column=0)
 
     def refresh_label_current_time(self, label):
@@ -2290,7 +2625,7 @@ class CreateResourceInFrame:
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
         entry_credential_description = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_description"])
         entry_credential_description.grid(row=2, column=1, padx=2, pady=5)
-        # ★credential-项目
+        # ★credential-所属项目
         label_credential_project_oid = tkinter.Label(self.frame, text="项目")
         label_credential_project_oid.grid(row=3, column=0, padx=2, pady=5)
         project_obj_name_list = []
@@ -2325,9 +2660,35 @@ class CreateResourceInFrame:
         label_credential_privilege_escalation_method = tkinter.Label(self.frame, text="privilege_escalation_method")
         label_credential_privilege_escalation_method.grid(row=8, column=0, padx=2, pady=5)
         privilege_escalation_method_list = ["su", "sudo"]
-        self.resource_info_dict["combobox_privilege_escalation_method"] = ttk.Combobox(self.frame, values=privilege_escalation_method_list,
-                                                                                       state="readonly")
+        self.resource_info_dict["combobox_privilege_escalation_method"] = \
+            ttk.Combobox(self.frame, values=privilege_escalation_method_list, state="readonly")
         self.resource_info_dict["combobox_privilege_escalation_method"].grid(row=8, column=1, padx=2, pady=5)
+        # ★credential-提权用户
+        label_credential_privilege_escalation_username = tkinter.Label(self.frame, text="privilege_escalation_username")
+        label_credential_privilege_escalation_username.grid(row=9, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_privilege_escalation_username"] = tkinter.StringVar()
+        entry_credential_privilege_escalation_username = tkinter.Entry(self.frame, textvariable=self.resource_info_dict[
+            "sv_privilege_escalation_username"])
+        entry_credential_privilege_escalation_username.grid(row=9, column=1, padx=2, pady=5)
+        # ★credential-提权密码
+        label_credential_privilege_escalation_password = tkinter.Label(self.frame, text="privilege_escalation_password")
+        label_credential_privilege_escalation_password.grid(row=10, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_privilege_escalation_password"] = tkinter.StringVar()
+        entry_credential_privilege_escalation_password = tkinter.Entry(self.frame, textvariable=self.resource_info_dict[
+            "sv_privilege_escalation_password"])
+        entry_credential_privilege_escalation_password.grid(row=10, column=1, padx=2, pady=5)
+        # ★credential-auth_url
+        label_credential_auth_url = tkinter.Label(self.frame, text="auth_url")
+        label_credential_auth_url.grid(row=11, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_auth_url"] = tkinter.StringVar()
+        entry_credential_auth_url = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_auth_url"])
+        entry_credential_auth_url.grid(row=11, column=1, padx=2, pady=5)
+        # ★credential-ssl_verify
+        label_credential_ssl_verify = tkinter.Label(self.frame, text="ssl_verify")
+        label_credential_ssl_verify.grid(row=12, column=0, padx=2, pady=5)
+        ssl_verify_name_list = ["No", "Yes"]
+        self.resource_info_dict["combobox_ssl_verify"] = ttk.Combobox(self.frame, values=ssl_verify_name_list, state="readonly")
+        self.resource_info_dict["combobox_ssl_verify"].grid(row=12, column=1, padx=2, pady=5)
 
 
 class ListResourceInFrame:
@@ -2367,7 +2728,9 @@ class ListResourceInFrame:
             button_view = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="查看", command=view_obj.show)
             button_view.grid(row=index + 1, column=2, padx=2, pady=5)
             # 编辑对象信息
-            button_edit = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑")
+            edit_obj = EditResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
+                                           RESOURCE_TYPE_PROJECT)
+            button_edit = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑", command=edit_obj.show)
             button_edit.grid(row=index + 1, column=3, padx=2, pady=5)
             # 删除对象
             delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
@@ -2392,7 +2755,9 @@ class ListResourceInFrame:
             button_view = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="查看", command=view_obj.show)
             button_view.grid(row=index + 1, column=2, padx=2, pady=5)
             # 编辑对象信息
-            button_edit = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑")
+            edit_obj = EditResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
+                                           RESOURCE_TYPE_CREDENTIAL)
+            button_edit = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑", command=edit_obj.show)
             button_edit.grid(row=index + 1, column=3, padx=2, pady=5)
             # 删除对象
             delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
@@ -2424,6 +2789,24 @@ class ViewResourceInFrame:
             self.view_credential()
         else:
             print("resource_type is Unknown")
+        self.update_frame()
+
+    def update_frame(self):
+        # 更新Frame的尺寸
+        self.nav_frame_r_widget_dict["frame"].update_idletasks()
+        self.nav_frame_r_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
+                          self.nav_frame_r_widget_dict["frame"].winfo_height()))
+
+        def proces_mouse_scroll(event):
+            if event.delta > 0:
+                self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+            else:
+                self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+
+        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", proces_mouse_scroll)
+        # 滚动条移到最开头
+        self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
 
     def view_project(self):
         # ★查看-project
@@ -2438,34 +2821,376 @@ class ViewResourceInFrame:
         # ★project-描述
         project_description = "描述" + ": " + self.resource_obj.description + "\n"
         obj_info_text.insert(tkinter.END, project_description)
+        # ★credential-create_timestamp
+        credential_create_timestamp = "create_timestamp" + ": " \
+                                      + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.create_timestamp)) + "\n"
+        obj_info_text.insert(tkinter.END, credential_create_timestamp)
+        # ★credential-last_modify_timestamp
+        if self.resource_obj.last_modify_timestamp < 1:
+            last_modify_timestamp = self.resource_obj.create_timestamp
+        else:
+            last_modify_timestamp = self.resource_obj.last_modify_timestamp
+        credential_last_modify_timestamp = "last_modify_timestamp" + ": " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(
+            last_modify_timestamp)) + "\n"
+        obj_info_text.insert(tkinter.END, credential_last_modify_timestamp)
+        # 显示info Text文本框
         obj_info_text.pack()
-        # 滚动条移到最开头
-        self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
-        # ★返回“项目列表”界面
+        # ★★添加返回“项目列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
                                        command=self.main_window.display_project_of_nav_frame_r_project_page)  # 返回“项目列表”
         button_return.pack()
 
     def view_credential(self):
-        # ★查看-credential
-        print("查看项目")
-        print(self.resource_obj)
-        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
-        obj_info_text.insert(tkinter.END, "★★ 查看项目 ★★\n")
+        # 查看-credential
+        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
+        obj_info_text.insert(tkinter.END, "★★ 查看凭据 ★★\n")
         # ★credential-名称
         credential_name = "名称" + ": " + self.resource_obj.name + "\n"
         print(credential_name)
         obj_info_text.insert(tkinter.END, credential_name)
+        # ★credential-id
+        credential_oid = "凭据id" + ": " + self.resource_obj.oid + "\n"
+        obj_info_text.insert(tkinter.END, credential_oid)
         # ★credential-描述
         credential_description = "描述" + ": " + self.resource_obj.description + "\n"
         obj_info_text.insert(tkinter.END, credential_description)
+        # ★credential-所属项目
+        if self.global_info.get_project_by_oid(self.resource_obj.project_oid) is None:  # ★凡是有根据oid查找资源对象的，都要处理None的情况
+            project_name = "Unknown!"
+        else:
+            project_name = self.global_info.get_project_by_oid(self.resource_obj.project_oid).name
+        credential_project_name = "所属项目" + ": " + project_name + "\n"
+        obj_info_text.insert(tkinter.END, credential_project_name)
+        credential_project_oid = "项目id" + ": " + self.resource_obj.project_oid + "\n"
+        obj_info_text.insert(tkinter.END, credential_project_oid)
+        # ★credential-cred_type
+        cred_type_name_list = ["ssh_password", "ssh_key", "telnet", "ftp", "registry", "git"]
+        credential_cred_type = "凭据类型" + ": " + cred_type_name_list[self.resource_obj.cred_type] + "\n"
+        obj_info_text.insert(tkinter.END, credential_cred_type)
+        # ★credential-username
+        credential_username = "username" + ": " + self.resource_obj.username + "\n"
+        obj_info_text.insert(tkinter.END, credential_username)
+        # ★credential-password
+        credential_password = "password" + ": " + self.resource_obj.password + "\n"
+        obj_info_text.insert(tkinter.END, credential_password)
+        # ★credential-private_key
+        credential_private_key = "private_key" + ": " + self.resource_obj.private_key + "\n"
+        obj_info_text.insert(tkinter.END, credential_private_key)
+        # ★credential-privilege_escalation_method
+        privilege_escalation_method_list = ["su", "sudo"]
+        credential_privilege_escalation_method = "privilege_escalation_method" + ": " + privilege_escalation_method_list[
+            self.resource_obj.privilege_escalation_method] + "\n"
+        obj_info_text.insert(tkinter.END, credential_privilege_escalation_method)
+        # ★credential-privilege_escalation_username
+        credential_privilege_escalation_username = "privilege_escalation_username" \
+                                                   + ": " + self.resource_obj.privilege_escalation_username + "\n"
+        obj_info_text.insert(tkinter.END, credential_privilege_escalation_username)
+        # ★credential-privilege_escalation_password
+        credential_privilege_escalation_password = "privilege_escalation_password" \
+                                                   + ": " + self.resource_obj.privilege_escalation_password + "\n"
+        obj_info_text.insert(tkinter.END, credential_privilege_escalation_password)
+        # ★credential-auth_url
+        credential_auth_url = "auth_url" + ": " + self.resource_obj.auth_url + "\n"
+        obj_info_text.insert(tkinter.END, credential_auth_url)
+        # ★credential-ssl_verify
+        ssl_verify_list = ["su", "sudo"]
+        credential_ssl_verify = "ssl_verify" + ": " + ssl_verify_list[self.resource_obj.ssl_verify] + "\n"
+        obj_info_text.insert(tkinter.END, credential_ssl_verify)
+        # ★credential-create_timestamp
+        credential_create_timestamp = "create_timestamp" + ": " \
+                                      + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.create_timestamp)) + "\n"
+        obj_info_text.insert(tkinter.END, credential_create_timestamp)
+        # ★credential-last_modify_timestamp
+        if self.resource_obj.last_modify_timestamp < 1:
+            last_modify_timestamp = self.resource_obj.create_timestamp
+        else:
+            last_modify_timestamp = self.resource_obj.last_modify_timestamp
+        credential_last_modify_timestamp = "last_modify_timestamp" + ": " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(
+            last_modify_timestamp)) + "\n"
+        obj_info_text.insert(tkinter.END, credential_last_modify_timestamp)
+        # 显示info Text文本框
         obj_info_text.pack()
+        # ★★添加“返回项目列表”按钮★★
+        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
+                                       command=self.main_window.display_credential_of_nav_frame_r_credential_page)  # 返回项目列表
+        button_return.pack()
+
+
+class EditResourceInFrame:
+    """
+    在主窗口的查看资源界面，添加用于编辑资源信息的控件
+    """
+
+    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, resource_obj=None,
+                 resource_type=RESOURCE_TYPE_PROJECT):
+        self.main_window = main_window
+        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.global_info = global_info
+        self.resource_obj = resource_obj
+        self.resource_type = resource_type
+        self.resource_info_dict = {}  # 用于存储资源对象信息的diction
+
+    def show(self):  # 入口函数
+        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+            widget.destroy()
+        if self.resource_type == RESOURCE_TYPE_PROJECT:
+            self.edit_project()
+        elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
+            self.edit_credential()
+        else:
+            print("resource_type is Unknown")
+        self.update_frame()  # 更新Frame的尺寸
+
+    def update_frame(self):
+        # 更新Frame的尺寸
+        self.nav_frame_r_widget_dict["frame"].update_idletasks()
+        self.nav_frame_r_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
+                          self.nav_frame_r_widget_dict["frame"].winfo_height()))
+
+        def proces_mouse_scroll(event):
+            if event.delta > 0:
+                self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+            else:
+                self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+
+        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", proces_mouse_scroll)
         # 滚动条移到最开头
         self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
-        # ★返回“项目列表”界面
+
+    def edit_project(self):
+        # ★编辑-project
+        label_create_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑凭据 ★★")
+        label_create_project.grid(row=0, column=0, padx=2, pady=5)
+        # ★project-名称
+        label_project_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据名称")
+        label_project_name.grid(row=1, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_project_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_project_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
+        entry_project_name.grid(row=1, column=1, padx=2, pady=5)
+        # ★project-描述
+        label_project_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
+        label_project_description.grid(row=2, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_project_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                  textvariable=self.resource_info_dict["sv_description"])
+        entry_project_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
+        entry_project_description.grid(row=2, column=1, padx=2, pady=5)
+        # ★创建“保存更新”按钮
+        save_obj = UpdateResourceInFrame(self.main_window, self.resource_info_dict, self.global_info, self.resource_obj,
+                                         RESOURCE_TYPE_PROJECT)
+        button_save = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="保存更新", command=save_obj.update)
+        button_save.grid(row=13, column=0, padx=2, pady=5)
+        # ★★添加“返回项目列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
-                                       command=self.main_window.display_credential_of_nav_frame_r_credential_page)  # 返回“项目列表”
-        button_return.pack()
+                                       command=self.main_window.display_project_of_nav_frame_r_project_page)  # 返回项目列表
+        button_return.grid(row=13, column=1, padx=2, pady=5)
+
+    def edit_credential(self):
+        # ★编辑-credential
+        label_create_credential = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑凭据 ★★")
+        label_create_credential.grid(row=0, column=0, padx=2, pady=5)
+        # ★credential-名称
+        label_credential_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据名称")
+        label_credential_name.grid(row=1, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_credential_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_credential_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
+        entry_credential_name.grid(row=1, column=1, padx=2, pady=5)
+        # ★credential-描述
+        label_credential_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
+        label_credential_description.grid(row=2, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_credential_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                     textvariable=self.resource_info_dict["sv_description"])
+        entry_credential_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
+        entry_credential_description.grid(row=2, column=1, padx=2, pady=5)
+        # ★credential-所属项目
+        label_credential_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
+        label_credential_project_oid.grid(row=3, column=0, padx=2, pady=5)
+        project_obj_name_list = []
+        project_obj_index = 0
+        index = 0
+        for project_obj in self.global_info.project_obj_list:
+            project_obj_name_list.append(project_obj.name)
+            if self.resource_obj.project_oid == project_obj.oid:
+                project_obj_index = index
+            index += 1
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+                                                                   state="readonly")
+        self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=2, pady=5)
+        # ★credential-凭据类型
+        label_credential_type = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据类型")
+        label_credential_type.grid(row=4, column=0, padx=2, pady=5)
+        cred_type_name_list = ["ssh_password", "ssh_key", "telnet", "ftp", "registry", "git"]
+        self.resource_info_dict["combobox_cred_type"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=cred_type_name_list,
+                                                                     state="readonly")
+        if self.resource_obj.cred_type != -1:
+            self.resource_info_dict["combobox_cred_type"].current(self.resource_obj.cred_type)  # 显示初始值，可重新选择
+        self.resource_info_dict["combobox_cred_type"].grid(row=4, column=1, padx=2, pady=5)
+        # ★credential-用户名
+        label_credential_username = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="username")
+        label_credential_username.grid(row=5, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_username"] = tkinter.StringVar()
+        entry_credential_username = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                  textvariable=self.resource_info_dict["sv_username"])
+        entry_credential_username.insert(0, self.resource_obj.username)  # 显示初始值，可编辑
+        entry_credential_username.grid(row=5, column=1, padx=2, pady=5)
+        # ★credential-密码
+        label_credential_password = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="password")
+        label_credential_password.grid(row=6, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_password"] = tkinter.StringVar()
+        entry_credential_password = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                  textvariable=self.resource_info_dict["sv_password"])
+        entry_credential_password.insert(0, self.resource_obj.password)  # 显示初始值，可编辑
+        entry_credential_password.grid(row=6, column=1, padx=2, pady=5)
+        # ★credential-密钥
+        label_credential_private_key = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssh_private_key")
+        label_credential_private_key.grid(row=7, column=0, padx=2, pady=5)
+        self.resource_info_dict["text_private_key"] = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], height=3, width=32)
+        self.resource_info_dict["text_private_key"].insert(1.0, self.resource_obj.password)  # 显示初始值，可编辑
+        self.resource_info_dict["text_private_key"].grid(row=7, column=1, padx=2, pady=5)
+        # ★credential-提权类型
+        label_credential_privilege_escalation_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+                                                                     text="privilege_escalation_method")
+        label_credential_privilege_escalation_method.grid(row=8, column=0, padx=2, pady=5)
+        privilege_escalation_method_list = ["su", "sudo"]
+        self.resource_info_dict["combobox_privilege_escalation_method"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                                                       values=privilege_escalation_method_list,
+                                                                                       state="readonly")
+        if self.resource_obj.privilege_escalation_method != -1:
+            self.resource_info_dict["combobox_privilege_escalation_method"].current(self.resource_obj.privilege_escalation_method)
+        self.resource_info_dict["combobox_privilege_escalation_method"].grid(row=8, column=1, padx=2, pady=5)
+        # ★credential-提权用户
+        label_credential_privilege_escalation_username = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+                                                                       text="privilege_escalation_username")
+        label_credential_privilege_escalation_username.grid(row=9, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_privilege_escalation_username"] = tkinter.StringVar()
+        entry_credential_privilege_escalation_username = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                                       textvariable=self.resource_info_dict[
+                                                                           "sv_privilege_escalation_username"])
+        entry_credential_privilege_escalation_username.insert(0, self.resource_obj.privilege_escalation_username)  # 显示初始值，可编辑
+        entry_credential_privilege_escalation_username.grid(row=9, column=1, padx=2, pady=5)
+        # ★credential-提权密码
+        label_credential_privilege_escalation_password = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+                                                                       text="privilege_escalation_password")
+        label_credential_privilege_escalation_password.grid(row=10, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_privilege_escalation_password"] = tkinter.StringVar()
+        entry_credential_privilege_escalation_password = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                                       textvariable=self.resource_info_dict[
+                                                                           "sv_privilege_escalation_password"])
+        entry_credential_privilege_escalation_password.insert(0, self.resource_obj.privilege_escalation_password)  # 显示初始值，可编辑
+        entry_credential_privilege_escalation_password.grid(row=10, column=1, padx=2, pady=5)
+        # ★credential-auth_url
+        label_credential_auth_url = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="auth_url")
+        label_credential_auth_url.grid(row=11, column=0, padx=2, pady=5)
+        self.resource_info_dict["sv_auth_url"] = tkinter.StringVar()
+        entry_credential_auth_url = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                  textvariable=self.resource_info_dict["sv_auth_url"])
+        entry_credential_auth_url.insert(0, self.resource_obj.auth_url)  # 显示初始值，可编辑
+        entry_credential_auth_url.grid(row=11, column=1, padx=2, pady=5)
+        # ★credential-ssl_verify
+        label_credential_ssl_verify = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssl_verify")
+        label_credential_ssl_verify.grid(row=12, column=0, padx=2, pady=5)
+        ssl_verify_name_list = ["No", "Yes"]
+        self.resource_info_dict["combobox_ssl_verify"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=ssl_verify_name_list,
+                                                                      state="readonly")
+        if self.resource_obj.ssl_verify != -1:
+            self.resource_info_dict["combobox_ssl_verify"].current(self.resource_obj.ssl_verify)  # 显示初始值
+        self.resource_info_dict["combobox_ssl_verify"].grid(row=12, column=1, padx=2, pady=5)
+        # ★创建“保存更新”按钮
+        save_obj = UpdateResourceInFrame(self.main_window, self.resource_info_dict, self.global_info, self.resource_obj,
+                                         RESOURCE_TYPE_CREDENTIAL)
+        button_save = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="保存更新", command=save_obj.update)
+        button_save.grid(row=13, column=0, padx=2, pady=5)
+        # ★★添加“返回凭据列表”按钮★★
+        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回凭据列表",
+                                       command=self.main_window.display_credential_of_nav_frame_r_credential_page)  # 返回凭据列表
+        button_return.grid(row=13, column=1, padx=2, pady=5)
+
+
+class UpdateResourceInFrame:
+    """
+    在主窗口的创建资源界面，点击“保存更新”按钮时，更新并保存资源信息
+    """
+
+    def __init__(self, main_window=None, resource_info_dict=None, global_info=None, resource_obj=None,
+                 resource_type=None):
+        self.main_window = main_window
+        self.resource_info_dict = resource_info_dict
+        self.global_info = global_info
+        self.resource_obj = resource_obj
+        self.resource_type = resource_type
+
+    def update(self):  # 入口函数
+        if self.resource_type == RESOURCE_TYPE_PROJECT:
+            self.update_project()
+        elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
+            self.update_credential()
+        else:
+            print("resource_type is Unknown")
+
+    def update_project(self):
+        project_name = self.resource_info_dict["sv_name"].get()
+        project_description = self.resource_info_dict["sv_description"].get()
+        print(project_name, project_description)
+        # 更新-project
+        if project_name == '':
+            messagebox.showinfo("创建项目-Error", f"项目名称不能为空")
+        elif len(project_name) > 128:
+            messagebox.showinfo("创建项目-Error", f"项目名称>128字符")
+        elif len(project_description) > 256:
+            messagebox.showinfo("创建项目-Error", f"项目描述>256字符")
+        else:
+            self.resource_obj.update(name=project_name, description=project_description, global_info=self.global_info)
+            self.main_window.display_project_of_nav_frame_r_project_page()  # 保存项目信息后，返回项目展示页面
+
+    def update_credential(self):
+        credential_name = self.resource_info_dict["sv_name"].get()
+        credential_description = self.resource_info_dict["sv_description"].get()
+        # 凡是combobox未选择的（值为-1）都要设置为默认值0
+        if self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid == -1:
+            credential_project_oid = 0
+        else:
+            credential_project_oid = self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid
+        if self.resource_info_dict["combobox_cred_type"].current() == -1:
+            credential_cred_type = 0
+        else:
+            credential_cred_type = self.resource_info_dict["combobox_cred_type"].current()
+        credential_username = self.resource_info_dict["sv_username"].get()
+        credential_password = self.resource_info_dict["sv_password"].get()
+        credential_private_key = self.resource_info_dict["text_private_key"].get("1.0", tkinter.END)
+        if self.resource_info_dict["combobox_privilege_escalation_method"].current() == -1:
+            credential_privilege_escalation_method = 0
+        else:
+            credential_privilege_escalation_method = self.resource_info_dict["combobox_privilege_escalation_method"].current()
+        credential_privilege_escalation_username = self.resource_info_dict["sv_privilege_escalation_username"].get()
+        credential_privilege_escalation_password = self.resource_info_dict["sv_privilege_escalation_password"].get()
+        credential_auth_url = self.resource_info_dict["sv_auth_url"].get()
+        if self.resource_info_dict["combobox_ssl_verify"].current() == -1:
+            credential_ssl_verify = 0
+        else:
+            credential_ssl_verify = self.resource_info_dict["combobox_ssl_verify"].current()
+        # 更新-credential
+        if credential_name == '':
+            messagebox.showinfo("创建凭据-Error", f"凭据名称不能为空")
+        elif len(credential_name) > 128:
+            messagebox.showinfo("创建凭据-Error", f"凭据名称>128字符")
+        elif len(credential_description) > 256:
+            messagebox.showinfo("创建凭据-Error", f"凭据描述>256字符")
+        else:
+            self.resource_obj.update(name=credential_name, description=credential_description, project_oid=credential_project_oid,
+                                     cred_type=credential_cred_type,
+                                     username=credential_username, password=credential_password, private_key=credential_private_key,
+                                     privilege_escalation_method=credential_privilege_escalation_method,
+                                     privilege_escalation_username=credential_privilege_escalation_username,
+                                     privilege_escalation_password=credential_privilege_escalation_password,
+                                     auth_url=credential_auth_url,
+                                     ssl_verify=credential_ssl_verify,
+                                     global_info=self.global_info)
+            self.main_window.display_credential_of_nav_frame_r_credential_page()  # 保存credential信息后，返回“显示credential列表”页面
 
 
 class DeleteResourceInFrame:
@@ -2541,12 +3266,29 @@ class SaveResourceInMainWindow:
     def save_credential(self):
         credential_name = self.resource_info_dict["sv_name"].get()
         credential_description = self.resource_info_dict["sv_description"].get()
-        credential_project_oid = self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid
-        credential_cred_type = self.resource_info_dict["combobox_cred_type"].current()
+        # 凡是combobox未选择的（值为-1）都要设置为默认值0
+        if self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid == -1:
+            credential_project_oid = 0
+        else:
+            credential_project_oid = self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid
+        if self.resource_info_dict["combobox_cred_type"].current() == -1:
+            credential_cred_type = 0
+        else:
+            credential_cred_type = self.resource_info_dict["combobox_cred_type"].current()
         credential_username = self.resource_info_dict["sv_username"].get()
         credential_password = self.resource_info_dict["sv_password"].get()
         credential_private_key = self.resource_info_dict["text_private_key"].get("1.0", tkinter.END)
-        credential_privilege_escalation_method = self.resource_info_dict["combobox_privilege_escalation_method"].current()
+        if self.resource_info_dict["combobox_privilege_escalation_method"].current() == -1:
+            credential_privilege_escalation_method = 0
+        else:
+            credential_privilege_escalation_method = self.resource_info_dict["combobox_privilege_escalation_method"].current()
+        credential_privilege_escalation_username = self.resource_info_dict["sv_privilege_escalation_username"].get()
+        credential_privilege_escalation_password = self.resource_info_dict["sv_privilege_escalation_password"].get()
+        credential_auth_url = self.resource_info_dict["sv_auth_url"].get()
+        if self.resource_info_dict["combobox_ssl_verify"].current() == -1:
+            credential_ssl_verify = 0
+        else:
+            credential_ssl_verify = self.resource_info_dict["combobox_ssl_verify"].current()
         # print(credential_name, credential_description)
         # 创建credential
         if credential_name == '':
@@ -2561,7 +3303,12 @@ class SaveResourceInMainWindow:
             credential = Credential(name=credential_name, description=credential_description, project_oid=credential_project_oid,
                                     cred_type=credential_cred_type,
                                     username=credential_username, password=credential_password, private_key=credential_private_key,
-                                    privilege_escalation_method=credential_privilege_escalation_method, global_info=self.global_info)
+                                    privilege_escalation_method=credential_privilege_escalation_method,
+                                    privilege_escalation_username=credential_privilege_escalation_username,
+                                    privilege_escalation_password=credential_privilege_escalation_password,
+                                    auth_url=credential_auth_url,
+                                    ssl_verify=credential_ssl_verify,
+                                    global_info=self.global_info)
             credential.save()
             self.global_info.credential_obj_list.append(credential)
             self.main_window.nav_frame_r_credential_page_display()  # 保存credential信息后，返回credential展示页面
