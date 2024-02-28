@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-02-27
+# update: 2024-02-28
 
 """
 解决问题：
@@ -84,7 +84,6 @@ RESOURCE_TYPE_HOST = 2
 RESOURCE_TYPE_HOST_GROUP = 3
 RESOURCE_TYPE_INSPECTION_CODE_BLOCK = 4
 RESOURCE_TYPE_INSPECTION_TEMPLATE = 5
-VIEW_WIDTH = 20
 
 
 class Project:
@@ -373,12 +372,10 @@ class Host:
         self.login_protocol = login_protocol
         self.first_auth_method = first_auth_method
         self.credential_oid_list = []  # 元素为 Credential对象的cred_oid
-        self.credential_obj_list = []  # 元素为 Credential对象（此信息不保存到数据库）
         self.global_info = global_info
 
     def add_credential(self, credential_object):  # 每台主机都会绑定一个或多个不同类型的登录/访问认证凭据
         self.credential_oid_list.append(credential_object.oid)
-        self.credential_obj_list.append(credential_object)
 
     def save(self):
         sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
@@ -521,18 +518,14 @@ class HostGroup:
         self.last_modify_timestamp = last_modify_timestamp  # <float>
         self.host_oid_list = []
         self.host_group_oid_list = []  # 不能包含自己
-        self.host_obj_list = []  # 元素为对象（此信息不保存到数据库）
-        self.host_group_obj_list = []  # 元素为对象（此信息不保存到数据库）不能包含自己
         self.global_info = global_info
 
     def add_host(self, host):
         self.host_oid_list.append(host.oid)
-        self.host_obj_list.append(host)
 
     def add_host_group(self, host_group):  # 不能包含自己
         if host_group.oid != self.oid:
             self.host_group_oid_list.append(host_group.oid)
-            self.host_group_obj_list.append(host_group)
         else:
             pass
 
@@ -1994,6 +1987,84 @@ class GlobalInfo:
                 return project
         return None
 
+    def get_credential_by_oid(self, oid):
+        for credential in self.credential_obj_list:
+            if credential.oid == oid:
+                return credential
+        return None
+
+    def get_host_by_oid(self, oid):
+        for host in self.host_obj_list:
+            if host.oid == oid:
+                return host
+        return None
+
+    def get_host_group_by_oid(self, oid):
+        for host_group in self.host_group_obj_list:
+            if host_group.oid == oid:
+                return host_group
+        return None
+
+    def get_inspection_code_block_by_oid(self, oid):
+        for inspection_code_block in self.inspection_code_block_obj_list:
+            if inspection_code_block.oid == oid:
+                return inspection_code_block
+        return None
+
+    def get_inspection_template_by_oid(self, oid):
+        for inspection_template in self.inspection_template_obj_list:
+            if inspection_template.oid == oid:
+                return inspection_template
+        return None
+
+    def get_project_obj_index_of_list_by_oid(self, oid):
+        index = 0
+        for obj in self.project_obj_list:
+            if obj.oid == oid:
+                return index
+            index += 1
+        return None
+
+    def get_credential_obj_index_of_list_by_oid(self, oid):
+        index = 0
+        for obj in self.credential_obj_list:
+            if obj.oid == oid:
+                return index
+            index += 1
+        return None
+
+    def get_host_obj_index_of_list_by_oid(self, oid):
+        index = 0
+        for obj in self.host_obj_list:
+            if obj.oid == oid:
+                return index
+            index += 1
+        return None
+
+    def get_host_group_obj_index_of_list_by_oid(self, oid):
+        index = 0
+        for obj in self.host_group_obj_list:
+            if obj.oid == oid:
+                return index
+            index += 1
+        return None
+
+    def get_inspection_code_block_obj_index_of_list_by_oid(self, oid):
+        index = 0
+        for obj in self.inspection_code_block_obj_list:
+            if obj.oid == oid:
+                return index
+            index += 1
+        return None
+
+    def get_inspection_template_obj_index_of_list_by_oid(self, oid):
+        index = 0
+        for obj in self.inspection_template_obj_list:
+            if obj.oid == oid:
+                return index
+            index += 1
+        return None
+
     def delete_project_obj_by_oid(self, oid):
         """
         根据项目oid/uuid<str>删除项目对象
@@ -2078,6 +2149,14 @@ class GlobalInfo:
         result = sqlite_cursor.fetchall()
         if len(result) != 0:  # 若查询到有此表，才删除相应数据
             sql = f"delete from tb_host where oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_host_credential_oid_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE \
+                    "type"="table" and "tbl_name"="tb_host_include_credential_oid_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_host_include_credential_oid_list where host_oid='{obj.oid}'"
             sqlite_cursor.execute(sql)
         sqlite_cursor.close()
         sqlite_conn.commit()
@@ -2223,6 +2302,9 @@ class MainWindow:
         self.global_info = global_info  # <GlobalInfo>对象
         self.current_project = current_project
         self.about_info = "CofAble，自动化巡检平台，版本: v1.0\n本软件使用GPL-v3.0协议开源，作者: Cof-Lee"
+        self.padx = 2
+        self.pady = 2
+        self.view_width = 20
 
     @staticmethod
     def clear_tkinter_frame(frame):
@@ -2268,35 +2350,35 @@ class MainWindow:
         # Project项目-选项按钮
         menu_button_project = tkinter.Button(self.nav_frame_l, text="Project项目", width=self.nav_frame_l_width, height=2, bg="white",
                                              command=lambda: self.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_PROJECT))
-        menu_button_project.pack(padx=2, pady=2)
+        menu_button_project.pack(padx=self.padx, pady=self.pady)
         # Credentials凭据-选项按钮
         menu_button_credential = tkinter.Button(self.nav_frame_l, text="Credentials凭据", width=self.nav_frame_l_width, height=2,
                                                 bg="white",
                                                 command=lambda: self.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_CREDENTIAL))
-        menu_button_credential.pack(padx=2, pady=2)
+        menu_button_credential.pack(padx=self.padx, pady=self.pady)
         # Host主机管理-选项按钮
         menu_button_host = tkinter.Button(self.nav_frame_l, text="Host主机管理", width=self.nav_frame_l_width, height=2, bg="white",
                                           command=lambda: self.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST))
-        menu_button_host.pack(padx=2, pady=2)
+        menu_button_host.pack(padx=self.padx, pady=self.pady)
         # Host_group主机组管理-选项按钮
         menu_button_host = tkinter.Button(self.nav_frame_l, text="HostGroup管理", width=self.nav_frame_l_width, height=2, bg="white",
                                           command=lambda: self.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST_GROUP))
-        menu_button_host.pack(padx=2, pady=2)
+        menu_button_host.pack(padx=self.padx, pady=self.pady)
         # Inspect巡检代码-选项按钮
         menu_button_inspect_code = tkinter.Button(self.nav_frame_l, text="Inspect巡检代码", width=self.nav_frame_l_width, height=2,
                                                   bg="white",
                                                   command=lambda: self.nav_frame_r_resource_top_page_display(
                                                       RESOURCE_TYPE_INSPECTION_CODE_BLOCK))
-        menu_button_inspect_code.pack(padx=2, pady=2)
+        menu_button_inspect_code.pack(padx=self.padx, pady=self.pady)
         # Template巡检模板-选项按钮
         menu_button_inspection_template = tkinter.Button(self.nav_frame_l, text="Template巡检模板", width=self.nav_frame_l_width,
                                                          height=2, bg="white",
                                                          command=lambda: self.nav_frame_r_resource_top_page_display(
                                                              RESOURCE_TYPE_INSPECTION_TEMPLATE))
-        menu_button_inspection_template.pack(padx=2, pady=2)
+        menu_button_inspection_template.pack(padx=self.padx, pady=self.pady)
         # 时间-标签
         label_current_time = tkinter.Label(self.nav_frame_l, text=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-        label_current_time.pack(padx=2, pady=2)
+        label_current_time.pack(padx=self.padx, pady=self.pady)
         label_current_time.after(1000, self.refresh_label_current_time, label_current_time)
         # 当前项目-标签
         if self.global_info.current_project_obj is None:
@@ -2306,7 +2388,7 @@ class MainWindow:
         label_current_project = tkinter.Label(self.nav_frame_l, text=label_current_project_content,
                                               width=self.nav_frame_l_width, height=2)
 
-        label_current_project.pack(padx=2, pady=2)
+        label_current_project.pack(padx=self.padx, pady=self.pady)
 
     def create_nav_frame_r_init(self):  # 创建导航框架2-init界面的
         self.nav_frame_r = tkinter.Frame(self.window_obj, bg="blue", width=self.nav_frame_r_width, height=self.height)
@@ -2327,20 +2409,20 @@ class MainWindow:
         # 添加控件
         label_init = tkinter.Label(self.nav_frame_r, text="初始化界面")
         label_init.grid(row=0, column=0)
-        label_project_count_str = "项目数量".ljust(VIEW_WIDTH, " ") + ": " + str(len(self.global_info.project_obj_list))
+        label_project_count_str = "项目数量".ljust(self.view_width, " ") + ": " + str(len(self.global_info.project_obj_list))
         label_project_count = tkinter.Label(self.nav_frame_r, text=label_project_count_str)
         label_project_count.grid(row=1, column=0)
-        label_credential_count_str = "凭据数量".ljust(VIEW_WIDTH, " ") + ": " + str(len(self.global_info.credential_obj_list))
+        label_credential_count_str = "凭据数量".ljust(self.view_width, " ") + ": " + str(len(self.global_info.credential_obj_list))
         label_credential_count = tkinter.Label(self.nav_frame_r, text=label_credential_count_str)
         label_credential_count.grid(row=2, column=0)
-        label_host_count_str = "主机数量".ljust(VIEW_WIDTH, " ") + ": " + str(len(self.global_info.host_obj_list))
+        label_host_count_str = "主机数量".ljust(self.view_width, " ") + ": " + str(len(self.global_info.host_obj_list))
         label_host_count = tkinter.Label(self.nav_frame_r, text=label_host_count_str)
         label_host_count.grid(row=3, column=0)
-        label_inspect_code_count_str = "巡检代码块数量".ljust(VIEW_WIDTH - 6, " ") \
+        label_inspect_code_count_str = "巡检代码块数量".ljust(self.view_width - 6, " ") \
                                        + ": " + str(len(self.global_info.inspection_code_block_obj_list))
         label_inspect_code_count = tkinter.Label(self.nav_frame_r, text=label_inspect_code_count_str)
         label_inspect_code_count.grid(row=4, column=0)
-        label_inspect_template_count_str = "巡检模板数量".ljust(VIEW_WIDTH - 4, " ") + ": " \
+        label_inspect_template_count_str = "巡检模板数量".ljust(self.view_width - 4, " ") + ": " \
                                            + str(len(self.global_info.inspection_template_obj_list))
         label_inspect_template_count = tkinter.Label(self.nav_frame_r, text=label_inspect_template_count_str)
         label_inspect_template_count.grid(row=5, column=0)
@@ -2385,31 +2467,20 @@ class MainWindow:
         # 更新导航框架2
         nav_frame_r = self.window_obj.winfo_children()[2]
         nav_frame_r.__setitem__("bg", "green")
+        nav_frame_r_widget_dict = {}
         # 在框架2中添加canvas-frame滚动框
         self.clear_tkinter_frame(nav_frame_r)
-        scrollbar = tkinter.Scrollbar(nav_frame_r)
-        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        canvas = tkinter.Canvas(nav_frame_r, yscrollcommand=scrollbar.set)  # 创建画布
-        canvas.place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
-        scrollbar.config(command=canvas.yview)
-        frame = tkinter.Frame(canvas)
-        frame.pack()
-        canvas.create_window((0, 0), window=frame, anchor='nw')
+        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)  # 创建画布
+        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
+        nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
+        nav_frame_r_widget_dict["frame"].pack()
+        nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
         # ★在canvas - frame滚动框内添加创建资源控件
-        create_obj = CreateResourceInFrame(frame, self.global_info, resource_type)
+        create_obj = CreateResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, resource_type)
         create_obj.show()
-        # 更新Frame的尺寸
-        frame.update_idletasks()
-        canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
-
-        def proces_mouse_scroll(event):
-            nonlocal canvas
-            if event.delta > 0:
-                canvas.yview_scroll(-1, 'units')  # 向上移动
-            else:
-                canvas.yview_scroll(1, 'units')  # 向下移动
-
-        canvas.bind("<MouseWheel>", proces_mouse_scroll)
         # ★创建“保存”按钮
         save_obj = SaveResourceInMainWindow(self, create_obj.resource_info_dict, self.global_info, resource_type)
         button_save = tkinter.Button(nav_frame_r, text="保存", command=save_obj.save)
@@ -2419,9 +2490,9 @@ class MainWindow:
                                        command=lambda: self.nav_frame_r_resource_top_page_display(resource_type))  # 返回资源选项卡主界面
         button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
 
-    def display_resource_of_nav_frame_r_page(self, resource_type):
+    def list_resource_of_nav_frame_r_page(self, resource_type):
         """
-        ★★★★★ 显示资源-页面 ★★★★★
+        ★★★★★ 列出资源-页面 ★★★★★
         :return:
         """
         # 更新导航框架2
@@ -2442,19 +2513,6 @@ class MainWindow:
         # 在canvas-frame滚动框内添加资源列表控件
         list_obj = ListResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, resource_type)
         list_obj.show()
-        # 信息控件添加完毕
-        nav_frame_r_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
-        nav_frame_r_widget_dict["canvas"].configure(
-            scrollregion=(0, 0, nav_frame_r_widget_dict["frame"].winfo_width(), nav_frame_r_widget_dict["frame"].winfo_height()))
-
-        def proces_mouse_scroll(event):
-            nonlocal nav_frame_r_widget_dict
-            if event.delta > 0:
-                nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
-            else:
-                nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
-
-        nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", proces_mouse_scroll)
         # ★创建“返回”按钮
         button_cancel = tkinter.Button(nav_frame_r, text="返回",
                                        command=lambda: self.nav_frame_r_resource_top_page_display(resource_type))  # 返回资源选项卡主界面
@@ -2505,7 +2563,7 @@ class MainWindow:
                                                command=lambda: self.create_resource_of_nav_frame_r_page(resource_type))
         button_create_project.grid(row=0, column=1)
         button_display_project = tkinter.Button(nav_frame_r, text=text_display,
-                                                command=lambda: self.display_resource_of_nav_frame_r_page(resource_type))
+                                                command=lambda: self.list_resource_of_nav_frame_r_page(resource_type))
         button_display_project.grid(row=1, column=1)
 
     def show(self):
@@ -2530,119 +2588,273 @@ class CreateResourceInFrame:
     在主窗口的创建资源界面，添加用于输入资源信息的控件
     """
 
-    def __init__(self, frame=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
-        self.frame = frame
+    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
+        self.main_window = main_window
+        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
         self.global_info = global_info
         self.resource_type = resource_type
         self.resource_info_dict = {}  # 用于存储资源对象信息的diction
+        self.padx = 2
+        self.pady = 2
+
+    def proces_mouse_scroll(self, event):
+        if event.delta > 0:
+            self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+        else:
+            self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+
+    def update_frame(self):
+        # 更新Frame的尺寸
+        self.nav_frame_r_widget_dict["frame"].update_idletasks()
+        self.nav_frame_r_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
+                          self.nav_frame_r_widget_dict["frame"].winfo_height()))
+        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
+        # 滚动条移到最开头
+        self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
 
     def show(self):
-        for widget in self.frame.winfo_children():
+        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
             widget.destroy()
         if self.resource_type == RESOURCE_TYPE_PROJECT:
             self.create_project()
         elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
             self.create_credential()
+        elif self.resource_type == RESOURCE_TYPE_HOST:
+            self.create_host()
         else:
-            print("resource_type is Unknown")
+            print("<class CreateResourceInFrame> resource_type is Unknown")
+        self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
 
     def create_project(self):
         # ★创建-project
-        label_create_project = tkinter.Label(self.frame, text="★★ 创建项目 ★★")
-        label_create_project.grid(row=0, column=0, padx=2, pady=5)
+        label_create_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 创建项目 ★★")
+        label_create_project.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_create_project.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★project-名称
-        label_project_name = tkinter.Label(self.frame, text="项目名称")
-        label_project_name.grid(row=1, column=0, padx=2, pady=5)
+        label_project_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目名称")
+        label_project_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_project_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_project_name = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_name"])
-        entry_project_name.grid(row=1, column=1, padx=2, pady=5)
+        entry_project_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_project_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_project_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★project-描述
-        label_project_description = tkinter.Label(self.frame, text="描述")
-        label_project_description.grid(row=2, column=0, padx=2, pady=5)
+        label_project_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
+        label_project_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_project_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_project_description = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_description"])
-        entry_project_description.grid(row=2, column=1, padx=2, pady=5)
+        entry_project_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                  textvariable=self.resource_info_dict["sv_description"])
+        entry_project_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_project_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
 
     def create_credential(self):
         # ★创建-credential
-        label_create_credential = tkinter.Label(self.frame, text="★★ 创建凭据 ★★")
-        label_create_credential.grid(row=0, column=0, padx=2, pady=5)
+        label_create_credential = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 创建凭据 ★★")
+        label_create_credential.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_create_credential.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★credential-名称
-        label_credential_name = tkinter.Label(self.frame, text="凭据名称")
-        label_credential_name.grid(row=1, column=0, padx=2, pady=5)
+        label_credential_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据名称")
+        label_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_credential_name = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_name"])
-        entry_credential_name.grid(row=1, column=1, padx=2, pady=5)
+        entry_credential_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★credential-描述
-        label_credential_description = tkinter.Label(self.frame, text="描述")
-        label_credential_description.grid(row=2, column=0, padx=2, pady=5)
+        label_credential_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
+        label_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_credential_description = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_description"])
-        entry_credential_description.grid(row=2, column=1, padx=2, pady=5)
+        entry_credential_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                     textvariable=self.resource_info_dict["sv_description"])
+        entry_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★credential-所属项目
-        label_credential_project_oid = tkinter.Label(self.frame, text="项目")
-        label_credential_project_oid.grid(row=3, column=0, padx=2, pady=5)
+        label_credential_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
+        label_credential_project.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
-        for obj in self.global_info.project_obj_list:
-            project_obj_name_list.append(obj.name)
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.frame, values=project_obj_name_list, state="readonly")
-        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=2, pady=5)
+        for project_obj in self.global_info.project_obj_list:
+            project_obj_name_list.append(project_obj.name)
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+                                                                   state="readonly")
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★credential-凭据类型
-        label_credential_type = tkinter.Label(self.frame, text="凭据类型")
-        label_credential_type.grid(row=4, column=0, padx=2, pady=5)
+        label_credential_type = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据类型")
+        label_credential_type.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_type.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         cred_type_name_list = ["ssh_password", "ssh_key", "telnet", "ftp", "registry", "git"]
-        self.resource_info_dict["combobox_cred_type"] = ttk.Combobox(self.frame, values=cred_type_name_list, state="readonly")
-        self.resource_info_dict["combobox_cred_type"].grid(row=4, column=1, padx=2, pady=5)
+        self.resource_info_dict["combobox_cred_type"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=cred_type_name_list,
+                                                                     state="readonly")
+        self.resource_info_dict["combobox_cred_type"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★credential-用户名
-        label_credential_username = tkinter.Label(self.frame, text="username")
-        label_credential_username.grid(row=5, column=0, padx=2, pady=5)
+        label_credential_username = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="username")
+        label_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_username.grid(row=5, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_username"] = tkinter.StringVar()
-        entry_credential_username = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_username"])
-        entry_credential_username.grid(row=5, column=1, padx=2, pady=5)
+        entry_credential_username = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                  textvariable=self.resource_info_dict["sv_username"])
+        entry_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_username.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★credential-密码
-        label_credential_password = tkinter.Label(self.frame, text="password")
-        label_credential_password.grid(row=6, column=0, padx=2, pady=5)
+        label_credential_password = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="password")
+        label_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_password.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_password"] = tkinter.StringVar()
-        entry_credential_password = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_password"])
-        entry_credential_password.grid(row=6, column=1, padx=2, pady=5)
+        entry_credential_password = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                  textvariable=self.resource_info_dict["sv_password"])
+        entry_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_password.grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★credential-密钥
-        label_credential_private_key = tkinter.Label(self.frame, text="ssh_private_key")
-        label_credential_private_key.grid(row=7, column=0, padx=2, pady=5)
-        self.resource_info_dict["text_private_key"] = tkinter.Text(master=self.frame, height=3, width=32)
-        self.resource_info_dict["text_private_key"].grid(row=7, column=1, padx=2, pady=5)
+        label_credential_private_key = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssh_private_key")
+        label_credential_private_key.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_private_key.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["text_private_key"] = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], height=3, width=32)
+        self.resource_info_dict["text_private_key"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权类型
-        label_credential_privilege_escalation_method = tkinter.Label(self.frame, text="privilege_escalation_method")
-        label_credential_privilege_escalation_method.grid(row=8, column=0, padx=2, pady=5)
+        label_credential_privilege_escalation_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+                                                                     text="privilege_escalation_method")
+        label_credential_privilege_escalation_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_method.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         privilege_escalation_method_list = ["su", "sudo"]
         self.resource_info_dict["combobox_privilege_escalation_method"] = \
-            ttk.Combobox(self.frame, values=privilege_escalation_method_list, state="readonly")
-        self.resource_info_dict["combobox_privilege_escalation_method"].grid(row=8, column=1, padx=2, pady=5)
+            ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=privilege_escalation_method_list, state="readonly")
+        self.resource_info_dict["combobox_privilege_escalation_method"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权用户
-        label_credential_privilege_escalation_username = tkinter.Label(self.frame, text="privilege_escalation_username")
-        label_credential_privilege_escalation_username.grid(row=9, column=0, padx=2, pady=5)
+        label_credential_privilege_escalation_username = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+                                                                       text="privilege_escalation_username")
+        label_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_username.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_privilege_escalation_username"] = tkinter.StringVar()
-        entry_credential_privilege_escalation_username = tkinter.Entry(self.frame, textvariable=self.resource_info_dict[
-            "sv_privilege_escalation_username"])
-        entry_credential_privilege_escalation_username.grid(row=9, column=1, padx=2, pady=5)
+        entry_credential_privilege_escalation_username = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                                       textvariable=self.resource_info_dict[
+                                                                           "sv_privilege_escalation_username"])
+        entry_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_privilege_escalation_username.grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权密码
-        label_credential_privilege_escalation_password = tkinter.Label(self.frame, text="privilege_escalation_password")
-        label_credential_privilege_escalation_password.grid(row=10, column=0, padx=2, pady=5)
+        label_credential_privilege_escalation_password = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+                                                                       text="privilege_escalation_password")
+        label_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_password.grid(row=10, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_privilege_escalation_password"] = tkinter.StringVar()
-        entry_credential_privilege_escalation_password = tkinter.Entry(self.frame, textvariable=self.resource_info_dict[
-            "sv_privilege_escalation_password"])
-        entry_credential_privilege_escalation_password.grid(row=10, column=1, padx=2, pady=5)
+        entry_credential_privilege_escalation_password = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                                       textvariable=self.resource_info_dict[
+                                                                           "sv_privilege_escalation_password"])
+        entry_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_privilege_escalation_password.grid(row=10, column=1, padx=self.padx, pady=self.pady)
         # ★credential-auth_url
-        label_credential_auth_url = tkinter.Label(self.frame, text="auth_url")
-        label_credential_auth_url.grid(row=11, column=0, padx=2, pady=5)
+        label_credential_auth_url = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="auth_url")
+        label_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_auth_url.grid(row=11, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_auth_url"] = tkinter.StringVar()
-        entry_credential_auth_url = tkinter.Entry(self.frame, textvariable=self.resource_info_dict["sv_auth_url"])
-        entry_credential_auth_url.grid(row=11, column=1, padx=2, pady=5)
+        entry_credential_auth_url = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                  textvariable=self.resource_info_dict["sv_auth_url"])
+        entry_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_auth_url.grid(row=11, column=1, padx=self.padx, pady=self.pady)
         # ★credential-ssl_verify
-        label_credential_ssl_verify = tkinter.Label(self.frame, text="ssl_verify")
-        label_credential_ssl_verify.grid(row=12, column=0, padx=2, pady=5)
+        label_credential_ssl_verify = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssl_verify")
+        label_credential_ssl_verify.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_ssl_verify.grid(row=12, column=0, padx=self.padx, pady=self.pady)
         ssl_verify_name_list = ["No", "Yes"]
-        self.resource_info_dict["combobox_ssl_verify"] = ttk.Combobox(self.frame, values=ssl_verify_name_list, state="readonly")
-        self.resource_info_dict["combobox_ssl_verify"].grid(row=12, column=1, padx=2, pady=5)
+        self.resource_info_dict["combobox_ssl_verify"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=ssl_verify_name_list,
+                                                                      state="readonly")
+        self.resource_info_dict["combobox_ssl_verify"].grid(row=12, column=1, padx=self.padx, pady=self.pady)
+
+    def create_host(self):
+        # ★创建-host
+        label_create_host = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 创建主机 ★★")
+        label_create_host.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_create_host.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        # ★host-名称
+        label_host_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机名称")
+        label_host_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_host_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_host_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # ★host-描述
+        label_host_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
+        label_host_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_host_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                               textvariable=self.resource_info_dict["sv_description"])
+        entry_host_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # ★host-所属项目
+        label_host_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
+        label_host_project.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        project_obj_name_list = []
+        for project_obj in self.global_info.project_obj_list:
+            project_obj_name_list.append(project_obj.name)
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+                                                                   state="readonly")
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # ★host-address
+        label_host_address = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="address")
+        label_host_address.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_address.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_address"] = tkinter.StringVar()
+        entry_host_address = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                           textvariable=self.resource_info_dict["sv_address"])
+        entry_host_address.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_address.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # ★host-ssh_port
+        label_host_ssh_port = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssh_port")
+        label_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_ssh_port.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_ssh_port"] = tkinter.StringVar()
+        entry_host_ssh_port = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                            textvariable=self.resource_info_dict["sv_ssh_port"])
+        entry_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_ssh_port.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        # ★host-telnet_port
+        label_host_telnet_port = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="telnet_port")
+        label_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_telnet_port.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_telnet_port"] = tkinter.StringVar()
+        entry_host_telnet_port = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                               textvariable=self.resource_info_dict["sv_telnet_port"])
+        entry_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_telnet_port.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # ★host-login_protocol
+        label_host_login_protocol = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="远程登录类型")
+        label_host_login_protocol.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_login_protocol.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        login_protocol_name_list = ["ssh", "telnet"]
+        self.resource_info_dict["combobox_login_protocol"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                                          values=login_protocol_name_list,
+                                                                          state="readonly")
+        self.resource_info_dict["combobox_login_protocol"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        # ★host-first_auth_method
+        label_host_first_auth_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="优先认证类型")
+        label_host_first_auth_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_first_auth_method.grid(row=8, column=0, padx=self.padx, pady=self.pady)
+        first_auth_method_name_list = ["priKey", "password"]
+        self.resource_info_dict["combobox_first_auth_method"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                                             values=first_auth_method_name_list,
+                                                                             state="readonly")
+        self.resource_info_dict["combobox_first_auth_method"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
+        # ★host-凭据列表
+        label_credential_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据列表")
+        label_credential_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
+        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
+        list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
+        self.resource_info_dict["credential_listbox"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
+                                                                        yscrollcommand=list_scrollbar.set, selectbackground='pink',
+                                                                        selectforeground='black',
+                                                                        selectborderwidth=2, activestyle='dotbox', height=6)
+        for cred in self.global_info.credential_obj_list:
+            self.resource_info_dict["credential_listbox"].insert(tkinter.END, cred.name)  # 添加item选项
+        self.resource_info_dict["credential_listbox"].pack(side="left")
+        list_scrollbar.config(command=self.resource_info_dict["credential_listbox"].yview)
+        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
 
 
 class ListResourceInFrame:
@@ -2655,11 +2867,18 @@ class ListResourceInFrame:
         self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
         self.global_info = global_info
         self.resource_type = resource_type
+        self.padx = 2
+        self.pady = 2
+
+    def proces_mouse_scroll(self, event):
+        if event.delta > 0:
+            self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+        else:
+            self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
 
     def show(self):  # 入口函数
         for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
             widget.destroy()
-        # 列出资源
         if self.resource_type == RESOURCE_TYPE_PROJECT:
             resource_display_frame_title = "★★ 项目列表 ★★"
             resource_obj_list = self.global_info.project_obj_list
@@ -2682,31 +2901,42 @@ class ListResourceInFrame:
             print("unknown resource type")
             resource_display_frame_title = "★★ 项目列表 ★★"
             resource_obj_list = self.global_info.project_obj_list
+        # 列出资源
         label_display_resource = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=resource_display_frame_title)
-        label_display_resource.grid(row=0, column=0, padx=2, pady=5)
+        label_display_resource.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         index = 0
         for obj in resource_obj_list:
             print(obj.name)
             label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index) + " : ")
-            label_index.grid(row=index + 1, column=0, padx=2, pady=5)
+            label_index.bind("<MouseWheel>", self.proces_mouse_scroll)
+            label_index.grid(row=index + 1, column=0, padx=self.padx, pady=self.pady)
             label_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=obj.name)
-            label_name.grid(row=index + 1, column=1, padx=2, pady=5)
+            label_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+            label_name.grid(row=index + 1, column=1, padx=self.padx, pady=self.pady)
             # 查看对象信息
             view_obj = ViewResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
                                            self.resource_type)
             button_view = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="查看", command=view_obj.show)
-            button_view.grid(row=index + 1, column=2, padx=2, pady=5)
+            button_view.bind("<MouseWheel>", self.proces_mouse_scroll)
+            button_view.grid(row=index + 1, column=2, padx=self.padx, pady=self.pady)
             # 编辑对象信息
             edit_obj = EditResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
                                            self.resource_type)
             button_edit = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑", command=edit_obj.show)
-            button_edit.grid(row=index + 1, column=3, padx=2, pady=5)
+            button_edit.bind("<MouseWheel>", self.proces_mouse_scroll)
+            button_edit.grid(row=index + 1, column=3, padx=self.padx, pady=self.pady)
             # 删除对象
             delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
                                                self.resource_type)
             button_delete = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="删除", command=delete_obj.show)
-            button_delete.grid(row=index + 1, column=4, padx=2, pady=5)
+            button_delete.bind("<MouseWheel>", self.proces_mouse_scroll)
+            button_delete.grid(row=index + 1, column=4, padx=self.padx, pady=self.pady)
             index += 1
+        # 信息控件添加完毕
+        self.nav_frame_r_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
+        self.nav_frame_r_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(), self.nav_frame_r_widget_dict["frame"].winfo_height()))
+        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
 
 
 class ViewResourceInFrame:
@@ -2721,6 +2951,7 @@ class ViewResourceInFrame:
         self.global_info = global_info
         self.resource_obj = resource_obj
         self.resource_type = resource_type
+        self.view_width = 20
 
     def show(self):  # 入口函数
         for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
@@ -2729,9 +2960,17 @@ class ViewResourceInFrame:
             self.view_project()
         elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
             self.view_credential()
+        elif self.resource_type == RESOURCE_TYPE_HOST:
+            self.view_host()
         else:
-            print("resource_type is Unknown")
-        self.update_frame()
+            print("<class ViewResourceInFrame> resource_type is Unknown")
+        self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
+
+    def proces_mouse_scroll(self, event):
+        if event.delta > 0:
+            self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+        else:
+            self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
 
     def update_frame(self):
         # 更新Frame的尺寸
@@ -2739,14 +2978,7 @@ class ViewResourceInFrame:
         self.nav_frame_r_widget_dict["canvas"].configure(
             scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
                           self.nav_frame_r_widget_dict["frame"].winfo_height()))
-
-        def proces_mouse_scroll(event):
-            if event.delta > 0:
-                self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
-            else:
-                self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
-
-        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", proces_mouse_scroll)
+        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
         # 滚动条移到最开头
         self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
 
@@ -2757,14 +2989,14 @@ class ViewResourceInFrame:
         obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
         obj_info_text.insert(tkinter.END, "★★ 查看项目 ★★\n")
         # ★project-名称
-        project_name = "名称".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.name + "\n"
+        project_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
         print(project_name)
         obj_info_text.insert(tkinter.END, project_name)
         # ★project-描述
-        project_description = "描述".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.description + "\n"
+        project_description = "描述".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.description + "\n"
         obj_info_text.insert(tkinter.END, project_description)
         # ★credential-create_timestamp
-        credential_create_timestamp = "create_time".ljust(VIEW_WIDTH, " ") + ": " \
+        credential_create_timestamp = "create_time".ljust(self.view_width, " ") + ": " \
                                       + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.create_timestamp)) + "\n"
         obj_info_text.insert(tkinter.END, credential_create_timestamp)
         # ★credential-last_modify_timestamp
@@ -2772,7 +3004,7 @@ class ViewResourceInFrame:
             last_modify_timestamp = self.resource_obj.create_timestamp
         else:
             last_modify_timestamp = self.resource_obj.last_modify_timestamp
-        credential_last_modify_timestamp = "last_modify_time".ljust(VIEW_WIDTH, " ") + ": " \
+        credential_last_modify_timestamp = "last_modify_time".ljust(self.view_width, " ") + ": " \
                                            + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_modify_timestamp)) + "\n"
         print(last_modify_timestamp)
         obj_info_text.insert(tkinter.END, credential_last_modify_timestamp)
@@ -2780,7 +3012,7 @@ class ViewResourceInFrame:
         obj_info_text.pack()
         # ★★添加返回“项目列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
-                                       command=lambda: self.main_window.display_resource_of_nav_frame_r_page(
+                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
                                            RESOURCE_TYPE_PROJECT))  # 返回“项目列表”
         button_return.pack()
 
@@ -2789,58 +3021,58 @@ class ViewResourceInFrame:
         obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
         obj_info_text.insert(tkinter.END, "★★ 查看凭据 ★★\n")
         # ★credential-名称
-        credential_name = "名称".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.name + "\n"
+        credential_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
         obj_info_text.insert(tkinter.END, credential_name)
         # ★credential-id
-        credential_oid = "凭据id".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.oid + "\n"
+        credential_oid = "凭据id".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.oid + "\n"
         obj_info_text.insert(tkinter.END, credential_oid)
         # ★credential-描述
-        credential_description = "描述".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.description + "\n"
+        credential_description = "描述".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.description + "\n"
         obj_info_text.insert(tkinter.END, credential_description)
-        # ★credential-所属项目
+        # ★credential-所属项目+项目id
         if self.global_info.get_project_by_oid(self.resource_obj.project_oid) is None:  # ★凡是有根据oid查找资源对象的，都要处理None的情况
             project_name = "Unknown!"
         else:
             project_name = self.global_info.get_project_by_oid(self.resource_obj.project_oid).name
-        credential_project_name = "所属项目".ljust(VIEW_WIDTH - 4, " ") + ": " + project_name + "\n"
+        credential_project_name = "所属项目".ljust(self.view_width - 4, " ") + ": " + project_name + "\n"
         obj_info_text.insert(tkinter.END, credential_project_name)
-        credential_project_oid = "项目id".ljust(VIEW_WIDTH - 2, " ") + ": " + self.resource_obj.project_oid + "\n"
+        credential_project_oid = "项目id".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.project_oid + "\n"
         obj_info_text.insert(tkinter.END, credential_project_oid)
         # ★credential-cred_type
         cred_type_name_list = ["ssh_password", "ssh_key", "telnet", "ftp", "registry", "git"]
-        credential_cred_type = "凭据类型".ljust(VIEW_WIDTH - 4, " ") + ": " + cred_type_name_list[self.resource_obj.cred_type] + "\n"
+        credential_cred_type = "凭据类型".ljust(self.view_width - 4, " ") + ": " + cred_type_name_list[self.resource_obj.cred_type] + "\n"
         obj_info_text.insert(tkinter.END, credential_cred_type)
         # ★credential-username
-        credential_username = "username".ljust(VIEW_WIDTH, " ") + ": " + self.resource_obj.username + "\n"
+        credential_username = "username".ljust(self.view_width, " ") + ": " + self.resource_obj.username + "\n"
         obj_info_text.insert(tkinter.END, credential_username)
         # ★credential-password
-        credential_password = "password".ljust(VIEW_WIDTH, " ") + ": " + self.resource_obj.password + "\n"
+        credential_password = "password".ljust(self.view_width, " ") + ": " + self.resource_obj.password + "\n"
         obj_info_text.insert(tkinter.END, credential_password)
         # ★credential-private_key
-        credential_private_key = "private_key".ljust(VIEW_WIDTH, " ") + ": " + self.resource_obj.private_key + "\n"
+        credential_private_key = "private_key".ljust(self.view_width, " ") + ": " + self.resource_obj.private_key + "\n"
         obj_info_text.insert(tkinter.END, credential_private_key)
         # ★credential-privilege_escalation_method
         privilege_escalation_method_list = ["su", "sudo"]
-        credential_privilege_escalation_method = "提权_method".ljust(VIEW_WIDTH - 2, " ") + ": " + privilege_escalation_method_list[
+        credential_privilege_escalation_method = "提权_method".ljust(self.view_width - 2, " ") + ": " + privilege_escalation_method_list[
             self.resource_obj.privilege_escalation_method] + "\n"
         obj_info_text.insert(tkinter.END, credential_privilege_escalation_method)
         # ★credential-privilege_escalation_username
-        credential_privilege_escalation_username = "提权_username".ljust(VIEW_WIDTH - 2, " ") \
+        credential_privilege_escalation_username = "提权_username".ljust(self.view_width - 2, " ") \
                                                    + ": " + self.resource_obj.privilege_escalation_username + "\n"
         obj_info_text.insert(tkinter.END, credential_privilege_escalation_username)
         # ★credential-privilege_escalation_password
-        credential_privilege_escalation_password = "提权_password".ljust(VIEW_WIDTH - 2, " ") \
+        credential_privilege_escalation_password = "提权_password".ljust(self.view_width - 2, " ") \
                                                    + ": " + self.resource_obj.privilege_escalation_password + "\n"
         obj_info_text.insert(tkinter.END, credential_privilege_escalation_password)
         # ★credential-auth_url
-        credential_auth_url = "auth_url".ljust(VIEW_WIDTH, " ") + ": " + self.resource_obj.auth_url + "\n"
+        credential_auth_url = "auth_url".ljust(self.view_width, " ") + ": " + self.resource_obj.auth_url + "\n"
         obj_info_text.insert(tkinter.END, credential_auth_url)
         # ★credential-ssl_verify
         ssl_verify_list = ["NO", "YES"]
-        credential_ssl_verify = "ssl_verify".ljust(VIEW_WIDTH, " ") + ": " + ssl_verify_list[self.resource_obj.ssl_verify] + "\n"
+        credential_ssl_verify = "ssl_verify".ljust(self.view_width, " ") + ": " + ssl_verify_list[self.resource_obj.ssl_verify] + "\n"
         obj_info_text.insert(tkinter.END, credential_ssl_verify)
         # ★credential-create_timestamp
-        credential_create_timestamp = "create_time".ljust(VIEW_WIDTH, " ") + ": " \
+        credential_create_timestamp = "create_time".ljust(self.view_width, " ") + ": " \
                                       + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.create_timestamp)) + "\n"
         obj_info_text.insert(tkinter.END, credential_create_timestamp)
         # ★credential-last_modify_timestamp
@@ -2848,15 +3080,74 @@ class ViewResourceInFrame:
             last_modify_timestamp = self.resource_obj.create_timestamp
         else:
             last_modify_timestamp = self.resource_obj.last_modify_timestamp
-        credential_last_modify_timestamp = "last_modify_time".ljust(VIEW_WIDTH, " ") + ": " \
+        credential_last_modify_timestamp = "last_modify_time".ljust(self.view_width, " ") + ": " \
                                            + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_modify_timestamp)) + "\n"
         obj_info_text.insert(tkinter.END, credential_last_modify_timestamp)
         # 显示info Text文本框
         obj_info_text.pack()
         # ★★添加“返回项目列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
-                                       command=lambda: self.main_window.display_resource_of_nav_frame_r_page(
+                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
                                            RESOURCE_TYPE_CREDENTIAL))  # 返回凭据列表
+        button_return.pack()
+
+    def view_host(self):
+        # 查看-host
+        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
+        obj_info_text.insert(tkinter.END, "★★ 查看主机 ★★\n")
+        # ★host-名称
+        host_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
+        obj_info_text.insert(tkinter.END, host_name)
+        # ★host-id
+        host_oid = "主机id".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.oid + "\n"
+        obj_info_text.insert(tkinter.END, host_oid)
+        # ★host-描述
+        host_description = "描述".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.description + "\n"
+        obj_info_text.insert(tkinter.END, host_description)
+        # ★host-所属项目+项目id
+        if self.global_info.get_project_by_oid(self.resource_obj.project_oid) is None:  # ★凡是有根据oid查找资源对象的，都要处理None的情况
+            project_name = "Unknown!"
+        else:
+            project_name = self.global_info.get_project_by_oid(self.resource_obj.project_oid).name
+        host_project_name = "所属项目".ljust(self.view_width - 4, " ") + ": " + project_name + "\n"
+        obj_info_text.insert(tkinter.END, host_project_name)
+        host_project_oid = "项目id".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.project_oid + "\n"
+        obj_info_text.insert(tkinter.END, host_project_oid)
+        # ★host-address
+        host_address = "address".ljust(self.view_width, " ") + ": " + self.resource_obj.address + "\n"
+        obj_info_text.insert(tkinter.END, host_address)
+        # ★host-ssh_port
+        host_ssh_port = "ssh_port".ljust(self.view_width, " ") + ": " + str(self.resource_obj.ssh_port) + "\n"
+        obj_info_text.insert(tkinter.END, host_ssh_port)
+        # ★host-telnet_port
+        host_telnet_port = "ssh_port".ljust(self.view_width, " ") + ": " + str(self.resource_obj.telnet_port) + "\n"
+        obj_info_text.insert(tkinter.END, host_telnet_port)
+        # ★host-create_timestamp
+        host_create_timestamp = "create_time".ljust(self.view_width, " ") + ": " \
+                                + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.create_timestamp)) + "\n"
+        obj_info_text.insert(tkinter.END, host_create_timestamp)
+        # ★host-last_modify_timestamp
+        if self.resource_obj.last_modify_timestamp < 1:
+            last_modify_timestamp = self.resource_obj.create_timestamp
+        else:
+            last_modify_timestamp = self.resource_obj.last_modify_timestamp
+        host_last_modify_timestamp = "last_modify_time".ljust(self.view_width, " ") + ": " \
+                                     + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_modify_timestamp)) + "\n"
+        obj_info_text.insert(tkinter.END, host_last_modify_timestamp)
+        # ★host-凭据列表
+        obj_info_text.insert(tkinter.END, "\n" + "凭据列表".ljust(self.view_width - 4, " ") + ": " + "\n")
+        for cred_oid in self.resource_obj.credential_oid_list:  # ★凡是有根据oid查找资源对象的，都要处理None的情况
+            cred_obj = self.global_info.get_credential_by_oid(cred_oid)
+            if cred_obj is not None:
+                obj_info_text.insert(tkinter.END, "".ljust(self.view_width + 2, " ") + cred_obj.name + "\n")
+            else:
+                obj_info_text.insert(tkinter.END, "".ljust(self.view_width + 2, " ") + cred_oid + " Unknown!\n")
+        # 显示info Text文本框
+        obj_info_text.pack()
+        # ★★添加“返回主机列表”按钮★★
+        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回主机列表",
+                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
+                                           RESOURCE_TYPE_HOST))  # 返回主机列表
         button_return.pack()
 
 
@@ -2873,6 +3164,9 @@ class EditResourceInFrame:
         self.resource_obj = resource_obj
         self.resource_type = resource_type
         self.resource_info_dict = {}  # 用于存储资源对象信息的diction
+        self.padx = 2
+        self.pady = 2
+        self.current_row_index = 0
 
     def show(self):  # 入口函数
         for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
@@ -2881,9 +3175,31 @@ class EditResourceInFrame:
             self.edit_project()
         elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
             self.edit_credential()
+        elif self.resource_type == RESOURCE_TYPE_HOST:
+            self.edit_host()
         else:
-            print("resource_type is Unknown")
-        self.update_frame()  # 更新Frame的尺寸
+            print("<class EditResourceInFrame> resource_type is Unknown")
+        self.add_save_and_return_button()
+        self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
+
+    def add_save_and_return_button(self):
+        # ★创建“保存更新”按钮
+        save_obj = UpdateResourceInFrame(self.main_window, self.resource_info_dict, self.global_info, self.resource_obj,
+                                         self.resource_type)
+        button_save = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="保存更新", command=save_obj.update)
+        button_save.bind("<MouseWheel>", self.proces_mouse_scroll)
+        button_save.grid(row=self.current_row_index + 1, column=0, padx=self.padx, pady=self.pady)
+        # ★★添加“返回资源列表”按钮★★
+        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="取消编辑",
+                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(self.resource_type))
+        button_return.bind("<MouseWheel>", self.proces_mouse_scroll)
+        button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
+
+    def proces_mouse_scroll(self, event):
+        if event.delta > 0:
+            self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+        else:
+            self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
 
     def update_frame(self):
         # 更新Frame的尺寸
@@ -2891,69 +3207,62 @@ class EditResourceInFrame:
         self.nav_frame_r_widget_dict["canvas"].configure(
             scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
                           self.nav_frame_r_widget_dict["frame"].winfo_height()))
-
-        def proces_mouse_scroll(event):
-            if event.delta > 0:
-                self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
-            else:
-                self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
-
-        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", proces_mouse_scroll)
+        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
         # 滚动条移到最开头
         self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
 
     def edit_project(self):
         # ★编辑-project
-        label_create_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑凭据 ★★")
-        label_create_project.grid(row=0, column=0, padx=2, pady=5)
+        label_edit_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑项目 ★★")
+        label_edit_project.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★project-名称
-        label_project_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据名称")
-        label_project_name.grid(row=1, column=0, padx=2, pady=5)
+        label_project_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目名称")
+        label_project_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_project_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
         entry_project_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_project_name.bind("<MouseWheel>", self.proces_mouse_scroll)
         entry_project_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
-        entry_project_name.grid(row=1, column=1, padx=2, pady=5)
+        entry_project_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★project-描述
         label_project_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_project_description.grid(row=2, column=0, padx=2, pady=5)
+        label_project_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_project_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
         entry_project_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_description"])
+        entry_project_description.bind("<MouseWheel>", self.proces_mouse_scroll)
         entry_project_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
-        entry_project_description.grid(row=2, column=1, padx=2, pady=5)
-        # ★创建“保存更新”按钮
-        save_obj = UpdateResourceInFrame(self.main_window, self.resource_info_dict, self.global_info, self.resource_obj,
-                                         RESOURCE_TYPE_PROJECT)
-        button_save = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="保存更新", command=save_obj.update)
-        button_save.grid(row=13, column=0, padx=2, pady=5)
-        # ★★添加“返回项目列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
-                                       command=lambda: self.main_window.display_resource_of_nav_frame_r_page(
-                                           RESOURCE_TYPE_PROJECT))  # 返回项目列表
-        button_return.grid(row=13, column=1, padx=2, pady=5)
+        entry_project_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        self.current_row_index = 2
 
     def edit_credential(self):
         # ★编辑-credential
-        label_create_credential = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑凭据 ★★")
-        label_create_credential.grid(row=0, column=0, padx=2, pady=5)
+        label_edit_credential = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑凭据 ★★")
+        label_edit_credential.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★credential-名称
         label_credential_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据名称")
-        label_credential_name.grid(row=1, column=0, padx=2, pady=5)
+        label_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
         entry_credential_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll)
         entry_credential_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
-        entry_credential_name.grid(row=1, column=1, padx=2, pady=5)
+        entry_credential_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★credential-描述
         label_credential_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_credential_description.grid(row=2, column=0, padx=2, pady=5)
+        label_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
         entry_credential_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
                                                      textvariable=self.resource_info_dict["sv_description"])
+        entry_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll)
         entry_credential_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
-        entry_credential_description.grid(row=2, column=1, padx=2, pady=5)
+        entry_credential_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★credential-所属项目
         label_credential_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_credential_project_oid.grid(row=3, column=0, padx=2, pady=5)
+        label_credential_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_project_oid.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         project_obj_index = 0
         index = 0
@@ -2965,96 +3274,219 @@ class EditResourceInFrame:
         self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
-        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=2, pady=5)
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★credential-凭据类型
         label_credential_type = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据类型")
-        label_credential_type.grid(row=4, column=0, padx=2, pady=5)
+        label_credential_type.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_type.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         cred_type_name_list = ["ssh_password", "ssh_key", "telnet", "ftp", "registry", "git"]
         self.resource_info_dict["combobox_cred_type"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=cred_type_name_list,
                                                                      state="readonly")
         if self.resource_obj.cred_type != -1:
             self.resource_info_dict["combobox_cred_type"].current(self.resource_obj.cred_type)  # 显示初始值，可重新选择
-        self.resource_info_dict["combobox_cred_type"].grid(row=4, column=1, padx=2, pady=5)
+        self.resource_info_dict["combobox_cred_type"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★credential-用户名
         label_credential_username = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="username")
-        label_credential_username.grid(row=5, column=0, padx=2, pady=5)
+        label_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_username.grid(row=5, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_username"] = tkinter.StringVar()
         entry_credential_username = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_username"])
         entry_credential_username.insert(0, self.resource_obj.username)  # 显示初始值，可编辑
-        entry_credential_username.grid(row=5, column=1, padx=2, pady=5)
+        entry_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_username.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★credential-密码
         label_credential_password = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="password")
-        label_credential_password.grid(row=6, column=0, padx=2, pady=5)
+        label_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_password.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_password"] = tkinter.StringVar()
         entry_credential_password = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_password"])
+        entry_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll)
         entry_credential_password.insert(0, self.resource_obj.password)  # 显示初始值，可编辑
-        entry_credential_password.grid(row=6, column=1, padx=2, pady=5)
+        entry_credential_password.grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★credential-密钥
         label_credential_private_key = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssh_private_key")
-        label_credential_private_key.grid(row=7, column=0, padx=2, pady=5)
+        label_credential_private_key.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_private_key.grid(row=7, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["text_private_key"] = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], height=3, width=32)
         self.resource_info_dict["text_private_key"].insert(1.0, self.resource_obj.private_key)  # 显示初始值，可编辑
-        self.resource_info_dict["text_private_key"].grid(row=7, column=1, padx=2, pady=5)
+        self.resource_info_dict["text_private_key"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权类型
         label_credential_privilege_escalation_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
                                                                      text="privilege_escalation_method")
-        label_credential_privilege_escalation_method.grid(row=8, column=0, padx=2, pady=5)
+        label_credential_privilege_escalation_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_method.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         privilege_escalation_method_list = ["su", "sudo"]
         self.resource_info_dict["combobox_privilege_escalation_method"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
                                                                                        values=privilege_escalation_method_list,
                                                                                        state="readonly")
         if self.resource_obj.privilege_escalation_method != -1:
             self.resource_info_dict["combobox_privilege_escalation_method"].current(self.resource_obj.privilege_escalation_method)
-        self.resource_info_dict["combobox_privilege_escalation_method"].grid(row=8, column=1, padx=2, pady=5)
+        self.resource_info_dict["combobox_privilege_escalation_method"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权用户
         label_credential_privilege_escalation_username = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
                                                                        text="privilege_escalation_username")
-        label_credential_privilege_escalation_username.grid(row=9, column=0, padx=2, pady=5)
+        label_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_username.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_privilege_escalation_username"] = tkinter.StringVar()
         entry_credential_privilege_escalation_username = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
                                                                        textvariable=self.resource_info_dict[
                                                                            "sv_privilege_escalation_username"])
+        entry_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll)
         entry_credential_privilege_escalation_username.insert(0, self.resource_obj.privilege_escalation_username)  # 显示初始值，可编辑
-        entry_credential_privilege_escalation_username.grid(row=9, column=1, padx=2, pady=5)
+        entry_credential_privilege_escalation_username.grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权密码
         label_credential_privilege_escalation_password = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
                                                                        text="privilege_escalation_password")
-        label_credential_privilege_escalation_password.grid(row=10, column=0, padx=2, pady=5)
+        label_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_password.grid(row=10, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_privilege_escalation_password"] = tkinter.StringVar()
         entry_credential_privilege_escalation_password = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
                                                                        textvariable=self.resource_info_dict[
                                                                            "sv_privilege_escalation_password"])
+        entry_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll)
         entry_credential_privilege_escalation_password.insert(0, self.resource_obj.privilege_escalation_password)  # 显示初始值，可编辑
-        entry_credential_privilege_escalation_password.grid(row=10, column=1, padx=2, pady=5)
+        entry_credential_privilege_escalation_password.grid(row=10, column=1, padx=self.padx, pady=self.pady)
         # ★credential-auth_url
         label_credential_auth_url = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="auth_url")
-        label_credential_auth_url.grid(row=11, column=0, padx=2, pady=5)
+        label_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_auth_url.grid(row=11, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_auth_url"] = tkinter.StringVar()
         entry_credential_auth_url = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_auth_url"])
+        entry_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll)
         entry_credential_auth_url.insert(0, self.resource_obj.auth_url)  # 显示初始值，可编辑
-        entry_credential_auth_url.grid(row=11, column=1, padx=2, pady=5)
+        entry_credential_auth_url.grid(row=11, column=1, padx=self.padx, pady=self.pady)
         # ★credential-ssl_verify
         label_credential_ssl_verify = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssl_verify")
-        label_credential_ssl_verify.grid(row=12, column=0, padx=2, pady=5)
+        label_credential_ssl_verify.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_ssl_verify.grid(row=12, column=0, padx=self.padx, pady=self.pady)
         ssl_verify_name_list = ["No", "Yes"]
         self.resource_info_dict["combobox_ssl_verify"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=ssl_verify_name_list,
                                                                       state="readonly")
         if self.resource_obj.ssl_verify != -1:
             self.resource_info_dict["combobox_ssl_verify"].current(self.resource_obj.ssl_verify)  # 显示初始值
-        self.resource_info_dict["combobox_ssl_verify"].grid(row=12, column=1, padx=2, pady=5)
-        # ★创建“保存更新”按钮
-        save_obj = UpdateResourceInFrame(self.main_window, self.resource_info_dict, self.global_info, self.resource_obj,
-                                         RESOURCE_TYPE_CREDENTIAL)
-        button_save = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="保存更新", command=save_obj.update)
-        button_save.grid(row=13, column=0, padx=2, pady=5)
-        # ★★添加“返回凭据列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回凭据列表",
-                                       command=lambda: self.main_window.display_resource_of_nav_frame_r_page(
-                                           RESOURCE_TYPE_CREDENTIAL))  # 返回凭据列表
-        button_return.grid(row=13, column=1, padx=2, pady=5)
+        self.resource_info_dict["combobox_ssl_verify"].grid(row=12, column=1, padx=self.padx, pady=self.pady)
+        self.current_row_index = 12
+
+    def edit_host(self):
+        # ★创建-host
+        label_edit_host = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑主机 ★★")
+        label_edit_host.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_edit_host.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        # ★host-名称
+        label_host_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机名称")
+        label_host_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_host_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_host_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
+        entry_host_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # ★host-描述
+        label_host_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
+        label_host_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_host_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                               textvariable=self.resource_info_dict["sv_description"])
+        entry_host_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
+        entry_host_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # ★host-所属项目
+        label_host_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
+        label_host_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_project_oid.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        project_obj_name_list = []
+        project_obj_index = 0
+        index = 0
+        for project_obj in self.global_info.project_obj_list:
+            project_obj_name_list.append(project_obj.name)
+            if self.resource_obj.project_oid == project_obj.oid:
+                project_obj_index = index
+            index += 1
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+                                                                   state="readonly")
+        self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # ★host-address
+        label_host_address = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="address")
+        label_host_address.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_address.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_address"] = tkinter.StringVar()
+        entry_host_address = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                           textvariable=self.resource_info_dict["sv_address"])
+        entry_host_address.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_address.insert(0, self.resource_obj.address)  # 显示初始值，可编辑
+        entry_host_address.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # ★host-ssh_port
+        label_host_ssh_port = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssh_port")
+        label_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_ssh_port.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_ssh_port"] = tkinter.StringVar()
+        entry_host_ssh_port = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                            textvariable=self.resource_info_dict["sv_ssh_port"])
+        entry_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_ssh_port.insert(0, self.resource_obj.ssh_port)  # 显示初始值，可编辑
+        entry_host_ssh_port.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        # ★host-telnet_port
+        label_host_telnet_port = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="telnet_port")
+        label_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_telnet_port.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_telnet_port"] = tkinter.StringVar()
+        entry_host_telnet_port = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                               textvariable=self.resource_info_dict["sv_telnet_port"])
+        entry_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_telnet_port.insert(0, self.resource_obj.telnet_port)  # 显示初始值，可编辑
+        entry_host_telnet_port.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # ★host-login_protocol
+        label_host_login_protocol = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="远程登录类型")
+        label_host_login_protocol.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_login_protocol.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        login_protocol_name_list = ["ssh", "telnet"]
+        login_protocol_index = 0
+        index = 0
+        for login_protocol_name in login_protocol_name_list:
+            if self.resource_obj.login_protocol == login_protocol_name:
+                login_protocol_index = index
+                index += 1
+        self.resource_info_dict["combobox_login_protocol"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                                          values=login_protocol_name_list,
+                                                                          state="readonly")
+        self.resource_info_dict["combobox_login_protocol"].current(login_protocol_index)
+        self.resource_info_dict["combobox_login_protocol"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        # ★host-first_auth_method
+        label_host_first_auth_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="优先认证类型")
+        label_host_first_auth_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_first_auth_method.grid(row=8, column=0, padx=self.padx, pady=self.pady)
+        first_auth_method_name_list = ["priKey", "password"]
+        self.resource_info_dict["combobox_first_auth_method"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                                             values=first_auth_method_name_list,
+                                                                             state="readonly")
+        self.resource_info_dict["combobox_first_auth_method"].current(self.resource_obj.first_auth_method)
+        self.resource_info_dict["combobox_first_auth_method"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
+        # ★host-凭据列表
+        label_credential_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据列表")
+        label_credential_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
+        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
+        list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
+        self.resource_info_dict["credential_listbox"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
+                                                                        yscrollcommand=list_scrollbar.set, selectbackground='pink',
+                                                                        selectforeground='black',
+                                                                        selectborderwidth=2, activestyle='dotbox', height=6)
+        for cred in self.global_info.credential_obj_list:
+            self.resource_info_dict["credential_listbox"].insert(tkinter.END, cred.name)  # 添加item选项
+        for cred_oid in self.resource_obj.credential_oid_list:  # 设置已选择项★★★
+            cred_index = self.global_info.get_credential_obj_index_of_list_by_oid(cred_oid)
+            if cred_index is not None:
+                self.resource_info_dict["credential_listbox"].select_set(cred_index)
+        self.resource_info_dict["credential_listbox"].pack(side="left")
+        list_scrollbar.config(command=self.resource_info_dict["credential_listbox"].yview)
+        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
+        self.current_row_index = 9
 
 
 class UpdateResourceInFrame:
@@ -3075,8 +3507,10 @@ class UpdateResourceInFrame:
             self.update_project()
         elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
             self.update_credential()
+        elif self.resource_type == RESOURCE_TYPE_HOST:
+            self.update_host()
         else:
-            print("resource_type is Unknown")
+            print("<class UpdateResourceInFrame> resource_type is Unknown")
 
     def update_project(self):
         project_name = self.resource_info_dict["sv_name"].get()
@@ -3091,16 +3525,17 @@ class UpdateResourceInFrame:
             messagebox.showinfo("创建项目-Error", f"项目描述>256字符")
         else:
             self.resource_obj.update(name=project_name, description=project_description, global_info=self.global_info)
-            self.main_window.display_resource_of_nav_frame_r_page(RESOURCE_TYPE_PROJECT)  # 保存项目信息后，返回项目展示页面
+            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_PROJECT)  # 保存项目信息后，返回项目展示页面
 
     def update_credential(self):
         credential_name = self.resource_info_dict["sv_name"].get()
         credential_description = self.resource_info_dict["sv_description"].get()
-        # 凡是combobox未选择的（值为-1）都要设置为默认值0
+        # ★项目  凡是combobox未选择的（值为-1）都要设置为默认值0
         if self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid == -1:
             credential_project_oid = 0
         else:
             credential_project_oid = self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid
+        # ★cred_type
         if self.resource_info_dict["combobox_cred_type"].current() == -1:
             credential_cred_type = 0
         else:
@@ -3108,6 +3543,7 @@ class UpdateResourceInFrame:
         credential_username = self.resource_info_dict["sv_username"].get()
         credential_password = self.resource_info_dict["sv_password"].get()
         credential_private_key = self.resource_info_dict["text_private_key"].get("1.0", tkinter.END)
+        # ★privilege_escalation_method
         if self.resource_info_dict["combobox_privilege_escalation_method"].current() == -1:
             credential_privilege_escalation_method = 0
         else:
@@ -3115,6 +3551,7 @@ class UpdateResourceInFrame:
         credential_privilege_escalation_username = self.resource_info_dict["sv_privilege_escalation_username"].get()
         credential_privilege_escalation_password = self.resource_info_dict["sv_privilege_escalation_password"].get()
         credential_auth_url = self.resource_info_dict["sv_auth_url"].get()
+        # ★ssl_verify
         if self.resource_info_dict["combobox_ssl_verify"].current() == -1:
             credential_ssl_verify = 0
         else:
@@ -3136,7 +3573,60 @@ class UpdateResourceInFrame:
                                      auth_url=credential_auth_url,
                                      ssl_verify=credential_ssl_verify,
                                      global_info=self.global_info)
-            self.main_window.display_resource_of_nav_frame_r_page(RESOURCE_TYPE_CREDENTIAL)  # 保存credential信息后，返回“显示credential列表”页面
+            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_CREDENTIAL)  # 保存credential信息后，返回“显示credential列表”页面
+
+    def update_host(self):
+        host_name = self.resource_info_dict["sv_name"].get()
+        host_description = self.resource_info_dict["sv_description"].get()
+        # ★项目  凡是combobox未选择的（值为-1）都要设置为默认值0
+        if self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid == -1:
+            host_project_oid = 0
+        else:
+            host_project_oid = self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid
+        host_address = self.resource_info_dict["sv_address"].get()
+        host_ssh_port_str = self.resource_info_dict["sv_ssh_port"].get()
+        # ★ssh_port
+        if host_ssh_port_str != "" and host_ssh_port_str.isdigit():
+            host_ssh_port = int(host_ssh_port_str)
+        else:
+            host_ssh_port = 22
+        # ★telnet_port
+        host_telnet_port_str = self.resource_info_dict["sv_telnet_port"].get()
+        if host_telnet_port_str != "" and host_telnet_port_str.isdigit():
+            host_telnet_port = int(host_telnet_port_str)
+        else:
+            host_telnet_port = 23
+        login_protocol_name_list = ["ssh", "telnet"]
+        # ★login_protocol
+        if self.resource_info_dict["combobox_login_protocol"].current() == -1:
+            host_login_protocol_index = 0
+        else:
+            host_login_protocol_index = self.resource_info_dict["combobox_login_protocol"].current()
+        host_login_protocol = login_protocol_name_list[host_login_protocol_index]
+        # ★first_auth_method
+        if self.resource_info_dict["combobox_first_auth_method"].current() == -1:
+            host_first_auth_method = 0
+        else:
+            host_first_auth_method = self.resource_info_dict["combobox_first_auth_method"].current()
+        # 先更新host的credential_oid_list
+        self.resource_obj.credential_oid_list = []
+        for selected_credential_index in self.resource_info_dict["credential_listbox"].curselection():  # host对象添加凭据列表
+            self.resource_obj.add_credential(self.global_info.credential_obj_list[selected_credential_index])
+        # 更新-host
+        if host_name == '':
+            messagebox.showinfo("编辑主机-Error", f"主机名称不能为空")
+        elif len(host_name) > 128:
+            messagebox.showinfo("编辑主机-Error", f"主机名称>128字符")
+        elif len(host_description) > 256:
+            messagebox.showinfo("编辑主机-Error", f"主机描述>256字符")
+        else:
+            self.resource_obj.update(name=host_name, description=host_description, project_oid=host_project_oid,
+                                     address=host_address,
+                                     ssh_port=host_ssh_port, telnet_port=host_telnet_port,
+                                     login_protocol=host_login_protocol,
+                                     first_auth_method=host_first_auth_method,
+                                     global_info=self.global_info)
+            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_HOST)  # 保存host信息后，返回“显示host列表”页面
 
 
 class DeleteResourceInFrame:
@@ -3153,22 +3643,51 @@ class DeleteResourceInFrame:
         self.resource_type = resource_type
 
     def show(self):  # 入口函数
-        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
-            widget.destroy()
-        if self.resource_type == RESOURCE_TYPE_PROJECT:
-            self.delete_project()
-        elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
-            self.delete_credential()
+        result = messagebox.askyesno("删除资源", f"是否删除'{self.resource_obj.name}'资源对象？")
+        # messagebox.askyesno()参数1为弹窗标题，参数2为弹窗内容，有2个按钮（是，否），点击"是"时返回True
+        if result:
+            for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+                widget.destroy()
+            if self.resource_type == RESOURCE_TYPE_PROJECT:
+                self.delete_project()
+            elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
+                self.delete_credential()
+            elif self.resource_type == RESOURCE_TYPE_HOST:
+                self.delete_host()
+            elif self.resource_type == RESOURCE_TYPE_HOST_GROUP:
+                self.delete_host_group()
+            elif self.resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+                self.delete_inspection_code_block()
+            elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
+                self.delete_inspection_template()
+            else:
+                print("<class DeleteResourceInFrame> resource_type is Unknown")
         else:
-            print("resource_type is Unknown")
+            print("用户取消了删除操作")
 
     def delete_project(self):
         self.global_info.delete_project_obj(self.resource_obj)
-        self.main_window.display_resource_of_nav_frame_r_page(RESOURCE_TYPE_PROJECT)
+        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_PROJECT)
 
     def delete_credential(self):
         self.global_info.delete_credential_obj(self.resource_obj)
-        self.main_window.display_resource_of_nav_frame_r_page(RESOURCE_TYPE_CREDENTIAL)
+        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_CREDENTIAL)
+
+    def delete_host(self):
+        self.global_info.delete_host_obj(self.resource_obj)
+        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_HOST)
+
+    def delete_host_group(self):
+        self.global_info.delete_host_group_obj(self.resource_obj)
+        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_HOST_GROUP)
+
+    def delete_inspection_code_block(self):
+        self.global_info.delete_inspection_code_block_obj(self.resource_obj)
+        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_INSPECTION_CODE_BLOCK)
+
+    def delete_inspection_template(self):
+        self.global_info.delete_inspection_template_obj(self.resource_obj)
+        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_INSPECTION_TEMPLATE)
 
 
 class SaveResourceInMainWindow:
@@ -3187,8 +3706,10 @@ class SaveResourceInMainWindow:
             self.save_project()
         elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
             self.save_credential()
+        elif self.resource_type == RESOURCE_TYPE_HOST:
+            self.save_host()
         else:
-            print("resource_type is Unknown")
+            print("<class SaveResourceInMainWindow> resource_type is Unknown")
 
     def save_project(self):
         project_name = self.resource_info_dict["sv_name"].get()
@@ -3259,9 +3780,64 @@ class SaveResourceInMainWindow:
             self.global_info.credential_obj_list.append(credential)
             self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_CREDENTIAL)  # 保存credential信息后，返回credential展示页面
 
+    def save_host(self):
+        host_name = self.resource_info_dict["sv_name"].get()
+        host_description = self.resource_info_dict["sv_description"].get()
+        # ★project_oid  凡是combobox未选择的（值为-1）都要设置为默认值0
+        if self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid == -1:
+            host_project_oid = 0
+        else:
+            host_project_oid = self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid
+        host_address = self.resource_info_dict["sv_address"].get()
+        host_ssh_port_str = self.resource_info_dict["sv_ssh_port"].get()
+        # ★ssh_port
+        if host_ssh_port_str != "" and host_ssh_port_str.isdigit():
+            host_ssh_port = int(host_ssh_port_str)
+        else:
+            host_ssh_port = 22
+        # ★telnet_port
+        host_telnet_port_str = self.resource_info_dict["sv_telnet_port"].get()
+        if host_telnet_port_str != "" and host_telnet_port_str.isdigit():
+            host_telnet_port = int(host_telnet_port_str)
+        else:
+            host_telnet_port = 23
+        # ★login_protocol
+        if self.resource_info_dict["combobox_login_protocol"].current() == -1:
+            host_login_protocol = "ssh"
+        else:
+            host_login_protocol_index = self.resource_info_dict["combobox_login_protocol"].current()
+            login_protocol_name_list = ["ssh", "telnet"]
+            host_login_protocol = login_protocol_name_list[host_login_protocol_index]
+        # ★first_auth_method
+        if self.resource_info_dict["combobox_first_auth_method"].current() == -1:
+            host_first_auth_method = 0
+        else:
+            host_first_auth_method = self.resource_info_dict["combobox_first_auth_method"].current()
+        # 创建host
+        if host_name == '':
+            messagebox.showinfo("创建主机-Error", f"主机名称不能为空")
+        elif len(host_name) > 128:
+            messagebox.showinfo("创建主机-Error", f"主机名称>128字符")
+        elif len(host_description) > 256:
+            messagebox.showinfo("创建主机-Error", f"主机描述>256字符")
+        elif self.global_info.is_host_name_existed(host_name):
+            messagebox.showinfo("创建主机-Error", f"主机名称 {host_name} 已存在")
+        else:
+            host = Host(name=host_name, description=host_description, project_oid=host_project_oid,
+                        address=host_address,
+                        ssh_port=host_ssh_port, telnet_port=host_telnet_port,
+                        login_protocol=host_login_protocol,
+                        first_auth_method=host_first_auth_method,
+                        global_info=self.global_info)
+            for selected_credential_index in self.resource_info_dict["credential_listbox"].curselection():  # host对象添加凭据列表
+                host.add_credential(self.global_info.credential_obj_list[selected_credential_index])
+            host.save()  # 保存资源对象
+            self.global_info.host_obj_list.append(host)
+            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST)  # 保存host信息后，返回host展示页面
+
 
 if __name__ == '__main__':
     global_info_obj = GlobalInfo()  # 创建全局信息类，用于存储所有资源类的对象
     global_info_obj.load_all_data_from_sqlite3()  # 首先加载数据库，加载所有资源（若未指定数据库文件名称，则默认为"cofable_default.db"）
-    main_window_obj = MainWindow(width=640, height=400, title='cofAble', global_info=global_info_obj)  # 创建程序主界面
+    main_window_obj = MainWindow(width=640, height=400, title='CofAble', global_info=global_info_obj)  # 创建程序主界面
     main_window_obj.show()
