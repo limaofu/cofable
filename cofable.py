@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-02-28
+# update: 2024-02-29
 
 """
 解决问题：
@@ -668,8 +668,8 @@ class InspectionCodeBlock:
     def save(self):
         sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-        # ★查询是否有名为'tb_inspection_code'的表★
-        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_code"'
+        # ★查询是否有名为'tb_inspection_code_block'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_code_block"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         print("exist tables: ", result)
@@ -729,7 +729,8 @@ class InspectionCodeBlock:
                         "interactive_process_method int )"]
             sqlite_cursor.execute(" ".join(sql_list))
         # 开始插入数据
-        sql = f"delete from tb_inspection_code_block_include_code_list where inspection_code_oid='{self.oid}'"  # 每次保存代码前，先删除所有code内容，再去重新插入
+        # ★每次保存代码前，先删除所有code内容，再去重新插入
+        sql = f"delete from tb_inspection_code_block_include_code_list where inspection_code_block_oid='{self.oid}'"
         sqlite_cursor.execute(sql)
         for code in self.code_list:
             sql_list = ["insert into tb_inspection_code_block_include_code_list (inspection_code_block_oid,",
@@ -1786,7 +1787,7 @@ class GlobalInfo:
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_code'的表★
-        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_code"'
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_code_block"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
         print("exist tables: ", result)
@@ -1794,7 +1795,7 @@ class GlobalInfo:
         if len(result) == 0:
             return []
         # 读取数据
-        sql = f"select * from tb_inspection_code"
+        sql = f"select * from tb_inspection_code_block"
         sqlite_cursor.execute(sql)
         search_result = sqlite_cursor.fetchall()
         obj_list = []
@@ -1824,7 +1825,7 @@ class GlobalInfo:
             return []
         # 读取数据
         for inspection_code in inspection_code_list:
-            sql = f"select * from tb_inspection_code_block_include_code_list where inspection_code_oid='{inspection_code.oid}'"
+            sql = f"select * from tb_inspection_code_block_include_code_list where inspection_code_block_oid='{inspection_code.oid}'"
             sqlite_cursor.execute(sql)
             search_result = sqlite_cursor.fetchall()
             for obj_info_tuple in search_result:
@@ -2223,7 +2224,7 @@ class GlobalInfo:
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()
         if len(result) != 0:  # 若查询到有此表，才删除相应数据
-            sql = f"delete from tb_inspection_code_list where inspection_code_block_oid='{obj.oid}'"
+            sql = f"delete from tb_inspection_code_block_include_code_list where inspection_code_block_oid='{obj.oid}'"
             sqlite_cursor.execute(sql)
         sqlite_cursor.close()
         sqlite_conn.commit()
@@ -2364,8 +2365,8 @@ class MainWindow:
         menu_button_host = tkinter.Button(self.nav_frame_l, text="HostGroup管理", width=self.nav_frame_l_width, height=2, bg="white",
                                           command=lambda: self.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST_GROUP))
         menu_button_host.pack(padx=self.padx, pady=self.pady)
-        # Inspect巡检代码-选项按钮
-        menu_button_inspect_code = tkinter.Button(self.nav_frame_l, text="Inspect巡检代码", width=self.nav_frame_l_width, height=2,
+        # Inspect巡检代码块-选项按钮
+        menu_button_inspect_code = tkinter.Button(self.nav_frame_l, text="Inspect巡检代码块", width=self.nav_frame_l_width, height=2,
                                                   bg="white",
                                                   command=lambda: self.nav_frame_r_resource_top_page_display(
                                                       RESOURCE_TYPE_INSPECTION_CODE_BLOCK))
@@ -2418,14 +2419,17 @@ class MainWindow:
         label_host_count_str = "主机数量".ljust(self.view_width, " ") + ": " + str(len(self.global_info.host_obj_list))
         label_host_count = tkinter.Label(self.nav_frame_r, text=label_host_count_str)
         label_host_count.grid(row=3, column=0)
+        label_host_group_count_str = "主机组数量".ljust(self.view_width, " ") + ": " + str(len(self.global_info.host_group_obj_list))
+        label_host_group_count = tkinter.Label(self.nav_frame_r, text=label_host_group_count_str)
+        label_host_group_count.grid(row=4, column=0)
         label_inspect_code_count_str = "巡检代码块数量".ljust(self.view_width - 6, " ") \
                                        + ": " + str(len(self.global_info.inspection_code_block_obj_list))
         label_inspect_code_count = tkinter.Label(self.nav_frame_r, text=label_inspect_code_count_str)
-        label_inspect_code_count.grid(row=4, column=0)
+        label_inspect_code_count.grid(row=5, column=0)
         label_inspect_template_count_str = "巡检模板数量".ljust(self.view_width - 4, " ") + ": " \
                                            + str(len(self.global_info.inspection_template_obj_list))
         label_inspect_template_count = tkinter.Label(self.nav_frame_r, text=label_inspect_template_count_str)
-        label_inspect_template_count.grid(row=5, column=0)
+        label_inspect_template_count.grid(row=6, column=0)
 
     def refresh_label_current_time(self, label):
         label.__setitem__('text', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
@@ -2504,7 +2508,6 @@ class MainWindow:
         nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
         nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
-        # canvas.pack(fill=tkinter.X, expand=tkinter.TRUE)
         nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
         nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
         nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
@@ -2622,6 +2625,10 @@ class CreateResourceInFrame:
             self.create_credential()
         elif self.resource_type == RESOURCE_TYPE_HOST:
             self.create_host()
+        elif self.resource_type == RESOURCE_TYPE_HOST_GROUP:
+            self.create_host_group()
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+            self.create_inspection_code_block()
         else:
             print("<class CreateResourceInFrame> resource_type is Unknown")
         self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
@@ -2846,15 +2853,119 @@ class CreateResourceInFrame:
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
-        self.resource_info_dict["credential_listbox"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
+        self.resource_info_dict["listbox_credential"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
                                                                         yscrollcommand=list_scrollbar.set, selectbackground='pink',
-                                                                        selectforeground='black',
+                                                                        selectforeground='black', exportselection=False,
                                                                         selectborderwidth=2, activestyle='dotbox', height=6)
         for cred in self.global_info.credential_obj_list:
-            self.resource_info_dict["credential_listbox"].insert(tkinter.END, cred.name)  # 添加item选项
-        self.resource_info_dict["credential_listbox"].pack(side="left")
-        list_scrollbar.config(command=self.resource_info_dict["credential_listbox"].yview)
+            self.resource_info_dict["listbox_credential"].insert(tkinter.END, cred.name)  # 添加item选项
+        self.resource_info_dict["listbox_credential"].pack(side="left")
+        list_scrollbar.config(command=self.resource_info_dict["listbox_credential"].yview)
         frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
+
+    def create_host_group(self):
+        # ★创建-host_group
+        label_create_host_group = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 创建主机组 ★★")
+        label_create_host_group.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_create_host_group.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        # ★host_group-名称
+        label_host_group_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组名称")
+        label_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_host_group_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_group_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # ★host_group-描述
+        label_host_group_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
+        label_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_host_group_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                     textvariable=self.resource_info_dict["sv_description"])
+        entry_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_group_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # ★host_group-所属项目
+        label_host_group_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
+        label_host_group_project.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        project_obj_name_list = []
+        for project_obj in self.global_info.project_obj_list:
+            project_obj_name_list.append(project_obj.name)
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+                                                                   state="readonly")
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # ★添加host_group列表
+        label_host_group_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组列表")
+        label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_list.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
+        list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
+        self.resource_info_dict["listbox_host_group"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
+                                                                        yscrollcommand=list_scrollbar.set, selectbackground='pink',
+                                                                        selectforeground='black', exportselection=False,
+                                                                        selectborderwidth=2, activestyle='dotbox', height=6)
+        for host_group in self.global_info.host_group_obj_list:
+            self.resource_info_dict["listbox_host_group"].insert(tkinter.END, host_group.name)  # 添加item选项
+        self.resource_info_dict["listbox_host_group"].pack(side="left")
+        list_scrollbar.config(command=self.resource_info_dict["listbox_host_group"].yview)
+        frame.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # ★添加host列表
+        label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机列表")
+        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_list.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
+        list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
+        self.resource_info_dict["listbox_host"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
+                                                                  yscrollcommand=list_scrollbar.set, selectbackground='pink',
+                                                                  selectforeground='black', exportselection=False,
+                                                                  selectborderwidth=2, activestyle='dotbox', height=6)
+        for host in self.global_info.host_obj_list:
+            self.resource_info_dict["listbox_host"].insert(tkinter.END, host.name)  # 添加item选项
+        self.resource_info_dict["listbox_host"].pack(side="left")
+        list_scrollbar.config(command=self.resource_info_dict["listbox_host"].yview)
+        frame.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+
+    def create_inspection_code_block(self):
+        # ★创建-inspection_code_block
+        label_create_inspection_code_block = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 创建巡检代码块 ★★")
+        label_create_inspection_code_block.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_create_inspection_code_block.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        # ★inspection_code_block-名称
+        label_inspection_code_block_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码块名称")
+        label_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_inspection_code_block_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                         textvariable=self.resource_info_dict["sv_name"])
+        entry_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_code_block_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_code_block-描述
+        label_inspection_code_block_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
+        label_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_inspection_code_block_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                                textvariable=self.resource_info_dict["sv_description"])
+        entry_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_code_block_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_code_block-所属项目
+        label_inspection_code_block_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
+        label_inspection_code_block_project.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        project_obj_name_list = []
+        for project_obj in self.global_info.project_obj_list:
+            project_obj_name_list.append(project_obj.name)
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+                                                                   state="readonly")
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # ★添加巡检代码内容
+        label_inspection_code_block_code_content = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码内容")
+        label_inspection_code_block_code_content.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["text_code_content"] = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], width=40, height=12)
+        self.resource_info_dict["text_code_content"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
 
 
 class ListResourceInFrame:
@@ -2902,12 +3013,13 @@ class ListResourceInFrame:
             resource_display_frame_title = "★★ 项目列表 ★★"
             resource_obj_list = self.global_info.project_obj_list
         # 列出资源
-        label_display_resource = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=resource_display_frame_title)
+        label_display_resource = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+                                               text=resource_display_frame_title + "    数量: " + str(len(resource_obj_list)))
         label_display_resource.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         index = 0
         for obj in resource_obj_list:
             print(obj.name)
-            label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index) + " : ")
+            label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index + 1) + " : ")
             label_index.bind("<MouseWheel>", self.proces_mouse_scroll)
             label_index.grid(row=index + 1, column=0, padx=self.padx, pady=self.pady)
             label_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=obj.name)
@@ -2962,6 +3074,10 @@ class ViewResourceInFrame:
             self.view_credential()
         elif self.resource_type == RESOURCE_TYPE_HOST:
             self.view_host()
+        elif self.resource_type == RESOURCE_TYPE_HOST_GROUP:
+            self.view_host_group()
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+            self.view_inspection_code_block()
         else:
             print("<class ViewResourceInFrame> resource_type is Unknown")
         self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
@@ -3150,6 +3266,123 @@ class ViewResourceInFrame:
                                            RESOURCE_TYPE_HOST))  # 返回主机列表
         button_return.pack()
 
+    def view_host_group(self):
+        # 查看-host_group
+        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
+        obj_info_text.insert(tkinter.END, "★★ 查看主机组 ★★\n")
+        # ★host_group-名称
+        host_group_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
+        obj_info_text.insert(tkinter.END, host_group_name)
+        # ★host_group-id
+        host_group_oid = "主机组id".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.oid + "\n"
+        obj_info_text.insert(tkinter.END, host_group_oid)
+        # ★host_group-描述
+        host_group_description = "描述".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.description + "\n"
+        obj_info_text.insert(tkinter.END, host_group_description)
+        # ★host_group-所属项目+项目id
+        if self.global_info.get_project_by_oid(self.resource_obj.project_oid) is None:  # ★凡是有根据oid查找资源对象的，都要处理None的情况
+            project_name = "Unknown!"
+        else:
+            project_name = self.global_info.get_project_by_oid(self.resource_obj.project_oid).name
+        host_group_project_name = "所属项目".ljust(self.view_width - 4, " ") + ": " + project_name + "\n"
+        obj_info_text.insert(tkinter.END, host_group_project_name)
+        host_group_project_oid = "项目id".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.project_oid + "\n"
+        obj_info_text.insert(tkinter.END, host_group_project_oid)
+        # ★host_group-create_timestamp
+        host_group_create_timestamp = "create_time".ljust(self.view_width, " ") + ": " \
+                                      + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.create_timestamp)) + "\n"
+        obj_info_text.insert(tkinter.END, host_group_create_timestamp)
+        # ★host_group-last_modify_timestamp
+        if self.resource_obj.last_modify_timestamp < 1:
+            last_modify_timestamp = self.resource_obj.create_timestamp
+        else:
+            last_modify_timestamp = self.resource_obj.last_modify_timestamp
+        host_group_last_modify_timestamp = "last_modify_time".ljust(self.view_width, " ") + ": " \
+                                           + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_modify_timestamp)) + "\n"
+        obj_info_text.insert(tkinter.END, host_group_last_modify_timestamp)
+        # ★host_group-列表
+        obj_info_text.insert(tkinter.END, "\n" + "主机组列表".ljust(self.view_width - 5, " ") + ": " + "\n")
+        for host_group_oid in self.resource_obj.host_group_oid_list:  # ★凡是有根据oid查找资源对象的，都要处理None的情况
+            host_group_obj = self.global_info.get_host_group_by_oid(host_group_oid)
+            if host_group_obj is not None:
+                obj_info_text.insert(tkinter.END, "".ljust(self.view_width + 2, " ") + host_group_obj.name + "\n")
+            else:
+                obj_info_text.insert(tkinter.END, "".ljust(self.view_width + 2, " ") + host_group_oid + " Unknown!\n")
+        # ★host-列表
+        obj_info_text.insert(tkinter.END, "\n" + "主机列表".ljust(self.view_width - 4, " ") + ": " + "\n")
+        for host_oid in self.resource_obj.host_oid_list:  # ★凡是有根据oid查找资源对象的，都要处理None的情况
+            host_obj = self.global_info.get_host_by_oid(host_oid)
+            if host_obj is not None:
+                obj_info_text.insert(tkinter.END, "".ljust(self.view_width + 2, " ") + host_obj.name + "\n")
+            else:
+                obj_info_text.insert(tkinter.END, "".ljust(self.view_width + 2, " ") + host_oid + " Unknown!\n")
+        # 显示info Text文本框
+        obj_info_text.pack()
+        # ★★添加“返回主机组列表”按钮★★
+        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回主机组列表",
+                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
+                                           RESOURCE_TYPE_HOST_GROUP))  # 返回主机组列表
+        button_return.pack()
+
+    def view_inspection_code_block(self):
+        # 查看-inspection_code_block
+        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], height=9)  # 创建多行文本框，用于显示资源信息
+        obj_info_text.insert(tkinter.END, "★★ 查看巡检代码块 ★★\n")
+        # ★inspection_code_block-名称
+        inspection_code_block_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
+        obj_info_text.insert(tkinter.END, inspection_code_block_name)
+        # ★inspection_code_block-id
+        inspection_code_block_oid = "巡检代码块id".ljust(self.view_width - 5, " ") + ": " + self.resource_obj.oid + "\n"
+        obj_info_text.insert(tkinter.END, inspection_code_block_oid)
+        # ★inspection_code_block-描述
+        inspection_code_block_description = "描述".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.description + "\n"
+        obj_info_text.insert(tkinter.END, inspection_code_block_description)
+        # ★inspection_code_block-所属项目+项目id
+        if self.global_info.get_project_by_oid(self.resource_obj.project_oid) is None:  # ★凡是有根据oid查找资源对象的，都要处理None的情况
+            project_name = "Unknown!"
+        else:
+            project_name = self.global_info.get_project_by_oid(self.resource_obj.project_oid).name
+        inspection_code_block_project_name = "所属项目".ljust(self.view_width - 4, " ") + ": " + project_name + "\n"
+        obj_info_text.insert(tkinter.END, inspection_code_block_project_name)
+        inspection_code_block_project_oid = "项目id".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.project_oid + "\n"
+        obj_info_text.insert(tkinter.END, inspection_code_block_project_oid)
+        # ★inspection_code_block-create_timestamp
+        inspection_code_block_create_timestamp = "create_time".ljust(self.view_width, " ") + ": " \
+                                                 + time.strftime("%Y-%m-%d %H:%M:%S",
+                                                                 time.localtime(self.resource_obj.create_timestamp)) + "\n"
+        obj_info_text.insert(tkinter.END, inspection_code_block_create_timestamp)
+        # ★inspection_code_block-last_modify_timestamp
+        if self.resource_obj.last_modify_timestamp < 1:
+            last_modify_timestamp = self.resource_obj.create_timestamp
+        else:
+            last_modify_timestamp = self.resource_obj.last_modify_timestamp
+        inspection_code_block_last_modify_timestamp = "last_modify_time".ljust(self.view_width, " ") + ": " \
+                                                      + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_modify_timestamp)) + "\n"
+        obj_info_text.insert(tkinter.END, inspection_code_block_last_modify_timestamp)
+        # 显示info Text文本框
+        obj_info_text.pack()
+        # 列出代码内容
+        label_code_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检命令内容")
+        label_code_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_code_list.pack()
+        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
+        list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
+        listbox_code_content = tkinter.Listbox(frame, selectmode="single", bg="white", bd=2, cursor="arrow",
+                                               yscrollcommand=list_scrollbar.set, selectbackground='pink',
+                                               selectforeground='black', exportselection=False,
+                                               selectborderwidth=2, activestyle='dotbox', height=7, width=50)
+        for code_obj in self.resource_obj.code_list:
+            listbox_code_content.insert(tkinter.END, code_obj.code_content)  # 添加item选项
+        listbox_code_content.pack(side="left")
+        list_scrollbar.config(command=listbox_code_content.yview)
+        frame.pack()
+        # ★★添加“返回主机组列表”按钮★★
+        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回巡检代码块列表",
+                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
+                                           RESOURCE_TYPE_INSPECTION_CODE_BLOCK))  # 返回巡检代码块列表
+        button_return.pack()
+
 
 class EditResourceInFrame:
     """
@@ -3177,6 +3410,10 @@ class EditResourceInFrame:
             self.edit_credential()
         elif self.resource_type == RESOURCE_TYPE_HOST:
             self.edit_host()
+        elif self.resource_type == RESOURCE_TYPE_HOST_GROUP:
+            self.edit_host_group()
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+            self.edit_inspection_code_block()
         else:
             print("<class EditResourceInFrame> resource_type is Unknown")
         self.add_save_and_return_button()
@@ -3234,6 +3471,7 @@ class EditResourceInFrame:
         entry_project_description.bind("<MouseWheel>", self.proces_mouse_scroll)
         entry_project_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
         entry_project_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # ★★更新row_index
         self.current_row_index = 2
 
     def edit_credential(self):
@@ -3368,6 +3606,7 @@ class EditResourceInFrame:
         if self.resource_obj.ssl_verify != -1:
             self.resource_info_dict["combobox_ssl_verify"].current(self.resource_obj.ssl_verify)  # 显示初始值
         self.resource_info_dict["combobox_ssl_verify"].grid(row=12, column=1, padx=self.padx, pady=self.pady)
+        # ★★更新row_index
         self.current_row_index = 12
 
     def edit_host(self):
@@ -3473,20 +3712,168 @@ class EditResourceInFrame:
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
-        self.resource_info_dict["credential_listbox"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
+        self.resource_info_dict["listbox_credential"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
                                                                         yscrollcommand=list_scrollbar.set, selectbackground='pink',
-                                                                        selectforeground='black',
+                                                                        selectforeground='black', exportselection=False,
                                                                         selectborderwidth=2, activestyle='dotbox', height=6)
         for cred in self.global_info.credential_obj_list:
-            self.resource_info_dict["credential_listbox"].insert(tkinter.END, cred.name)  # 添加item选项
+            self.resource_info_dict["listbox_credential"].insert(tkinter.END, cred.name)  # 添加item选项
         for cred_oid in self.resource_obj.credential_oid_list:  # 设置已选择项★★★
             cred_index = self.global_info.get_credential_obj_index_of_list_by_oid(cred_oid)
             if cred_index is not None:
-                self.resource_info_dict["credential_listbox"].select_set(cred_index)
-        self.resource_info_dict["credential_listbox"].pack(side="left")
-        list_scrollbar.config(command=self.resource_info_dict["credential_listbox"].yview)
+                self.resource_info_dict["listbox_credential"].select_set(cred_index)
+        self.resource_info_dict["listbox_credential"].pack(side="left")
+        list_scrollbar.config(command=self.resource_info_dict["listbox_credential"].yview)
         frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
+        # ★★更新row_index
         self.current_row_index = 9
+
+    def edit_host_group(self):
+        # ★创建-host_group
+        label_edit_host_group = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑主机 ★★")
+        label_edit_host_group.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_edit_host_group.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        # ★host_group-名称
+        label_host_group_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机名称")
+        label_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_host_group_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_group_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
+        entry_host_group_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # ★host_group-描述
+        label_host_group_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
+        label_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_host_group_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                     textvariable=self.resource_info_dict["sv_description"])
+        entry_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_group_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
+        entry_host_group_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # ★host_group-所属项目
+        label_host_group_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
+        label_host_group_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_project_oid.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        project_obj_name_list = []
+        project_obj_index = 0
+        index = 0
+        for project_obj in self.global_info.project_obj_list:
+            project_obj_name_list.append(project_obj.name)
+            if self.resource_obj.project_oid == project_obj.oid:
+                project_obj_index = index
+            index += 1
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+                                                                   state="readonly")
+        self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # ★host_group-列表
+        label_host_group_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组列表")
+        label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_list.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
+        list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
+        self.resource_info_dict["listbox_host_group"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
+                                                                        yscrollcommand=list_scrollbar.set, selectbackground='pink',
+                                                                        selectforeground='black', exportselection=False,
+                                                                        selectborderwidth=2, activestyle='dotbox', height=6)
+        for host_group in self.global_info.host_group_obj_list:
+            self.resource_info_dict["listbox_host_group"].insert(tkinter.END, host_group.name)  # 添加item选项
+        for host_group_oid in self.resource_obj.host_group_oid_list:  # 设置已选择项★★★
+            host_group_index = self.global_info.get_host_group_obj_index_of_list_by_oid(host_group_oid)
+            if host_group_index is not None:
+                self.resource_info_dict["listbox_host_group"].select_set(host_group_index)
+        self.resource_info_dict["listbox_host_group"].pack(side="left")
+        list_scrollbar.config(command=self.resource_info_dict["listbox_host_group"].yview)
+        frame.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # ★host-列表
+        label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机列表")
+        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_list.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
+        list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
+        self.resource_info_dict["listbox_host"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
+                                                                  yscrollcommand=list_scrollbar.set, selectbackground='pink',
+                                                                  selectforeground='black', exportselection=False,
+                                                                  selectborderwidth=2, activestyle='dotbox', height=6)
+        for host in self.global_info.host_obj_list:
+            self.resource_info_dict["listbox_host"].insert(tkinter.END, host.name)  # 添加item选项
+        for host_oid in self.resource_obj.host_oid_list:  # 设置已选择项★★★
+            host_index = self.global_info.get_host_obj_index_of_list_by_oid(host_oid)
+            if host_index is not None:
+                self.resource_info_dict["listbox_host"].select_set(host_index)
+        self.resource_info_dict["listbox_host"].pack(side="left")
+        list_scrollbar.config(command=self.resource_info_dict["listbox_host"].yview)
+        frame.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        # ★★更新row_index
+        self.current_row_index = 5
+
+    def edit_inspection_code_block(self):
+        # ★创建-inspection_code_block
+        label_edit_inspection_code_block = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑主机 ★★")
+        label_edit_inspection_code_block.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_edit_inspection_code_block.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        # ★inspection_code_block-名称
+        label_inspection_code_block_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机名称")
+        label_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_inspection_code_block_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                         textvariable=self.resource_info_dict["sv_name"])
+        entry_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_code_block_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
+        entry_inspection_code_block_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_code_block-描述
+        label_inspection_code_block_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
+        label_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_inspection_code_block_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                                textvariable=self.resource_info_dict["sv_description"])
+        entry_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_code_block_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
+        entry_inspection_code_block_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_code_block-所属项目
+        label_inspection_code_block_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
+        label_inspection_code_block_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_project_oid.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        project_obj_name_list = []
+        project_obj_index = 0
+        index = 0
+        for project_obj in self.global_info.project_obj_list:
+            project_obj_name_list.append(project_obj.name)
+            if self.resource_obj.project_oid == project_obj.oid:
+                project_obj_index = index
+            index += 1
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+                                                                   state="readonly")
+        self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # ★命令内容-列表
+        label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检命令内容")
+        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_list.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        # frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        # list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
+        # list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
+        # self.resource_info_dict["listbox_code_content"] = tkinter.Listbox(frame, selectmode="single", bg="white", bd=2, cursor="arrow",
+        #                                                                   yscrollcommand=list_scrollbar.set, selectbackground='pink',
+        #                                                                   selectforeground='black', exportselection=False,
+        #                                                                   selectborderwidth=2, activestyle='dotbox', height=7, width=40)
+        # for code_obj in self.resource_obj.code_list:
+        #     self.resource_info_dict["listbox_code_content"].insert(tkinter.END, code_obj.code_content)  # 添加item选项
+        # self.resource_info_dict["listbox_code_content"].pack(side="left")
+        # list_scrollbar.config(command=self.resource_info_dict["listbox_code_content"].yview)
+        # frame.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["text_code_content"] = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], width=40, height=12)
+        for code_obj in self.resource_obj.code_list:
+            self.resource_info_dict["text_code_content"].insert(tkinter.END, code_obj.code_content + "\n")
+        self.resource_info_dict["text_code_content"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # ★★更新row_index
+        self.current_row_index = 4
 
 
 class UpdateResourceInFrame:
@@ -3509,6 +3896,10 @@ class UpdateResourceInFrame:
             self.update_credential()
         elif self.resource_type == RESOURCE_TYPE_HOST:
             self.update_host()
+        elif self.resource_type == RESOURCE_TYPE_HOST_GROUP:
+            self.update_host_group()
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+            self.update_inspection_code_block()
         else:
             print("<class UpdateResourceInFrame> resource_type is Unknown")
 
@@ -3525,7 +3916,7 @@ class UpdateResourceInFrame:
             messagebox.showinfo("创建项目-Error", f"项目描述>256字符")
         else:
             self.resource_obj.update(name=project_name, description=project_description, global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_PROJECT)  # 保存项目信息后，返回项目展示页面
+            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_PROJECT)  # 更新项目信息后，返回项目展示页面
 
     def update_credential(self):
         credential_name = self.resource_info_dict["sv_name"].get()
@@ -3573,7 +3964,7 @@ class UpdateResourceInFrame:
                                      auth_url=credential_auth_url,
                                      ssl_verify=credential_ssl_verify,
                                      global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_CREDENTIAL)  # 保存credential信息后，返回“显示credential列表”页面
+            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_CREDENTIAL)  # 更新credential信息后，返回“显示credential列表”页面
 
     def update_host(self):
         host_name = self.resource_info_dict["sv_name"].get()
@@ -3610,7 +4001,7 @@ class UpdateResourceInFrame:
             host_first_auth_method = self.resource_info_dict["combobox_first_auth_method"].current()
         # 先更新host的credential_oid_list
         self.resource_obj.credential_oid_list = []
-        for selected_credential_index in self.resource_info_dict["credential_listbox"].curselection():  # host对象添加凭据列表
+        for selected_credential_index in self.resource_info_dict["listbox_credential"].curselection():  # host对象添加凭据列表
             self.resource_obj.add_credential(self.global_info.credential_obj_list[selected_credential_index])
         # 更新-host
         if host_name == '':
@@ -3626,7 +4017,65 @@ class UpdateResourceInFrame:
                                      login_protocol=host_login_protocol,
                                      first_auth_method=host_first_auth_method,
                                      global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_HOST)  # 保存host信息后，返回“显示host列表”页面
+            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_HOST)  # 更新host信息后，返回“显示host列表”页面
+
+    def update_host_group(self):
+        host_group_name = self.resource_info_dict["sv_name"].get()
+        host_group_description = self.resource_info_dict["sv_description"].get()
+        # ★项目  凡是combobox未选择的（值为-1）都要设置为默认值0
+        if self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid == -1:
+            host_group_project_oid = 0
+        else:
+            host_group_project_oid = self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid
+        # 先更新host_group的 host_group_oid_list
+        self.resource_obj.host_group_oid_list = []
+        for selected_host_group_index in self.resource_info_dict["listbox_host_group"].curselection():  # host_group对象添加host_group列表
+            self.resource_obj.add_host_group(self.global_info.host_group_obj_list[selected_host_group_index])
+        # 先更新host_group的 host_oid_list
+        self.resource_obj.host_oid_list = []
+        for selected_host_index in self.resource_info_dict["listbox_host"].curselection():  # host对象添加host列表
+            self.resource_obj.add_host(self.global_info.host_obj_list[selected_host_index])
+        # 更新-host_group
+        if host_group_name == '':
+            messagebox.showinfo("编辑主机组-Error", f"主机组名称不能为空")
+        elif len(host_group_name) > 128:
+            messagebox.showinfo("编辑主机组-Error", f"主机组名称>128字符")
+        elif len(host_group_description) > 256:
+            messagebox.showinfo("编辑主机组-Error", f"主机组描述>256字符")
+        else:
+            self.resource_obj.update(name=host_group_name, description=host_group_description, project_oid=host_group_project_oid,
+                                     global_info=self.global_info)
+            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_HOST_GROUP)  # 更新host_group信息后，返回“显示host_group列表”页面
+
+    def update_inspection_code_block(self):
+        inspection_code_block_name = self.resource_info_dict["sv_name"].get()
+        inspection_code_block_description = self.resource_info_dict["sv_description"].get()
+        # ★项目  凡是combobox未选择的（值为-1）都要设置为默认值0
+        if self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid == -1:
+            inspection_code_block_project_oid = 0
+        else:
+            inspection_code_block_project_oid = self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid
+        # 先更新inspection_code_block的 code_list
+        self.resource_obj.code_list = []
+        code_content_str = self.resource_info_dict["text_code_content"].get("1.0", tkinter.END).strip()
+        code_index = 0
+        for code_line_str in code_content_str.split("\n"):
+            code_line_str_strip = code_line_str.strip()
+            if code_line_str_strip != "":
+                one_line_code_obj = OneLineCode(code_index=code_index, code_content=code_line_str_strip)
+                self.resource_obj.add_code_line(one_line_code_obj)
+        # 更新-inspection_code_block
+        if inspection_code_block_name == '':
+            messagebox.showinfo("编辑巡检代码块-Error", f"巡检代码块名称不能为空")
+        elif len(inspection_code_block_name) > 128:
+            messagebox.showinfo("编辑巡检代码块-Error", f"巡检代码块名称>128字符")
+        elif len(inspection_code_block_description) > 256:
+            messagebox.showinfo("编辑巡检代码块-Error", f"巡检代码块名称>256字符")
+        else:
+            self.resource_obj.update(name=inspection_code_block_name, description=inspection_code_block_description,
+                                     project_oid=inspection_code_block_project_oid,
+                                     global_info=self.global_info)
+            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_INSPECTION_CODE_BLOCK)  # 更新inspection_code_block信息后，返回
 
 
 class DeleteResourceInFrame:
@@ -3708,6 +4157,10 @@ class SaveResourceInMainWindow:
             self.save_credential()
         elif self.resource_type == RESOURCE_TYPE_HOST:
             self.save_host()
+        elif self.resource_type == RESOURCE_TYPE_HOST_GROUP:
+            self.save_host_group()
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+            self.save_inspection_code_block()
         else:
             print("<class SaveResourceInMainWindow> resource_type is Unknown")
 
@@ -3829,11 +4282,72 @@ class SaveResourceInMainWindow:
                         login_protocol=host_login_protocol,
                         first_auth_method=host_first_auth_method,
                         global_info=self.global_info)
-            for selected_credential_index in self.resource_info_dict["credential_listbox"].curselection():  # host对象添加凭据列表
+            for selected_credential_index in self.resource_info_dict["listbox_credential"].curselection():  # host对象添加凭据列表
                 host.add_credential(self.global_info.credential_obj_list[selected_credential_index])
             host.save()  # 保存资源对象
             self.global_info.host_obj_list.append(host)
             self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST)  # 保存host信息后，返回host展示页面
+
+    def save_host_group(self):
+        host_group_name = self.resource_info_dict["sv_name"].get()
+        host_group_description = self.resource_info_dict["sv_description"].get()
+        # ★project_oid  凡是combobox未选择的（值为-1）都要设置为默认值0
+        if self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid == -1:
+            host_group_project_oid = 0
+        else:
+            host_group_project_oid = self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid
+        # 创建host_group
+        if host_group_name == '':
+            messagebox.showinfo("创建主机-Error", f"主机名称不能为空")
+        elif len(host_group_name) > 128:
+            messagebox.showinfo("创建主机-Error", f"主机名称>128字符")
+        elif len(host_group_description) > 256:
+            messagebox.showinfo("创建主机-Error", f"主机描述>256字符")
+        elif self.global_info.is_host_group_name_existed(host_group_name):
+            messagebox.showinfo("创建主机-Error", f"主机名称 {host_group_name} 已存在")
+        else:
+            host_group = HostGroup(name=host_group_name, description=host_group_description, project_oid=host_group_project_oid,
+                                   global_info=self.global_info)
+            for selected_host_index in self.resource_info_dict["listbox_host"].curselection():  # host_group对象添加主机列表
+                host_group.add_host(self.global_info.host_obj_list[selected_host_index])
+            for selected_host_group_index in self.resource_info_dict["listbox_host_group"].curselection():  # host_group对象添加主机组列表
+                host_group.add_host_group(self.global_info.host_group_obj_list[selected_host_group_index])
+            host_group.save()  # 保存资源对象
+            self.global_info.host_group_obj_list.append(host_group)
+            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST_GROUP)  # 保存host_group信息后，返回host_group展示页面
+
+    def save_inspection_code_block(self):
+        inspection_code_block_name = self.resource_info_dict["sv_name"].get()
+        inspection_code_block_description = self.resource_info_dict["sv_description"].get()
+        # ★project_oid  凡是combobox未选择的（值为-1）都要设置为默认值0
+        if self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid == -1:
+            inspection_code_block_project_oid = 0
+        else:
+            inspection_code_block_project_oid = self.global_info.project_obj_list[self.resource_info_dict["combobox_project"].current()].oid
+        # 创建inspection_code_block
+        if inspection_code_block_name == '':
+            messagebox.showinfo("创建巡检代码块-Error", f"巡检代码块名称不能为空")
+        elif len(inspection_code_block_name) > 128:
+            messagebox.showinfo("创建巡检代码块-Error", f"巡检代码块名称>128字符")
+        elif len(inspection_code_block_description) > 256:
+            messagebox.showinfo("创建巡检代码块-Error", f"巡检代码块描述>256字符")
+        elif self.global_info.is_inspection_code_block_name_existed(inspection_code_block_name):
+            messagebox.showinfo("创建巡检代码块-Error", f"巡检代码块名称 {inspection_code_block_name} 已存在")
+        else:
+            inspection_code_block = InspectionCodeBlock(name=inspection_code_block_name, description=inspection_code_block_description,
+                                                        project_oid=inspection_code_block_project_oid,
+                                                        global_info=self.global_info)
+            # ★inspection_code_block对象添加code_line列表
+            code_content_str = self.resource_info_dict["text_code_content"].get("1.0", tkinter.END).strip()
+            code_index = 0
+            for code_line_str in code_content_str.split("\n"):
+                code_line_str_strip = code_line_str.strip()
+                if code_line_str_strip != "":
+                    one_line_code_obj = OneLineCode(code_index=code_index, code_content=code_line_str_strip)
+                    inspection_code_block.add_code_line(one_line_code_obj)
+            inspection_code_block.save()  # 保存资源对象
+            self.global_info.inspection_code_block_obj_list.append(inspection_code_block)
+            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_INSPECTION_CODE_BLOCK)  # 保存后，返回展示页面
 
 
 if __name__ == '__main__':
