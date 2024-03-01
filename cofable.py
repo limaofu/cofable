@@ -21,6 +21,14 @@
 ★. 本次作业命令输出与最近一次（上一次）输出做对比
 ★. 巡检命令输出做基础信息提取与判断并触发告警，告警如何通知人类用户？
 ★. Credential密钥保存时，会有换行符，sql语句不支持，需要修改，已将密钥字符串转为base64   2024年2月25日 完成
+★. 主机 允许添加若干条ip，含ip地址范围
+
+资源操作逻辑：
+★创建-资源      CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
+★列出-资源列表   ListResourceInFrame.show
+★查看-资源      ViewResourceInFrame.show()
+★编辑-资源      EditResourceInFrame.show()    →  UpdateResourceInFrame.update()
+★删除-资源      DeleteResourceInFrame.show()
 """
 
 import io
@@ -779,6 +787,7 @@ class InspectionCodeBlock:
 class InspectionTemplate:
     """
     巡检模板，包含目标主机，可手动触发执行，可定时执行，可周期执行
+    每创建一个<InspecionTemplate>巡检模板 就要求绑定一个<LaunchTemplateTrigger>巡检触发检测对象
     """
 
     def __init__(self, name='default', description='default', project_oid='default',
@@ -890,7 +899,7 @@ class InspectionTemplate:
         # ★查询是否有名为'tb_inspection_template_include_host_list'的表★
         sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_template_include_host_list"'
         sqlite_cursor.execute(sql)
-        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        result = sqlite_cursor.fetchall()
         print("exist tables: ", result)
         if len(result) == 0:  # 若未查询到有此表，则创建此表
             sql_list = ["create table tb_inspection_template_include_host_list",
@@ -912,7 +921,7 @@ class InspectionTemplate:
         # ★查询是否有名为'tb_inspection_template_include_group_list'的表★
         sql = f'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_template_include_group_list"'
         sqlite_cursor.execute(sql)
-        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        result = sqlite_cursor.fetchall()
         print("exist tables: ", result)
         if len(result) == 0:  # 若未查询到有此表，则创建此表
             sql_list = [
@@ -936,10 +945,10 @@ class InspectionTemplate:
         # ★查询是否有名为'tb_inspection_template_include_inspection_code_block_list'的表★
         sql = f'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template_include_inspection_code_block_list"'
         sqlite_cursor.execute(sql)
-        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        result = sqlite_cursor.fetchall()
         print("exist tables: ", result)
         if len(result) == 0:  # 若未查询到有此表，则创建此表
-            sql_list = ["create table tb_inspection_template_include_inspection_code_list",
+            sql_list = ["create table tb_inspection_template_include_inspection_code_block_list",
                         "(inspection_template_oid varchar(36), ",
                         "inspection_code_block_index int, ",
                         "inspection_code_block_oid varchar(36) )"]
@@ -957,6 +966,7 @@ class InspectionTemplate:
                         f"{inspection_code_block_index},",
                         f"'{inspection_code_block_oid}' )"]
             sqlite_cursor.execute(" ".join(sql_list))
+            inspection_code_block_index += 1
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
@@ -997,7 +1007,7 @@ class InspectionTemplate:
 
 class LaunchTemplateTrigger:
     """
-    巡检触发检测类，周期检查是否需要执行某巡检模板，每创建一个巡检模板就要求绑定一个巡检触发检测对象
+    巡检触发检测类，周期检查是否需要执行某巡检模板，每创建一个<InspecionTemplate>巡检模板 就要求绑定一个<LaunchTemplateTrigger>巡检触发检测对象
     """
 
     def __init__(self, name='default', description='default', project_oid='default',
@@ -1047,7 +1057,7 @@ class LaunchInspectionJob:
             self.create_timestamp = create_timestamp
         self.project_oid = project_oid
         self.inspection_template = inspection_template  # InspectionTemplate对象
-        self.unduplicated_host_obj_list = []  # <Host>对象，无重复项
+        self.unduplicated_host_oid_list = []  # host_oid，无重复项
         self.job_state = INSPECTION_CODE_JOB_EXEC_STATE_UNKNOWN
         self.job_exec_finished_host_oid_list = []
         self.job_exec_timeout_host_oid_list = []
@@ -1055,32 +1065,34 @@ class LaunchInspectionJob:
         self.job_find_credential_timeout_host_oid_list = []
         self.global_info = global_info
 
-    def get_unduplicated_host_obj_from_group(self, host_group):  # 从主机组中获取非重复主机
-        for host in host_group.host_obj_list:
-            if host in self.unduplicated_host_obj_list:
-                print(f"get_unduplicated_host_obj_from_group:重复主机：{host.name} *************")
+    def get_unduplicated_host_oid_from_group(self, host_group_oid):  # 从主机组中获取非重复主机
+        host_group = self.global_info.get_host_group_by_oid(host_group_oid)
+        for host_oid in host_group.host_oid_list:
+            if host_oid in self.unduplicated_host_oid_list:
+                print(f"get_unduplicated_host_oid_from_group:重复主机：{self.global_info.get_host_by_oid(host_oid).name} *************")
                 continue
             else:
-                self.unduplicated_host_obj_list.append(host)
-        for group in host_group.host_group_obj_list:
-            self.get_unduplicated_host_obj_from_group(group)
+                self.unduplicated_host_oid_list.append(host_oid)
+        for group_oid in host_group.host_group_oid_list:
+            self.get_unduplicated_host_oid_from_group(group_oid)
         return None
 
-    def get_unduplicated_host_obj_from_inspection_template(self):  # 从巡检模板的主机列表及主机组列表中获取非重复主机
+    def get_unduplicated_host_oid_from_inspection_template(self):  # 从巡检模板的主机列表及主机组列表中获取非重复主机
         if self.inspection_template is None:
             print("巡检模板为空")
             return
-        for host in self.inspection_template.host_obj_list:
-            if host in self.unduplicated_host_obj_list:
-                print(f"get_unduplicated_host_obj_from_inspection_template:重复主机：{host.name} **********")
+        for host in self.inspection_template.host_oid_list:
+            if host in self.unduplicated_host_oid_list:
+                print(f"get_unduplicated_host_oid_from_inspection_template:重复主机：{host.name} **********")
                 continue
             else:
-                self.unduplicated_host_obj_list.append(host)
-        for host_group in self.inspection_template.host_group_obj_list:
-            self.get_unduplicated_host_obj_from_group(host_group)
+                self.unduplicated_host_oid_list.append(host)
+        for host_group_oid in self.inspection_template.host_group_oid_list:
+            self.get_unduplicated_host_oid_from_group(host_group_oid)
 
     def create_ssh_operator_invoke_shell(self, host, cred):
-        for inspection_code_obj in self.inspection_template.inspection_code_obj_list:  # 注意：巡检代码不去重
+        for inspection_code_block_oid in self.inspection_template.inspection_code_block_oid_list:  # 注意：巡检代码块不去重
+            inspection_code_obj=self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
             if cred.cred_type == CRED_TYPE_SSH_PASS:
                 auth_method = AUTH_METHOD_SSH_PASS
             else:
@@ -1115,33 +1127,33 @@ class LaunchInspectionJob:
         print(f">>>>>>>>>>>>>>>>>> 目标主机：{host.name} 已巡检完成，远程方式: ssh <<<<<<<<<<<<<<<<<<")
 
     def operator_job_thread(self, host_index):
-        host = self.unduplicated_host_obj_list[host_index]
-        print(f"\n>>>>>>>>>>>>>>>>>> 目标主机：{host.name} 开始巡检 <<<<<<<<<<<<<<<<<<")
-        if host.login_protocol == "ssh":
+        host_obj = self.global_info.get_host_by_oid(self.unduplicated_host_oid_list[host_index])
+        print(f"\n>>>>>>>>>>>>>>>>>> 目标主机：{host_obj.name} 开始巡检 <<<<<<<<<<<<<<<<<<")
+        if host_obj.login_protocol == "ssh":
             try:
-                cred = self.find_ssh_credential(host)  # 查找可用的登录凭据，这里会登录一次目标主机
-            except TimeoutError as e:
-                print("查找可用的凭据超时，", e)
-                self.job_find_credential_timeout_host_oid_list.append(host.oid)
+                cred = self.find_ssh_credential(host_obj)  # 查找可用的登录凭据，这里会登录一次目标主机
+            except Exception as e:
+                print("查找可用的凭据错误，", e)
+                self.job_find_credential_timeout_host_oid_list.append(host_obj.oid)
                 return
             if cred is None:
-                print("Could not find correct credential")
+                print("Credential is None, Could not find correct credential")
                 return
-            self.create_ssh_operator_invoke_shell(host, cred)  # 开始正式作业工作，执行巡检命令，将输出信息保存到文件及数据库
-        elif host.login_protocol == "telnet":
+            self.create_ssh_operator_invoke_shell(host_obj, cred)  # 开始正式作业工作，执行巡检命令，将输出信息保存到文件及数据库
+        elif host_obj.login_protocol == "telnet":
             pass
         else:
             pass
 
-    @staticmethod
-    def find_ssh_credential(host):
+    def find_ssh_credential(self, host):
         """
         查找可用的ssh凭据，会登录一次目标主机
         :param host:
         :return:
         """
         # if host.login_protocol == "ssh":
-        for cred in host.credential_obj_list:
+        for cred_oid in host.credential_oid_list:
+            cred = self.global_info.get_credential_by_oid(cred_oid)
             if cred.cred_type == CRED_TYPE_SSH_PASS:
                 ssh_client = paramiko.client.SSHClient()
                 ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
@@ -1158,7 +1170,11 @@ class LaunchInspectionJob:
                 ssh_client = paramiko.client.SSHClient()
                 ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
                 prikey_obj = io.StringIO(cred.private_key)
-                pri_key = paramiko.RSAKey.from_private_key(prikey_obj)
+                try:
+                    pri_key = paramiko.RSAKey.from_private_key(prikey_obj)
+                except paramiko.ssh_exception.SSHException as e:
+                    # print("not a valid RSA private key file")
+                    raise e
                 try:
                     ssh_client.connect(hostname=host.address, port=host.ssh_port, username=cred.username,
                                        pkey=pri_key,
@@ -1277,7 +1293,7 @@ class LaunchInspectionJob:
         sqlite_conn.close()  # 关闭数据库连接
 
     def judge_completion_of_job(self):
-        if len(self.job_exec_finished_host_oid_list) == len(self.unduplicated_host_obj_list):
+        if len(self.job_exec_finished_host_oid_list) == len(self.unduplicated_host_oid_list):
             self.job_state = INSPECTION_CODE_JOB_EXEC_STATE_SUCCESSFUL
         elif len(self.job_exec_finished_host_oid_list) > 0:
             self.job_state = INSPECTION_CODE_JOB_EXEC_STATE_PART_SUCCESSFUL
@@ -1333,10 +1349,10 @@ class LaunchInspectionJob:
             print("巡检模板为空，结束本次任务")
             return
         start_time = time.time()
-        self.get_unduplicated_host_obj_from_inspection_template()  # ★主机去重
+        self.get_unduplicated_host_oid_from_inspection_template()  # ★主机去重
         print("巡检模板名称：", self.inspection_template.name)
         thread_pool = ThreadPool(processes=self.inspection_template.forks)  # 创建线程池
-        thread_pool.map(self.operator_job_thread, range(len(self.unduplicated_host_obj_list)))  # ★线程池调用巡检作业函数
+        thread_pool.map(self.operator_job_thread, range(len(self.unduplicated_host_oid_list)))  # ★线程池调用巡检作业函数
         thread_pool.close()
         thread_pool.join()
         end_time = time.time()
@@ -1350,7 +1366,7 @@ class LaunchInspectionJob:
 
 class OneLineCode:
     """
-    <inspect_code>对象包含的元素，一行命令为一个<OneLineCode>对象
+    InspectionCodeBlock.code_list列表包含的元素，一行命令为一个<OneLineCode>对象
     """
 
     def __init__(self, code_index=0, code_content='', code_post_wait_time=CODE_POST_WAIT_TIME_DEFAULT,
@@ -1367,7 +1383,7 @@ class OneLineCode:
 
 class SSHOperatorOutput:
     """
-    一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
+    <OneLineCode>对象的一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
     """
 
     def __init__(self, code_index=0, code_content=None, code_exec_method=CODE_EXEC_METHOD_INVOKE_SHELL,
@@ -1403,7 +1419,7 @@ class SSHOperatorOutput:
 
 class SSHOperator:
     """
-    一个<SSHOperator>对象操作一个<InspectionCode>巡检代码的所有命令
+    一个<SSHOperator>对象操作一个<InspectionCodeBlock>巡检代码块的所有命令
     """
 
     def __init__(self, hostname='', username='', password='', private_key='', port=22,
@@ -1416,7 +1432,7 @@ class SSHOperator:
         self.port = port
         self.timeout = timeout  # 单位:秒
         self.auth_method = auth_method
-        self.command_list = command_list  # 元素为 <OneLineCode>对象
+        self.command_list = command_list  # ★★元素为 <OneLineCode> 对象★★
         self.is_finished = False  # False表示命令未执行完成
         self.output_list = []  # 元素类型为 <SSHOperatorOutput>，一条执行命令<OneLineCode>只产生一个output元素
 
@@ -1967,11 +1983,10 @@ class GlobalInfo:
         # 读取数据
         for inspection_template in inspection_template_list:
             sql = f"select * from tb_inspection_template_include_inspection_code_block_list where \
-                    inspection_template_oid='{inspection_template.oid}'"
+            inspection_template_oid='{inspection_template.oid}'"
             sqlite_cursor.execute(sql)
             search_result = sqlite_cursor.fetchall()
             for obj_info_tuple in search_result:
-                # print('tuple: ', obj_info_tuple)
                 inspection_template.inspection_code_block_oid_list.append(obj_info_tuple[2])
 
     def is_project_name_existed(self, project_name):  # 判断项目名称是否已存在项目obj_list里
@@ -3188,6 +3203,12 @@ class ListResourceInFrame:
             button_delete = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="删除", command=delete_obj.show)
             button_delete.bind("<MouseWheel>", self.proces_mouse_scroll)
             button_delete.grid(row=index + 1, column=4, padx=self.padx, pady=self.pady)
+            # ★巡检模板-start
+            if self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
+                start_obj = StartInspectionTemplateInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj)
+                button_start = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="Start", command=start_obj.start)
+                button_start.bind("<MouseWheel>", self.proces_mouse_scroll)
+                button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
             index += 1
         # 信息控件添加完毕
         self.nav_frame_r_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
@@ -4477,7 +4498,7 @@ class UpdateResourceInFrame:
         for selected_host_index in self.resource_info_dict["listbox_host"].curselection():  # 添加host列表
             self.resource_obj.add_host(self.global_info.host_obj_list[selected_host_index])
         # 先更新inspection_template的 inspection_code_block_obj_list
-        self.resource_obj.inspection_code_block_obj_list = []
+        self.resource_obj.inspection_code_block_oid_list = []
         for selected_code_block_index in self.resource_info_dict["listbox_inspection_code_block"].curselection():  # 添加巡检代码块列表
             self.resource_obj.add_inspection_code_block(self.global_info.inspection_code_block_obj_list[selected_code_block_index])
         # 更新-inspection_template-对象本身
@@ -4818,6 +4839,28 @@ class SaveResourceInMainWindow:
             inspection_template.save()  # 保存资源对象
             self.global_info.inspection_template_obj_list.append(inspection_template)
             self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_INSPECTION_TEMPLATE)  # 保存后，返回展示页面
+
+
+class StartInspectionTemplateInFrame:
+    """
+    在主窗口的查看资源界面，启动目标巡检模板作业，并添加用于显示巡检模板执行情况的控件
+    """
+
+    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, inspection_template_obj=None):
+        self.main_window = main_window
+        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.global_info = global_info
+        self.inspection_template_obj = inspection_template_obj
+        self.padx = 2
+        self.pady = 2
+
+    def start(self):
+        print(f"开始启动巡检作业: {self.inspection_template_obj.name}")
+        inspect_job_name = "job-" + self.inspection_template_obj.name + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        # template_project_name=self.global_info.get_project_by_oid(self.inspection_template_obj.project_oid)
+        inspect_job = LaunchInspectionJob(name=inspect_job_name, project_oid=self.inspection_template_obj.project_oid,
+                                          inspection_template=self.inspection_template_obj, global_info=self.global_info)
+        inspect_job.start_job()
 
 
 if __name__ == '__main__':
