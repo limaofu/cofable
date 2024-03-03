@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-01
+# update: 2024-03-03
 
 """
 解决问题：
@@ -1062,8 +1062,10 @@ class LaunchInspectionJob:
         self.job_exec_finished_host_oid_list = []
         self.job_exec_timeout_host_oid_list = []
         self.job_exec_failed_host_oid_list = []
-        self.job_find_credential_timeout_host_oid_list = []
+        self.job_find_credential_failed_host_oid_list = []
         self.global_info = global_info
+        self.start_time = 0
+        self.end_time = 0
 
     def get_unduplicated_host_oid_from_group(self, host_group_oid):  # 从主机组中获取非重复主机
         host_group = self.global_info.get_host_group_by_oid(host_group_oid)
@@ -1092,17 +1094,17 @@ class LaunchInspectionJob:
 
     def create_ssh_operator_invoke_shell(self, host, cred):
         for inspection_code_block_oid in self.inspection_template.inspection_code_block_oid_list:  # 注意：巡检代码块不去重
-            inspection_code_obj=self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
+            inspection_code_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
             if cred.cred_type == CRED_TYPE_SSH_PASS:
                 auth_method = AUTH_METHOD_SSH_PASS
             else:
                 auth_method = AUTH_METHOD_SSH_KEY
-            # 一个<SSHOperator>对象操作一个<InspectionCode>巡检代码的所有命令
-            ssh_opt = SSHOperator(hostname=host.address, port=host.ssh_port, username=cred.username,
-                                  password=cred.password, private_key=cred.private_key, auth_method=auth_method,
-                                  command_list=inspection_code_obj.code_list, timeout=LOGIN_AUTH_TIMEOUT)
+            # 一个<SSHOperator>对象操作一个<InspectionCode>巡检代码块的所有命令
+            ssh_operator = SSHOperator(hostname=host.address, port=host.ssh_port, username=cred.username,
+                                       password=cred.password, private_key=cred.private_key, auth_method=auth_method,
+                                       command_list=inspection_code_obj.code_list, timeout=LOGIN_AUTH_TIMEOUT)
             try:
-                ssh_opt.run_invoke_shell()  # 执行巡检命令，输出信息保存在 ssh_opt.output_list里，元素为<SSHOperatorOutput>
+                ssh_operator.run_invoke_shell()  # 执行巡检命令，输出信息保存在 SSHOperator.output_list里，元素为<SSHOperatorOutput>
             except paramiko.AuthenticationException as e:
                 print(f"目标主机 {host.name} 登录时身份验证失败: {e}")  # 登录验证失败，则此host的所有巡检code都不再继续
                 self.job_exec_failed_host_oid_list.append(host.oid)
@@ -1115,18 +1117,23 @@ class LaunchInspectionJob:
                     break
                 time.sleep(CODE_POST_WAIT_TIME_MAX_TIMEOUT_INTERVAL)
                 max_timeout_index += 1
-                if ssh_opt.is_finished:
+                if ssh_operator.is_finished:
                     print(f"inspection_code: {inspection_code_obj.name} 已执行完成")
                     self.job_exec_finished_host_oid_list.append(host.oid)
                     break
-            if len(ssh_opt.output_list) != 0:
+            if len(ssh_operator.output_list) != 0:
                 # 输出信息保存到文件
-                self.save_ssh_operator_output_to_file(ssh_opt.output_list, host)
+                self.save_ssh_operator_output_to_file(ssh_operator.output_list, host)
                 # 输出信息保存到sqlite数据库
-                self.save_ssh_operator_invoke_shell_output_to_sqlite(ssh_opt.output_list, host, inspection_code_obj)
-        print(f">>>>>>>>>>>>>>>>>> 目标主机：{host.name} 已巡检完成，远程方式: ssh <<<<<<<<<<<<<<<<<<")
+                self.save_ssh_operator_invoke_shell_output_to_sqlite(ssh_operator.output_list, host, inspection_code_obj)
+        print(f"create_ssh_operator_invoke_shell : 目标主机：{host.name} 已巡检完成，远程方式: ssh <<<<<<<<<<<<<<<<<<")
 
     def operator_job_thread(self, host_index):
+        """
+        正式执行主机巡检任务，一台主机一个线程，本函数只处理一台主机
+        :param host_index:
+        :return:
+        """
         host_obj = self.global_info.get_host_by_oid(self.unduplicated_host_oid_list[host_index])
         print(f"\n>>>>>>>>>>>>>>>>>> 目标主机：{host_obj.name} 开始巡检 <<<<<<<<<<<<<<<<<<")
         if host_obj.login_protocol == "ssh":
@@ -1134,14 +1141,14 @@ class LaunchInspectionJob:
                 cred = self.find_ssh_credential(host_obj)  # 查找可用的登录凭据，这里会登录一次目标主机
             except Exception as e:
                 print("查找可用的凭据错误，", e)
-                self.job_find_credential_timeout_host_oid_list.append(host_obj.oid)
+                self.job_find_credential_failed_host_oid_list.append(host_obj.oid)
                 return
             if cred is None:
                 print("Credential is None, Could not find correct credential")
                 return
             self.create_ssh_operator_invoke_shell(host_obj, cred)  # 开始正式作业工作，执行巡检命令，将输出信息保存到文件及数据库
         elif host_obj.login_protocol == "telnet":
-            pass
+            print("使用telnet协议远程目标主机")
         else:
             pass
 
@@ -1346,22 +1353,22 @@ class LaunchInspectionJob:
     def start_job(self):
         print("开始巡检任务 ############################################################")
         if self.inspection_template is None:
-            print("巡检模板为空，结束本次任务")
+            print("巡检模板对象为空，结束本次任务")
             return
-        start_time = time.time()
+        self.start_time = time.time()
         self.get_unduplicated_host_oid_from_inspection_template()  # ★主机去重
         print("巡检模板名称：", self.inspection_template.name)
         thread_pool = ThreadPool(processes=self.inspection_template.forks)  # 创建线程池
-        thread_pool.map(self.operator_job_thread, range(len(self.unduplicated_host_oid_list)))  # ★线程池调用巡检作业函数
+        thread_pool.map(self.operator_job_thread, range(len(self.unduplicated_host_oid_list)))  # ★★线程池调用巡检作业函数★★
         thread_pool.close()
         thread_pool.join()
-        end_time = time.time()
+        self.end_time = time.time()
         print("巡检任务完成 ############################################################")
         print(f"巡检并发数为{self.inspection_template.forks}")
-        print("用时 {:<6.4f} 秒".format(end_time - start_time))
+        print("用时 {:<6.4f} 秒".format(self.end_time - self.start_time))
         # 将作业信息保存到数据库，从数据库读取出来时，不可重构为一个<LaunchInspectionJob>对象
         self.judge_completion_of_job()  # 先判断作业完成情况
-        self.save_to_sqlite(start_time, end_time)
+        self.save_to_sqlite(self.start_time, self.end_time)
 
 
 class OneLineCode:
@@ -1437,7 +1444,12 @@ class SSHOperator:
         self.output_list = []  # 元素类型为 <SSHOperatorOutput>，一条执行命令<OneLineCode>只产生一个output元素
 
     def run_invoke_shell(self):
+        """
+        使用invoke_shell交互式shell进行发送命令
+        :return:
+        """
         if self.command_list is None:
+            print("SSHOperator.run_invoke_shell : command_list is None")
             return None
         ssh_client = paramiko.client.SSHClient()
         ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
@@ -1448,8 +1460,8 @@ class SSHOperator:
                                    password=self.password,
                                    timeout=self.timeout)
             elif self.auth_method == AUTH_METHOD_SSH_KEY:
-                prikey_obj = io.StringIO(self.private_key)
-                pri_key = paramiko.RSAKey.from_private_key(prikey_obj)
+                prikey_string_io = io.StringIO(self.private_key)
+                pri_key = paramiko.RSAKey.from_private_key(prikey_string_io)
                 print("使用ssh_key密钥登录 ##########################")
                 ssh_client.connect(hostname=self.hostname, port=self.port, username=self.username,
                                    pkey=pri_key, timeout=self.timeout)
@@ -1458,7 +1470,7 @@ class SSHOperator:
         except paramiko.AuthenticationException as e:
             # print(f"Authentication Error: {e}")
             raise e
-        time.sleep(CODE_POST_WAIT_TIME_DEFAULT)
+        time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
         ssh_shell = ssh_client.invoke_shell()  # 创建一个交互式shell
         try:
             recv = ssh_shell.recv(65535)  # 获取登录后的输出信息，此时未执行任何命令
@@ -1466,21 +1478,20 @@ class SSHOperator:
             print(e)
             return
         # 创建命令输出对象<SSHOperatorOutput>，一条命令对应一个<SSHOperatorOutput>对象
-        # invoke_shell_output_str_list = recv.decode('utf8').split('\r\n')
-        # invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
-        invoke_shell_output_str = recv.decode('utf8').replace('\r', '')
+        invoke_shell_output_str = recv.decode('utf8').replace('\r', '')  # 登录后的输出信息，换行符为\r\n，这里去除一个\r，只留\n
         output = SSHOperatorOutput(code_index=-1, code_exec_method=CODE_EXEC_METHOD_INVOKE_SHELL,
                                    invoke_shell_output_str=invoke_shell_output_str)
-        self.output_list.append(output)  # 刚登录后的输出信息保存到output对象里
+        self.output_list.append(output)  # 刚登录后的输出信息保存到output_list里
         print("登录后输出内容如下 #############################################")
         print(invoke_shell_output_str)
+        # ★★开始执行正式命令★★
         cmd_index = 0
-        for code in self.command_list:  # 开始执行正式命令
-            if not isinstance(code, OneLineCode):
+        for one_line_code in self.command_list:
+            if not isinstance(one_line_code, OneLineCode):
                 return
-            ssh_shell.send(code.code_content.strip().encode('utf8'))
+            ssh_shell.send(one_line_code.code_content.strip().encode('utf8'))  # 发送巡检命令，一行命令
             ssh_shell.send("\n".encode('utf8'))  # 命令strip()后，不带\n换行，需要额外发送一个换行符
-            time.sleep(code.code_post_wait_time)  # 发送完命令后，要等待系统回复
+            time.sleep(one_line_code.code_post_wait_time)  # 发送完命令后，要等待系统回复★
             try:
                 recv = ssh_shell.recv(65535)
             except Exception as e:
@@ -1492,14 +1503,14 @@ class SSHOperator:
             output_last_line_index = len(output_str_lines) - 1
             output_last_line = output_str_lines[output_last_line_index]  # 命令输出最后一行（shell提示符，不带换行符的）
             output = SSHOperatorOutput(code_index=cmd_index, code_exec_method=CODE_EXEC_METHOD_INVOKE_SHELL,
-                                       code_content=code.code_content, invoke_shell_output_str=invoke_shell_output_str,
+                                       code_content=one_line_code.code_content, invoke_shell_output_str=invoke_shell_output_str,
                                        invoke_shell_output_last_line=output_last_line)
-            self.output_list.append(output)  # 命令输出结果保存到output对象里
+            self.output_list.append(output)  # 命令输出结果保存到output_list里
             print(f"$$ 命令{cmd_index} $$ 输出结果如下 #############################################")
             print(invoke_shell_output_str)
-            print(f"命令输出最后一行（shell提示符，不带换行符的）为:  {output_last_line.encode('utf8')}")  # 提示符末尾有个空格
-            if code.need_interactive:  # 命令如果有交互，则判断交互提问关键词
-                self.process_code_interactive(code, output_last_line, ssh_shell, output)
+            print(f"命令输出最后一行（shell提示符，不带换行符的）为:  {output_last_line.encode('utf8')}")  # 有的提示符末尾有个空格
+            if one_line_code.need_interactive:  # 命令如果需要处理交互情况，则判断交互提问关键词
+                self.process_code_interactive(one_line_code, output_last_line, ssh_shell, output)
             cmd_index += 1
         ssh_shell.close()
         ssh_client.close()
@@ -1519,7 +1530,7 @@ class SSHOperator:
         ret = re.search(code.interactive_question_keyword, output_last_line, re.I)
         if ret is not None:  # 如果匹配上需要交互的提问判断字符串
             print(f"★★匹配到交互关键字 {ret} ，执行交互回答:")
-            ssh_shell.send(code.interactive_answer.encode('utf8'))
+            ssh_shell.send(code.interactive_answer.encode('utf8'))  # 发送交互回答内容，这里不会额外发送\n换行
             # ssh_shell.send("\n".encode('utf8'))  # 命令strip()后，不带\n换行，需要额外发送一个换行符
             time.sleep(code.code_post_wait_time)  # 发送完命令后，要等待系统回复
             try:
@@ -1537,20 +1548,21 @@ class SSHOperator:
                 return
             interactive_output_str_lines = interactive_output_str.split('\n')
             interactive_output_last_line_index = len(interactive_output_str_lines) - 1
-            if code.interactive_process_method == INTERACTIVE_PROCESS_METHOD_LOOP and len(
-                    interactive_output_str_lines) != 0:
-                SSHOperator.process_code_interactive(code,
-                                                     interactive_output_str_lines[interactive_output_last_line_index],
-                                                     ssh_shell, output)
-            if code.interactive_process_method == INTERACTIVE_PROCESS_METHOD_TWICE and len(
-                    interactive_output_str_lines) != 0:
-                SSHOperator.process_code_interactive(code,
-                                                     interactive_output_str_lines[interactive_output_last_line_index],
-                                                     ssh_shell, output, second_time=True)
+            if code.interactive_process_method == INTERACTIVE_PROCESS_METHOD_LOOP and len(interactive_output_str_lines) != 0:
+                SSHOperator.process_code_interactive(code, interactive_output_str_lines[interactive_output_last_line_index], ssh_shell,
+                                                     output)
+            if code.interactive_process_method == INTERACTIVE_PROCESS_METHOD_TWICE and len(interactive_output_str_lines) != 0:
+                SSHOperator.process_code_interactive(code, interactive_output_str_lines[interactive_output_last_line_index], ssh_shell,
+                                                     output, second_time=True)
         else:
+            # 如果没有匹配上需要交互的提问判断字符串，就结束交互
             return
 
     def exec_command(self):
+        """
+        与 run_invoke_shell 相对应，非invoke_shell，不适用于交换机等设备
+        :return:
+        """
         if self.command_list is None:
             return None
         ssh_client = paramiko.client.SSHClient()
@@ -2503,9 +2515,13 @@ class MainWindow:
             else:
                 self.width = self.window_obj.winfo_width()
                 self.height = self.window_obj.winfo_height()
+                self.nav_frame_l_width = int(self.width * 0.2)
+                self.nav_frame_r_width = int(self.width * 0.8)
                 print("size changed")
-                self.window_obj.__setitem__('width', self.width)
-                self.window_obj.__setitem__('height', self.height)
+                # self.window_obj.__setitem__('width', self.width)
+                # self.window_obj.__setitem__('height', self.height)
+                self.window_obj.configure(width=self.width)
+                self.window_obj.configure(height=self.height)
                 self.window_obj.winfo_children()[1].__setitem__('width', self.width * 0.2)
                 self.window_obj.winfo_children()[1].__setitem__('height', self.height)
                 self.window_obj.winfo_children()[2].__setitem__('width', self.width * 0.8)
@@ -3533,18 +3549,25 @@ class ViewResourceInFrame:
         label_code_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检命令内容")
         label_code_list.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_code_list.pack()
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
-        list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
-        list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
-        listbox_code_content = tkinter.Listbox(frame, selectmode="single", bg="white", bd=2, cursor="arrow",
-                                               yscrollcommand=list_scrollbar.set, selectbackground='pink',
-                                               selectforeground='black', exportselection=False,
-                                               selectborderwidth=2, activestyle='dotbox', height=7, width=50)
+        # list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
+        # list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
+        treeview_code_content = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=7,
+                                             columns=("index", "code_content"), show="headings")
+        # 设置每一个列的宽度和对齐的方式
+        treeview_code_content.column("index", width=60, anchor="w")
+        treeview_code_content.column("code_content", width=320, anchor="w")
+        # 设置每个列的标题
+        treeview_code_content.heading("index", text="index")
+        treeview_code_content.heading("code_content", text="code_content")
+        treeview_code_content.pack()
+        # 插入数据
+        index = 0
         for code_obj in self.resource_obj.code_list:
-            listbox_code_content.insert(tkinter.END, code_obj.code_content)  # 添加item选项
-        listbox_code_content.pack(side="left")
-        list_scrollbar.config(command=listbox_code_content.yview)
-        frame.pack()
+            treeview_code_content.insert("", index, values=(index, code_obj.code_content))  # 添加item选项
+            index += 1
+        treeview_code_content.pack()
+        # list_scrollbar.config(command=listbox_code_content.yview)
+        treeview_code_content.pack()
         # ★★添加“返回主机组列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回巡检代码块列表",
                                        command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
