@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-04
+# update: 2024-03-05
 
 """
 解决问题：
@@ -13,6 +13,7 @@
 ★. 登录凭据的选择与多次尝试各同类凭据（当同类型凭据有多个时），只选择第一个能成功登录的cred     2024年1月23日 完成
 ★. ssh密码登录，ssh密钥登录                              2024年1月23日 完成
 ★. 所有输出整理到txt文件                                 2024年1月24日 完成
+★. 所有输出根据模板设置，确认是否自动保存到txt文件以及文件名风格                           2024年3月4日 完成
 ★. 使用多线程，每台主机用一个线程去巡检，并发几个线程          2024年1月25日 完成
 ★. 巡检作业执行完成情况的统计，执行完成，连接超时，认证失败     2024年1月28日 基本完成
 ★. 程序运行后，所有类的对象都要分别加载到一个全局列表里
@@ -20,8 +21,9 @@
 ★. 定时/周期触发巡检模板作业
 ★. 本次作业命令输出与最近一次（上一次）输出做对比
 ★. 巡检命令输出做基础信息提取与判断并触发告警，告警如何通知人类用户？
-★. Credential密钥保存时，会有换行符，sql语句不支持，需要修改，已将密钥字符串转为base64   2024年2月25日 完成
+★. Credential密钥保存时，会有换行符，sql语句不支持，需要修改，已将密钥字符串转为base64      2024年2月25日 完成
 ★. 主机 允许添加若干条ip，含ip地址范围
+★. 巡检命令中有sleep N 之类的命令时，要判断是否完成，根据shell提示符进行判断
 
 资源操作逻辑：
 ★创建-资源      CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -29,9 +31,16 @@
 ★查看-资源      ViewResourceInFrame.show()
 ★编辑-资源      EditResourceInFrame.show()    →  UpdateResourceInFrame.update()
 ★删除-资源      DeleteResourceInFrame.show()
+
+巡检流程：
+★列出-巡检模板列表   ListResourceInFrame.show
+★启动-巡检模板      StartInspectionTemplateInFrame.start()  →  StartInspectionTemplateInFrame.show_inspection_job_status()
+                   线程|→ LaunchInspectionJob.start_job()                                      ↓
+                          线程|→ LaunchInspectionJob.operator_job_thread()                    ←|查询状态
 """
 
 import io
+import os
 import threading
 import uuid
 import time
@@ -92,6 +101,14 @@ RESOURCE_TYPE_HOST = 2
 RESOURCE_TYPE_HOST_GROUP = 3
 RESOURCE_TYPE_INSPECTION_CODE_BLOCK = 4
 RESOURCE_TYPE_INSPECTION_TEMPLATE = 5
+OUTPUT_FILE_NAME_STYLE_HOSTNAME = 0
+OUTPUT_FILE_NAME_STYLE_HOSTNAME_DATE = 1
+OUTPUT_FILE_NAME_STYLE_HOSTNAME_DATE_TIME = 2
+OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME = 3
+OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME_DATE = 4
+OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME_DATE_TIME = 5
+LOGIN_PROTOCOL_SSH = 0
+LOGIN_PROTOCOL_TELNET = 1
 
 
 class Project:
@@ -361,7 +378,7 @@ class Host:
 
     def __init__(self, name='default', description='default', project_oid='default', address='default',
                  ssh_port=22, telnet_port=23, last_modify_timestamp=0, oid=None, create_timestamp=None,
-                 login_protocol='ssh', first_auth_method=FIRST_AUTH_METHOD_PRIKEY, global_info=None):
+                 login_protocol=LOGIN_PROTOCOL_SSH, first_auth_method=FIRST_AUTH_METHOD_PRIKEY, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
@@ -404,7 +421,7 @@ class Host:
                         "ssh_port int,",
                         "telnet_port int,",
                         "last_modify_timestamp double,",
-                        "login_protocol varchar(32),"
+                        "login_protocol int,"
                         "first_auth_method int )"]
             sqlite_cursor.execute(" ".join(sql_list))
         # 开始插入数据
@@ -431,7 +448,7 @@ class Host:
                         f"{self.ssh_port},",
                         f"{self.telnet_port},",
                         f"{self.last_modify_timestamp},"
-                        f"'{self.login_protocol}',"
+                        f"{self.login_protocol},"
                         f"{self.first_auth_method} )"]
             sqlite_cursor.execute(" ".join(sql_list))
         else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
@@ -444,7 +461,7 @@ class Host:
                         f"ssh_port={self.ssh_port},",
                         f"telnet_port={self.telnet_port},",
                         f"last_modify_timestamp={self.last_modify_timestamp},"
-                        f"login_protocol='{self.login_protocol}',"
+                        f"login_protocol={self.login_protocol},"
                         f"first_auth_method={self.first_auth_method}",
                         "where",
                         f"oid='{self.oid}'"]
@@ -793,7 +810,8 @@ class InspectionTemplate:
     def __init__(self, name='default', description='default', project_oid='default',
                  execution_method=EXECUTION_METHOD_NONE, execution_at_time=0,
                  execution_after_time=0, execution_crond_time='default', update_code_on_launch=COF_FALSE,
-                 last_modify_timestamp=0, oid=None, create_timestamp=None, forks=DEFAULT_JOB_FORKS, global_info=None):
+                 last_modify_timestamp=0, oid=None, create_timestamp=None, forks=DEFAULT_JOB_FORKS, save_output_to_file=COF_YES,
+                 output_file_name_style=OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME, global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
@@ -817,6 +835,8 @@ class InspectionTemplate:
         self.update_code_on_launch = update_code_on_launch  # <int> 是否在执行项目任务时自动更新巡检代码
         self.forks = forks
         self.launch_template_trigger_oid = ''  # <str> CronDetectionTrigger对象的oid，此信息不保存到数据库
+        self.save_output_to_file = save_output_to_file  # 保存巡检输出到文本文件，一台主机的巡检输出为一个txt文件
+        self.output_file_name_style = output_file_name_style  # 保存巡检输出的文本文件名称风格
         self.global_info = global_info
 
     def add_host(self, host):
@@ -849,7 +869,9 @@ class InspectionTemplate:
                         "execution_crond_time varchar(128),",
                         "last_modify_timestamp double,",
                         "update_code_on_launch int,",
-                        "forks int )"]
+                        "forks int,",
+                        "save_output_to_file int,",
+                        "output_file_name_style int )"]
             sqlite_cursor.execute(" ".join(sql_list))
         # 开始插入数据
         sql = f"select * from tb_inspection_template where oid='{self.oid}'"
@@ -866,7 +888,9 @@ class InspectionTemplate:
                         "execution_crond_time,",
                         "last_modify_timestamp,",
                         "update_code_on_launch,",
-                        "forks ) values",
+                        "forks,",
+                        "save_output_to_file,",
+                        "output_file_name_style ) values",
                         f"('{self.oid}',",
                         f"'{self.name}',",
                         f"'{self.description}',",
@@ -878,7 +902,9 @@ class InspectionTemplate:
                         f"'{self.execution_crond_time}',",
                         f"{self.last_modify_timestamp},",
                         f"{self.update_code_on_launch},",
-                        f"{self.forks} )"]
+                        f"{self.forks},",
+                        f"{self.save_output_to_file},",
+                        f"{self.output_file_name_style} )"]
             sqlite_cursor.execute(" ".join(sql_list))
         else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
             sql_list = ["update tb_inspection_template set ",
@@ -892,7 +918,9 @@ class InspectionTemplate:
                         f"execution_crond_time='{self.execution_crond_time}',",
                         f"last_modify_timestamp={self.last_modify_timestamp},",
                         f"update_code_on_launch={self.update_code_on_launch},",
-                        f"forks={self.forks}",
+                        f"forks={self.forks},",
+                        f"save_output_to_file={self.save_output_to_file},",
+                        f"output_file_name_style={self.output_file_name_style}",
                         "where",
                         f"oid='{self.oid}'"]
             sqlite_cursor.execute(" ".join(sql_list))
@@ -974,7 +1002,8 @@ class InspectionTemplate:
     def update(self, name=None, description=None, project_oid=None,
                execution_method=None, execution_at_time=None,
                execution_after_time=None, execution_crond_time=None, update_code_on_launch=None,
-               last_modify_timestamp=None, create_timestamp=None, forks=None, global_info=None):
+               last_modify_timestamp=None, create_timestamp=None, forks=None, save_output_to_file=None, output_file_name_style=None,
+               global_info=None):
         if name is not None:
             self.name = name  # <str>
         if description is not None:
@@ -993,6 +1022,10 @@ class InspectionTemplate:
             self.update_code_on_launch = update_code_on_launch
         if forks is not None:
             self.forks = forks
+        if save_output_to_file is not None:
+            self.save_output_to_file = save_output_to_file
+        if output_file_name_style is not None:
+            self.output_file_name_style = output_file_name_style
         if last_modify_timestamp is not None:
             self.last_modify_timestamp = last_modify_timestamp
         else:
@@ -1057,6 +1090,10 @@ class LaunchInspectionJob:
             self.create_timestamp = create_timestamp
         self.project_oid = project_oid
         self.inspection_template = inspection_template  # InspectionTemplate对象
+        if isinstance(inspection_template, InspectionTemplate):
+            self.inspection_template_oid = inspection_template.oid  # InspectionTemplate对象oid
+        else:
+            self.inspection_template_oid = ""
         self.unduplicated_host_oid_list = []  # host_oid，无重复项
         self.unduplicated_host_job_status_list = []  # host的巡检作业状态，无重复项
         self.job_state = INSPECTION_CODE_JOB_EXEC_STATE_UNKNOWN
@@ -1092,10 +1129,10 @@ class LaunchInspectionJob:
                 self.unduplicated_host_oid_list.append(host)
         for host_group_oid in self.inspection_template.host_group_oid_list:
             self.get_unduplicated_host_oid_from_group(host_group_oid)
-        self.unduplicated_host_job_status_list = [INSPECTION_CODE_JOB_EXEC_STATE_UNKNOWN for i in
+        self.unduplicated_host_job_status_list = [INSPECTION_CODE_JOB_EXEC_STATE_UNKNOWN for _ in
                                                   range(len(self.unduplicated_host_oid_list))]
 
-    def create_ssh_operator_invoke_shell(self, host, cred):
+    def create_ssh_operator_invoke_shell(self, host, host_index, cred):
         for inspection_code_block_oid in self.inspection_template.inspection_code_block_oid_list:  # 注意：巡检代码块不去重
             inspection_code_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
             if cred.cred_type == CRED_TYPE_SSH_PASS:
@@ -1111,22 +1148,26 @@ class LaunchInspectionJob:
             except paramiko.AuthenticationException as e:
                 print(f"目标主机 {host.name} 登录时身份验证失败: {e}")  # 登录验证失败，则此host的所有巡检code都不再继续
                 self.job_exec_failed_host_oid_list.append(host.oid)
+                self.unduplicated_host_job_status_list[host_index] = INSPECTION_CODE_JOB_EXEC_STATE_FAILED
                 break
             max_timeout_index = 0
             while True:
                 if max_timeout_index >= CODE_POST_WAIT_TIME_MAX_TIMEOUT_COUNT:
                     print(f"inspection_code: {inspection_code_obj.name} 已达最大超时-未完成")
                     self.job_exec_timeout_host_oid_list.append(host.oid)
+                    self.unduplicated_host_job_status_list[host_index] = INSPECTION_CODE_JOB_EXEC_STATE_FAILED
                     break
                 time.sleep(CODE_POST_WAIT_TIME_MAX_TIMEOUT_INTERVAL)
                 max_timeout_index += 1
                 if ssh_operator.is_finished:
                     print(f"inspection_code: {inspection_code_obj.name} 已执行完成")
                     self.job_exec_finished_host_oid_list.append(host.oid)
+                    self.unduplicated_host_job_status_list[host_index] = INSPECTION_CODE_JOB_EXEC_STATE_COMPLETED
                     break
             if len(ssh_operator.output_list) != 0:
-                # 输出信息保存到文件
-                self.save_ssh_operator_output_to_file(ssh_operator.output_list, host)
+                # 判断是否需要输出信息保存到文件
+                if self.inspection_template.save_output_to_file == COF_YES:
+                    self.save_ssh_operator_output_to_file(ssh_operator.output_list, host, self.inspection_template.output_file_name_style)
                 # 输出信息保存到sqlite数据库
                 self.save_ssh_operator_invoke_shell_output_to_sqlite(ssh_operator.output_list, host, inspection_code_obj)
         print(f"create_ssh_operator_invoke_shell : 目标主机：{host.name} 已巡检完成，远程方式: ssh <<<<<<<<<<<<<<<<<<")
@@ -1138,9 +1179,9 @@ class LaunchInspectionJob:
         :return:
         """
         host_obj = self.global_info.get_host_by_oid(self.unduplicated_host_oid_list[host_index])
-        print(f"\noperator_job_thread >>>>>>>>>>>>>>>>>> 目标主机：{host_obj.name} 开始巡检 <<<<<<<<<<<<<<<<<<")
+        print(f"\nLaunchInspectionJob.operator_job_thread >>>>> 目标主机：{host_obj.name} 开始巡检 <<<<<")
         self.unduplicated_host_job_status_list[host_index] = INSPECTION_CODE_JOB_EXEC_STATE_STARTED
-        if host_obj.login_protocol == "ssh":
+        if host_obj.login_protocol == LOGIN_PROTOCOL_SSH:
             try:
                 cred = self.find_ssh_credential(host_obj)  # 查找可用的登录凭据，这里会登录一次目标主机
             except Exception as e:
@@ -1150,13 +1191,13 @@ class LaunchInspectionJob:
             if cred is None:
                 print("Credential is None, Could not find correct credential")
                 return
-            self.create_ssh_operator_invoke_shell(host_obj, cred)  # 开始正式作业工作，执行巡检命令，将输出信息保存到文件及数据库
-        elif host_obj.login_protocol == "telnet":
+            self.create_ssh_operator_invoke_shell(host_obj, host_index, cred)  # ★★开始正式作业工作，执行巡检命令，将输出信息保存到文件及数据库★★
+        elif host_obj.login_protocol == LOGIN_PROTOCOL_TELNET:
             print("使用telnet协议远程目标主机")
         else:
             pass
         self.unduplicated_host_job_status_list[host_index] = INSPECTION_CODE_JOB_EXEC_STATE_COMPLETED
-        print(f"\noperator_job_thread >>>>>>>>>>>>>>>>>> 目标主机：{host_obj.name} 巡检完成 <<<<<<<<<<<<<<<<<<")
+        print(f"\nLaunchInspectionJob.operator_job_thread >>>>> 目标主机：{host_obj.name} 巡检完成 <<<<<")
 
     def find_ssh_credential(self, host):
         """
@@ -1164,7 +1205,7 @@ class LaunchInspectionJob:
         :param host:
         :return:
         """
-        # if host.login_protocol == "ssh":
+        # if host.login_protocol == LOGIN_PROTOCOL_SSH:
         for cred_oid in host.credential_oid_list:
             cred = self.global_info.get_credential_by_oid(cred_oid)
             if cred.cred_type == CRED_TYPE_SSH_PASS:
@@ -1201,19 +1242,40 @@ class LaunchInspectionJob:
                 continue
         return None
 
-    def save_ssh_operator_output_to_file(self, ssh_operator_output_obj_list, host):
+    def save_ssh_operator_output_to_file(self, ssh_operator_output_obj_list, host, output_file_name_style):
         """
         主机的所有巡检命令输出信息都保存在一个文件里
         :param ssh_operator_output_obj_list:
         :param host:
+        :param output_file_name_style:
         :return:
         """
         localtime = time.localtime(time.time())
-        timestamp_list = [str(localtime.tm_year), self.fmt_time(localtime.tm_mon), self.fmt_time(localtime.tm_mday)]
-        # str(localtime.tm_hour), str(localtime.tm_min), str(localtime.tm_sec)
-        timestamp = "_".join(timestamp_list)  # 年月日，例：2024_01_25
-        file_name_list = [host.name, self.inspection_template.name, timestamp]
-        file_name = "-".join(file_name_list) + '.txt'  # 一台主机的所有巡检命令输出信息都保存在一个文件里：主机名-巡检模板名-日期.txt
+        timestamp_date_list = [str(localtime.tm_year), self.fmt_time(localtime.tm_mon), self.fmt_time(localtime.tm_mday)]
+        timestamp_time_list = [str(localtime.tm_hour), str(localtime.tm_min), str(localtime.tm_sec)]
+        timestamp_date = "-".join(timestamp_date_list)  # 年月日，例：2024-01-25
+        timestamp_time = ".".join(timestamp_time_list)  # 年月日，例：8.50.01
+        if output_file_name_style == OUTPUT_FILE_NAME_STYLE_HOSTNAME:
+            file_name = host.name + '.log'
+        elif output_file_name_style == OUTPUT_FILE_NAME_STYLE_HOSTNAME_DATE:
+            file_name = host.name + "__" + timestamp_date + '.log'
+        elif output_file_name_style == OUTPUT_FILE_NAME_STYLE_HOSTNAME_DATE_TIME:
+            file_name = host.name + "__" + timestamp_date + "__" + timestamp_time + '.log'
+        elif output_file_name_style == OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME:
+            os.makedirs(timestamp_date, exist_ok=True)
+            file_namex = host.name + '.log'
+            file_name = os.path.join(timestamp_date, file_namex)
+        elif output_file_name_style == OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME_DATE:
+            os.makedirs(timestamp_date, exist_ok=True)
+            file_namex = host.name + "__" + timestamp_date + '.log'
+            file_name = os.path.join(timestamp_date, file_namex)
+        elif output_file_name_style == OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME_DATE_TIME:
+            os.makedirs(timestamp_date, exist_ok=True)
+            file_namex = host.name + "__" + timestamp_date + "__" + timestamp_time + '.log'
+            file_name = os.path.join(timestamp_date, file_namex)
+        else:
+            file_name = host.name + '.log'
+        # 一台主机的所有巡检命令输出信息都保存在一个文件里：主机名_巡检模板名_日期.log
         with open(file_name, 'a', encoding='utf8') as file_obj:
             for ssh_operator_output_obj in ssh_operator_output_obj_list:
                 if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_INVOKE_SHELL:
@@ -1345,7 +1407,7 @@ class LaunchInspectionJob:
                         "job_state )  values ",
                         f"( '{self.oid}',",
                         f"'{self.name}',",
-                        f"'{self.inspection_template.oid}',",
+                        f"'{self.inspection_template_oid}',",
                         f"'{self.project_oid}',",
                         f"{start_time},",
                         f"{end_time},",
@@ -1363,17 +1425,17 @@ class LaunchInspectionJob:
         self.start_time = time.time()
         self.get_unduplicated_host_oid_from_inspection_template()  # ★主机去重
         print("巡检模板名称：", self.inspection_template.name)
-        thread_pool = ThreadPool(processes=self.inspection_template.forks)  # 创建线程池
+        thread_pool = ThreadPool(processes=self.inspection_template.forks)  # 创建线程池，线程数量由<InspectionTemplate>.forks决定
         thread_pool.map(self.operator_job_thread, range(len(self.unduplicated_host_oid_list)))  # ★★线程池调用巡检作业函数★★
         thread_pool.close()
-        thread_pool.join()
+        thread_pool.join()  # 会等待所有线程完成
         self.end_time = time.time()
         print("巡检任务完成 ############################################################")
         print(f"巡检并发数为{self.inspection_template.forks}")
         print("用时 {:<6.4f} 秒".format(self.end_time - self.start_time))
         # 将作业信息保存到数据库，从数据库读取出来时，不可重构为一个<LaunchInspectionJob>对象
         self.judge_completion_of_job()  # 先判断作业完成情况
-        self.save_to_sqlite(self.start_time, self.end_time)
+        self.save_to_sqlite(self.start_time, self.end_time)  # 这里保存的只是作业信息，而不是每台主机的巡检命令输出日志
 
 
 class OneLineCode:
@@ -1934,7 +1996,10 @@ class GlobalInfo:
                                      execution_crond_time=obj_info_tuple[8],
                                      last_modify_timestamp=obj_info_tuple[9],
                                      update_code_on_launch=obj_info_tuple[10],
-                                     forks=obj_info_tuple[11], global_info=self)
+                                     forks=obj_info_tuple[11],
+                                     save_output_to_file=obj_info_tuple[12],
+                                     output_file_name_style=obj_info_tuple[13],
+                                     global_info=self)
             obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -2131,6 +2196,15 @@ class GlobalInfo:
                 return index
             index += 1
         return None
+
+    def get_inspection_job_obj_by_inspection_template_oid(self, oid):
+        index = 0
+        existed_inspection_job_obj_list = []
+        for obj in self.inspection_job_obj_list:
+            if obj.inspection_template_oid == oid:
+                existed_inspection_job_obj_list.append(obj)
+            index += 1
+        return existed_inspection_job_obj_list
 
     def delete_project_obj_by_oid(self, oid):
         """
@@ -3098,10 +3172,30 @@ class CreateResourceInFrame:
         spinbox_inspection_template_forks = tkinter.Spinbox(self.nav_frame_r_widget_dict["frame"], from_=1, to=256, increment=1,
                                                             textvariable=self.resource_info_dict["sv_forks"])
         spinbox_inspection_template_forks.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_template-save_output_to_file
+        label_inspection_template_save_output_to_file = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="自动保存巡检日志到文件")
+        label_inspection_template_save_output_to_file.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_save_output_to_file.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        save_output_to_file_name_list = ["No", "Yes"]
+        self.resource_info_dict["combobox_save_output_to_file"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                                               values=save_output_to_file_name_list,
+                                                                               state="readonly")
+        self.resource_info_dict["combobox_save_output_to_file"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_template-output_file_name_style
+        label_inspection_template_output_file_name_style = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检日志文件名称")
+        label_inspection_template_output_file_name_style.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_output_file_name_style.grid(row=8, column=0, padx=self.padx, pady=self.pady)
+        output_file_name_style_name_list = ["HOSTNAME", "HOSTNAME-DATE", "HOSTNAME-DATE-TIME", "DATE_DIR/HOSTNAME",
+                                            "DATE_DIR/HOSTNAME-DATE",
+                                            "DATE_DIR/HOSTNAME-DATE-TIME"]
+        self.resource_info_dict["combobox_output_file_name_style"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                                                  values=output_file_name_style_name_list,
+                                                                                  state="readonly", width=32)
+        self.resource_info_dict["combobox_output_file_name_style"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★添加host_group列表
         label_host_group_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组列表")
         label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_host_group_list.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        label_host_group_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -3113,11 +3207,11 @@ class CreateResourceInFrame:
             self.resource_info_dict["listbox_host_group"].insert(tkinter.END, host_group.name)  # 添加item选项
         self.resource_info_dict["listbox_host_group"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_host_group"].yview)
-        frame.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★添加host列表
         label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机列表")
         label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_host_list.grid(row=8, column=0, padx=self.padx, pady=self.pady)
+        label_host_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -3129,11 +3223,11 @@ class CreateResourceInFrame:
             self.resource_info_dict["listbox_host"].insert(tkinter.END, host.name)  # 添加item选项
         self.resource_info_dict["listbox_host"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_host"].yview)
-        frame.grid(row=8, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
         # ★添加-巡检代码块列表
         label_inspection_code_block_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码块列表")
         label_inspection_code_block_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_code_block_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_code_block_list.grid(row=11, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -3147,7 +3241,7 @@ class CreateResourceInFrame:
             self.resource_info_dict["listbox_inspection_code_block"].insert(tkinter.END, cred.name)  # 添加item选项
         self.resource_info_dict["listbox_inspection_code_block"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_inspection_code_block"].yview)
-        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=11, column=1, padx=self.padx, pady=self.pady)
 
 
 class ListResourceInFrame:
@@ -3422,6 +3516,16 @@ class ViewResourceInFrame:
         # ★host-address
         host_address = "address".ljust(self.view_width, " ") + ": " + self.resource_obj.address + "\n"
         obj_info_text.insert(tkinter.END, host_address)
+        # ★host-login_protocol
+        login_protocol_name_list = ["ssh", "telnet"]
+        host_login_protocol = "远程登录类型".ljust(self.view_width - 6, " ") + ": " + login_protocol_name_list[
+            self.resource_obj.login_protocol] + "\n"
+        obj_info_text.insert(tkinter.END, host_login_protocol)
+        # ★host-first_auth_method
+        first_auth_method_name_list = ["priKey", "password"]
+        host_first_auth_method = "优先认证类型".ljust(self.view_width - 6, " ") + ": " + first_auth_method_name_list[
+            self.resource_obj.first_auth_method] + "\n"
+        obj_info_text.insert(tkinter.END, host_first_auth_method)
         # ★host-ssh_port
         host_ssh_port = "ssh_port".ljust(self.view_width, " ") + ": " + str(self.resource_obj.ssh_port) + "\n"
         obj_info_text.insert(tkinter.END, host_ssh_port)
@@ -3613,6 +3717,18 @@ class ViewResourceInFrame:
         # ★inspection_template-forks
         inspection_template_forks = "运行线程数".ljust(self.view_width - 5, " ") + ": " + str(self.resource_obj.forks) + "\n"
         obj_info_text.insert(tkinter.END, inspection_template_forks)
+        # ★inspection_template-save_output_to_file
+        save_output_to_file_name_list = ["No", "Yes"]
+        inspection_template_name = "自动保存巡检日志到文件".ljust(self.view_width - 11, " ") + ": " + save_output_to_file_name_list[
+            self.resource_obj.save_output_to_file] + "\n"
+        obj_info_text.insert(tkinter.END, inspection_template_name)
+        # ★inspection_template-output_file_name_style
+        output_file_name_style_name_list = ["HOSTNAME", "HOSTNAME-DATE", "HOSTNAME-DATE-TIME", "DATE_DIR/HOSTNAME",
+                                            "DATE_DIR/HOSTNAME-DATE",
+                                            "DATE_DIR/HOSTNAME-DATE-TIME"]
+        inspection_template_name = "巡检日志文件名称".ljust(self.view_width - 8, " ") + ": " + output_file_name_style_name_list[
+            self.resource_obj.output_file_name_style] + "\n"
+        obj_info_text.insert(tkinter.END, inspection_template_name)
         # ★inspection_template-create_timestamp
         inspection_template_create_timestamp = "create_time".ljust(self.view_width, " ") + ": " \
                                                + time.strftime("%Y-%m-%d %H:%M:%S",
@@ -3961,16 +4077,10 @@ class EditResourceInFrame:
         label_host_login_protocol.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_host_login_protocol.grid(row=7, column=0, padx=self.padx, pady=self.pady)
         login_protocol_name_list = ["ssh", "telnet"]
-        login_protocol_index = 0
-        index = 0
-        for login_protocol_name in login_protocol_name_list:
-            if self.resource_obj.login_protocol == login_protocol_name:
-                login_protocol_index = index
-                index += 1
         self.resource_info_dict["combobox_login_protocol"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
                                                                           values=login_protocol_name_list,
                                                                           state="readonly")
-        self.resource_info_dict["combobox_login_protocol"].current(login_protocol_index)
+        self.resource_info_dict["combobox_login_protocol"].current(self.resource_obj.login_protocol)
         self.resource_info_dict["combobox_login_protocol"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★host-first_auth_method
         label_host_first_auth_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="优先认证类型")
@@ -4222,10 +4332,32 @@ class EditResourceInFrame:
                                                             textvariable=self.resource_info_dict["sv_forks"])
         self.resource_info_dict["sv_forks"].set(self.resource_obj.forks)  # 显示初始值，可编辑
         spinbox_inspection_template_forks.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_template-save_output_to_file
+        label_inspection_template_save_output_to_file = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="自动保存巡检日志到文件")
+        label_inspection_template_save_output_to_file.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_save_output_to_file.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        save_output_to_file_name_list = ["No", "Yes"]
+        self.resource_info_dict["combobox_save_output_to_file"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                                               values=save_output_to_file_name_list,
+                                                                               state="readonly")
+        self.resource_info_dict["combobox_save_output_to_file"].current(self.resource_obj.save_output_to_file)
+        self.resource_info_dict["combobox_save_output_to_file"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_template-output_file_name_style
+        label_inspection_template_output_file_name_style = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检日志文件名称")
+        label_inspection_template_output_file_name_style.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_output_file_name_style.grid(row=8, column=0, padx=self.padx, pady=self.pady)
+        output_file_name_style_name_list = ["HOSTNAME", "HOSTNAME-DATE", "HOSTNAME-DATE-TIME", "DATE_DIR/HOSTNAME",
+                                            "DATE_DIR/HOSTNAME-DATE",
+                                            "DATE_DIR/HOSTNAME-DATE-TIME"]
+        self.resource_info_dict["combobox_output_file_name_style"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                                                  values=output_file_name_style_name_list,
+                                                                                  state="readonly", width=32)
+        self.resource_info_dict["combobox_output_file_name_style"].current(self.resource_obj.output_file_name_style)
+        self.resource_info_dict["combobox_output_file_name_style"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★host_group-列表
         label_host_group_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组列表")
         label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_host_group_list.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        label_host_group_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -4241,11 +4373,11 @@ class EditResourceInFrame:
                 self.resource_info_dict["listbox_host_group"].select_set(host_group_index)
         self.resource_info_dict["listbox_host_group"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_host_group"].yview)
-        frame.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★host-列表
         label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机列表")
         label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_host_list.grid(row=8, column=0, padx=self.padx, pady=self.pady)
+        label_host_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -4261,11 +4393,11 @@ class EditResourceInFrame:
                 self.resource_info_dict["listbox_host"].select_set(host_index)
         self.resource_info_dict["listbox_host"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_host"].yview)
-        frame.grid(row=8, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
         # ★巡检代码块-列表
         label_inspection_code_block_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码块列表")
         label_inspection_code_block_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_code_block_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_code_block_list.grid(row=11, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -4283,9 +4415,9 @@ class EditResourceInFrame:
                 self.resource_info_dict["listbox_inspection_code_block"].select_set(inspection_code_block_index)
         self.resource_info_dict["listbox_inspection_code_block"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_inspection_code_block"].yview)
-        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=11, column=1, padx=self.padx, pady=self.pady)
         # ★★更新row_index
-        self.current_row_index = 9
+        self.current_row_index = 11
 
 
 class UpdateResourceInFrame:
@@ -4403,13 +4535,11 @@ class UpdateResourceInFrame:
             host_telnet_port = int(host_telnet_port_str)
         else:
             host_telnet_port = 23
-        login_protocol_name_list = ["ssh", "telnet"]
         # ★login_protocol
         if self.resource_info_dict["combobox_login_protocol"].current() == -1:
-            host_login_protocol_index = 0
+            host_login_protocol = 0
         else:
-            host_login_protocol_index = self.resource_info_dict["combobox_login_protocol"].current()
-        host_login_protocol = login_protocol_name_list[host_login_protocol_index]
+            host_login_protocol = self.resource_info_dict["combobox_login_protocol"].current()
         # ★first_auth_method
         if self.resource_info_dict["combobox_first_auth_method"].current() == -1:
             host_first_auth_method = 0
@@ -4516,6 +4646,16 @@ class UpdateResourceInFrame:
             inspection_template_update_code_on_launch = self.resource_info_dict["combobox_update_code_on_launch"].current()
         # ★forks
         inspection_template_forks = int(self.resource_info_dict["sv_forks"].get())
+        # ★save_output_to_file
+        if self.resource_info_dict["combobox_save_output_to_file"].current() == -1:
+            inspection_template_save_output_to_file = 0
+        else:
+            inspection_template_save_output_to_file = self.resource_info_dict["combobox_save_output_to_file"].current()
+        # ★output_file_name_style
+        if self.resource_info_dict["combobox_output_file_name_style"].current() == -1:
+            inspection_template_output_file_name_style = 0
+        else:
+            inspection_template_output_file_name_style = self.resource_info_dict["combobox_output_file_name_style"].current()
         # 先更新inspection_template的 host_group_oid_list
         self.resource_obj.host_group_oid_list = []
         for selected_host_group_index in self.resource_info_dict["listbox_host_group"].curselection():  # 添加host_group列表
@@ -4539,6 +4679,8 @@ class UpdateResourceInFrame:
             self.resource_obj.update(name=inspection_template_name, description=inspection_template_description,
                                      project_oid=project_oid, execution_method=inspection_template_execution_method,
                                      update_code_on_launch=inspection_template_update_code_on_launch, forks=inspection_template_forks,
+                                     save_output_to_file=inspection_template_save_output_to_file,
+                                     output_file_name_style=inspection_template_output_file_name_style,
                                      global_info=self.global_info)
             self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_INSPECTION_TEMPLATE)  # 更新信息后，返回“显示资源列表”页面
 
@@ -4725,11 +4867,9 @@ class SaveResourceInMainWindow:
             host_telnet_port = 23
         # ★login_protocol
         if self.resource_info_dict["combobox_login_protocol"].current() == -1:
-            host_login_protocol = "ssh"
+            host_login_protocol = 0  # LOGIN_PROTOCOL_SSH
         else:
-            host_login_protocol_index = self.resource_info_dict["combobox_login_protocol"].current()
-            login_protocol_name_list = ["ssh", "telnet"]
-            host_login_protocol = login_protocol_name_list[host_login_protocol_index]
+            host_login_protocol = self.resource_info_dict["combobox_login_protocol"].current()
         # ★first_auth_method
         if self.resource_info_dict["combobox_first_auth_method"].current() == -1:
             host_first_auth_method = 0
@@ -4841,6 +4981,16 @@ class SaveResourceInMainWindow:
             inspection_template_update_code_on_launch = self.resource_info_dict["combobox_update_code_on_launch"].current()
         # ★forks
         inspection_template_forks = int(self.resource_info_dict["sv_forks"].get())
+        # ★save_output_to_file
+        if self.resource_info_dict["combobox_save_output_to_file"].current() == -1:
+            inspection_template_save_output_to_file = 0
+        else:
+            inspection_template_save_output_to_file = self.resource_info_dict["combobox_save_output_to_file"].current()
+        # ★output_file_name_style
+        if self.resource_info_dict["combobox_output_file_name_style"].current() == -1:
+            inspection_template_output_file_name_style = 0
+        else:
+            inspection_template_output_file_name_style = self.resource_info_dict["combobox_output_file_name_style"].current()
         # 创建inspection_template
         if inspection_template_name == '':
             messagebox.showinfo("创建巡检模板-Error", f"巡检模板名称不能为空")
@@ -4855,6 +5005,8 @@ class SaveResourceInMainWindow:
                                                      project_oid=project_oid, forks=inspection_template_forks,
                                                      execution_method=inspection_template_execution_method,
                                                      update_code_on_launch=inspection_template_update_code_on_launch,
+                                                     save_output_to_file=inspection_template_save_output_to_file,
+                                                     output_file_name_style=inspection_template_output_file_name_style,
                                                      global_info=self.global_info)
             # ★inspection_template对象添加 主机、主机组、巡检代码块
             for selected_host_index in self.resource_info_dict["listbox_host"].curselection():  # 添加主机列表
@@ -4885,21 +5037,36 @@ class StartInspectionTemplateInFrame:
         self.current_row_index = 0
 
     def start(self):
-        print(f"开始启动巡检作业: {self.inspection_template_obj.name}")
-        inspect_job_name = "job-" + self.inspection_template_obj.name + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        # template_project_name=self.global_info.get_project_by_oid(self.inspection_template_obj.project_oid)
-        self.current_inspection_job_obj = LaunchInspectionJob(name=inspect_job_name, project_oid=self.inspection_template_obj.project_oid,
-                                                              inspection_template=self.inspection_template_obj,
-                                                              global_info=self.global_info)
-        self.global_info.inspection_job_obj_list.append(self.current_inspection_job_obj)
-        job_thread = threading.Thread(target=self.current_inspection_job_obj.start_job)
-        job_thread.start()  # 线程start后，不要join()，主界面才不会卡住
-        # ★进入作业详情页面★
-        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
-            widget.destroy()
-        self.show_inspection_job_status()
-        self.add_return_button()
-        self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
+        existed_inspection_job_obj_list = self.global_info.get_inspection_job_obj_by_inspection_template_oid(
+            self.inspection_template_obj.oid)
+        if len(existed_inspection_job_obj_list) > 0:
+            print("已有历史巡检作业！")
+            for job in existed_inspection_job_obj_list:
+                if job.job_state == INSPECTION_CODE_JOB_EXEC_STATE_STARTED:
+                    messagebox.showinfo("启动巡检作业", "还有历史作业未完成，无法启动新的巡检作业！")
+                    return
+        else:
+            pass
+        result = messagebox.askyesno("启动巡检作业", "是否立即启动巡检作业？")
+        if result:
+            print(f"开始启动巡检作业: {self.inspection_template_obj.name}")
+            inspect_job_name = "job-" + self.inspection_template_obj.name + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            # template_project_name=self.global_info.get_project_by_oid(self.inspection_template_obj.project_oid)
+            self.current_inspection_job_obj = LaunchInspectionJob(name=inspect_job_name,
+                                                                  project_oid=self.inspection_template_obj.project_oid,
+                                                                  inspection_template=self.inspection_template_obj,
+                                                                  global_info=self.global_info)
+            self.global_info.inspection_job_obj_list.append(self.current_inspection_job_obj)
+            job_thread = threading.Thread(target=self.current_inspection_job_obj.start_job)
+            job_thread.start()  # 线程start后，不要join()，主界面才不会卡住
+            # ★进入作业详情页面★
+            for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+                widget.destroy()
+            self.show_inspection_job_status()
+            self.add_return_button()
+            self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
+        else:
+            print("取消启动巡检作业")
 
     def proces_mouse_scroll(self, event):
         if event.delta > 0:
@@ -5003,7 +5170,7 @@ class StartInspectionTemplateInFrame:
                 index, host_obj.name, status_name_list[self.current_inspection_job_obj.unduplicated_host_job_status_list[index]]))
             index += 1
         inspection_host_treeview.grid(row=6, column=1, padx=self.padx, pady=self.pady)
-        inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
+        inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)  # 定时刷新主机巡检作业状态
         # ★★更新row_index
         self.current_row_index = 6
 
@@ -5017,6 +5184,9 @@ class StartInspectionTemplateInFrame:
             inspection_host_treeview.insert("", index, values=(
                 index, host_obj.name, status_name_list[self.current_inspection_job_obj.unduplicated_host_job_status_list[index]]))
             index += 1
+        # 只有巡检作业未完成时才刷新主机巡检作业状态，完成（包含失败）都不再去更新主机状态
+        if self.current_inspection_job_obj.job_state == INSPECTION_CODE_JOB_EXEC_STATE_UNKNOWN:
+            inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
 
 
 if __name__ == '__main__':
