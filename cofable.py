@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-05
+# update: 2024-03-06
 
 """
 解决问题：
@@ -24,6 +24,8 @@
 ★. Credential密钥保存时，会有换行符，sql语句不支持，需要修改，已将密钥字符串转为base64      2024年2月25日 完成
 ★. 主机 允许添加若干条ip，含ip地址范围
 ★. 巡检命令中有sleep N 之类的命令时，要判断是否完成，根据shell提示符进行判断
+★. 遗留：编辑或创建巡检代码时，要求能设置每条命令的 交互回复
+★. 没有创建项目时，就创建其他资源，要生成默认的项目，名为default的项目
 
 资源操作逻辑：
 ★创建-资源      CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -109,6 +111,7 @@ OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME_DATE = 4
 OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME_DATE_TIME = 5
 LOGIN_PROTOCOL_SSH = 0
 LOGIN_PROTOCOL_TELNET = 1
+MAX_INTERACTIVE_TIME = 5000  # 最大交互处理次数
 
 
 class Project:
@@ -1109,7 +1112,8 @@ class LaunchInspectionJob:
         host_group = self.global_info.get_host_group_by_oid(host_group_oid)
         for host_oid in host_group.host_oid_list:
             if host_oid in self.unduplicated_host_oid_list:
-                print(f"get_unduplicated_host_oid_from_group:重复主机：{self.global_info.get_host_by_oid(host_oid).name} *************")
+                print("LaunchInspectionJob.get_unduplicated_host_oid_from_group:",
+                      f"重复主机: {self.global_info.get_host_by_oid(host_oid).name}")
                 continue
             else:
                 self.unduplicated_host_oid_list.append(host_oid)
@@ -1119,14 +1123,15 @@ class LaunchInspectionJob:
 
     def get_unduplicated_host_oid_from_inspection_template(self):  # 从巡检模板的主机列表及主机组列表中获取非重复主机
         if self.inspection_template is None:
-            print("巡检模板为空")
+            print("LaunchInspectionJob.get_unduplicated_host_oid_from_inspection_template: 巡检模板为空")
             return
-        for host in self.inspection_template.host_oid_list:
-            if host in self.unduplicated_host_oid_list:
-                print(f"get_unduplicated_host_oid_from_inspection_template:重复主机：{host.name} **********")
+        for host_oid in self.inspection_template.host_oid_list:
+            if host_oid in self.unduplicated_host_oid_list:
+                print("LaunchInspectionJob.get_unduplicated_host_oid_from_inspection_template:",
+                      f"重复主机: {self.global_info.get_host_by_oid(host_oid).name}")
                 continue
             else:
-                self.unduplicated_host_oid_list.append(host)
+                self.unduplicated_host_oid_list.append(host_oid)
         for host_group_oid in self.inspection_template.host_group_oid_list:
             self.get_unduplicated_host_oid_from_group(host_group_oid)
         self.unduplicated_host_job_status_list = [INSPECTION_CODE_JOB_EXEC_STATE_UNKNOWN for _ in
@@ -1134,33 +1139,36 @@ class LaunchInspectionJob:
 
     def create_ssh_operator_invoke_shell(self, host, host_index, cred):
         for inspection_code_block_oid in self.inspection_template.inspection_code_block_oid_list:  # 注意：巡检代码块不去重
-            inspection_code_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
+            inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
             if cred.cred_type == CRED_TYPE_SSH_PASS:
                 auth_method = AUTH_METHOD_SSH_PASS
             else:
                 auth_method = AUTH_METHOD_SSH_KEY
-            # 一个<SSHOperator>对象操作一个<InspectionCode>巡检代码块的所有命令
+            # 一个<SSHOperator>对象操作一个<InspectionCodeBlock>巡检代码块的所有命令
             ssh_operator = SSHOperator(hostname=host.address, port=host.ssh_port, username=cred.username,
                                        password=cred.password, private_key=cred.private_key, auth_method=auth_method,
-                                       command_list=inspection_code_obj.code_list, timeout=LOGIN_AUTH_TIMEOUT)
+                                       command_list=inspection_code_block_obj.code_list, timeout=LOGIN_AUTH_TIMEOUT)
             try:
-                ssh_operator.run_invoke_shell()  # 执行巡检命令，输出信息保存在 SSHOperator.output_list里，元素为<SSHOperatorOutput>
+                ssh_operator.run_invoke_shell()  # ★★ 执行巡检命令，输出信息保存在 SSHOperator.output_list里，元素为<SSHOperatorOutput> ★★
             except paramiko.AuthenticationException as e:
-                print(f"目标主机 {host.name} 登录时身份验证失败: {e}")  # 登录验证失败，则此host的所有巡检code都不再继续
+                print("LaunchInspectionJob.create_ssh_operator_invoke_shell:",
+                      f"目标主机 {host.name} 登录时身份验证失败: {e}")  # 登录验证失败，则此host的所有巡检code都不再继续
                 self.job_exec_failed_host_oid_list.append(host.oid)
                 self.unduplicated_host_job_status_list[host_index] = INSPECTION_CODE_JOB_EXEC_STATE_FAILED
                 break
             max_timeout_index = 0
             while True:
                 if max_timeout_index >= CODE_POST_WAIT_TIME_MAX_TIMEOUT_COUNT:
-                    print(f"inspection_code: {inspection_code_obj.name} 已达最大超时-未完成")
+                    print("LaunchInspectionJob.create_ssh_operator_invoke_shell:",
+                          f"巡检代码块: {inspection_code_block_obj.name} 已达最大超时-未完成")
                     self.job_exec_timeout_host_oid_list.append(host.oid)
                     self.unduplicated_host_job_status_list[host_index] = INSPECTION_CODE_JOB_EXEC_STATE_FAILED
                     break
                 time.sleep(CODE_POST_WAIT_TIME_MAX_TIMEOUT_INTERVAL)
                 max_timeout_index += 1
                 if ssh_operator.is_finished:
-                    print(f"inspection_code: {inspection_code_obj.name} 已执行完成")
+                    print("LaunchInspectionJob.create_ssh_operator_invoke_shell:",
+                          f"巡检代码块: {inspection_code_block_obj.name} 已执行完成")
                     self.job_exec_finished_host_oid_list.append(host.oid)
                     self.unduplicated_host_job_status_list[host_index] = INSPECTION_CODE_JOB_EXEC_STATE_COMPLETED
                     break
@@ -1169,12 +1177,12 @@ class LaunchInspectionJob:
                 if self.inspection_template.save_output_to_file == COF_YES:
                     self.save_ssh_operator_output_to_file(ssh_operator.output_list, host, self.inspection_template.output_file_name_style)
                 # 输出信息保存到sqlite数据库
-                self.save_ssh_operator_invoke_shell_output_to_sqlite(ssh_operator.output_list, host, inspection_code_obj)
-        print(f"create_ssh_operator_invoke_shell : 目标主机：{host.name} 已巡检完成，远程方式: ssh <<<<<<<<<<<<<<<<<<")
+                self.save_ssh_operator_invoke_shell_output_to_sqlite(ssh_operator.output_list, host, inspection_code_block_obj)
+        print(f"LaunchInspectionJob.create_ssh_operator_invoke_shell: 目标主机：{host.name} 已巡检完成，远程方式: ssh <<<<<<<<<<<<<<<<<<")
 
     def operator_job_thread(self, host_index):
         """
-        正式执行主机巡检任务，一台主机一个线程，本函数只处理一台主机
+        正式执行主机巡检任务，一台主机一个线程，本函数只处理一台主机，本函数调用self.create_ssh_operator_invoke_shell去执行命令
         :param host_index:
         :return:
         """
@@ -1185,19 +1193,19 @@ class LaunchInspectionJob:
             try:
                 cred = self.find_ssh_credential(host_obj)  # 查找可用的登录凭据，这里会登录一次目标主机
             except Exception as e:
-                print("查找可用的凭据错误，", e)
+                print("LaunchInspectionJob.operator_job_thread: 查找可用的凭据错误，", e)
                 self.job_find_credential_failed_host_oid_list.append(host_obj.oid)
                 return
             if cred is None:
-                print("Credential is None, Could not find correct credential")
+                print("LaunchInspectionJob.operator_job_thread: Credential is None, Could not find correct credential")
                 return
             self.create_ssh_operator_invoke_shell(host_obj, host_index, cred)  # ★★开始正式作业工作，执行巡检命令，将输出信息保存到文件及数据库★★
         elif host_obj.login_protocol == LOGIN_PROTOCOL_TELNET:
-            print("使用telnet协议远程目标主机")
+            print("LaunchInspectionJob.operator_job_thread: 使用telnet协议远程目标主机")
         else:
             pass
         self.unduplicated_host_job_status_list[host_index] = INSPECTION_CODE_JOB_EXEC_STATE_COMPLETED
-        print(f"\nLaunchInspectionJob.operator_job_thread >>>>> 目标主机：{host_obj.name} 巡检完成 <<<<<")
+        print(f"LaunchInspectionJob.operator_job_thread: >>>>> 目标主机：{host_obj.name} 巡检完成 <<<<<")
 
     def find_ssh_credential(self, host):
         """
@@ -1361,7 +1369,6 @@ class LaunchInspectionJob:
                             f"'{code_invoke_shell_output_last_line_b64}',",
                             f"'{code_interactive_output_str_lines_b64}'",
                             " )"]
-                print("######################## ", " ".join(sql_list))
                 sqlite_cursor.execute(" ".join(sql_list))
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -1444,15 +1451,15 @@ class OneLineCode:
     """
 
     def __init__(self, code_index=0, code_content='', code_post_wait_time=CODE_POST_WAIT_TIME_DEFAULT,
-                 need_interactive=False, interactive_question_keyword='', interactive_answer='',
+                 need_interactive=COF_NO, interactive_question_keyword='', interactive_answer='',
                  interactive_process_method=INTERACTIVE_PROCESS_METHOD_ONETIME):
-        self.code_index = code_index
-        self.code_content = code_content
-        self.code_post_wait_time = code_post_wait_time
-        self.need_interactive = need_interactive
-        self.interactive_question_keyword = interactive_question_keyword
-        self.interactive_answer = interactive_answer
-        self.interactive_process_method = interactive_process_method
+        self.code_index = code_index  # <int>
+        self.code_content = code_content  # <str>
+        self.code_post_wait_time = code_post_wait_time  # <float>
+        self.need_interactive = need_interactive  # <int>
+        self.interactive_question_keyword = interactive_question_keyword  # <str>
+        self.interactive_answer = interactive_answer  # <str>
+        self.interactive_process_method = interactive_process_method  # <int>
 
 
 class SSHOperatorOutput:
@@ -1508,7 +1515,7 @@ class SSHOperator:
         self.auth_method = auth_method
         self.command_list = command_list  # ★★元素为 <OneLineCode> 对象★★
         self.is_finished = False  # False表示命令未执行完成
-        self.output_list = []  # 元素类型为 <SSHOperatorOutput>，一条执行命令<OneLineCode>只产生一个output元素
+        self.output_list = []  # 元素类型为 <SSHOperatorOutput>，一条执行命令<OneLineCode>只产生一个output对象
 
     def run_invoke_shell(self):
         """
@@ -1516,40 +1523,44 @@ class SSHOperator:
         :return:
         """
         if self.command_list is None:
-            print("SSHOperator.run_invoke_shell : command_list is None")
+            print("SSHOperator.run_invoke_shell : command_list(inspection_code_block_obj.code_list) is None")
             return None
+        # ★★创建ssh连接★★
         ssh_client = paramiko.client.SSHClient()
         ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
         try:
             if self.auth_method == AUTH_METHOD_SSH_PASS:
-                print("使用ssh_password密码登录 ##########################")
+                print("SSHOperator.run_invoke_shell : 使用ssh_password密码登录")
                 ssh_client.connect(hostname=self.hostname, port=self.port, username=self.username,
                                    password=self.password,
                                    timeout=self.timeout)
             elif self.auth_method == AUTH_METHOD_SSH_KEY:
                 prikey_string_io = io.StringIO(self.private_key)
                 pri_key = paramiko.RSAKey.from_private_key(prikey_string_io)
-                print("使用ssh_key密钥登录 ##########################")
+                print("SSHOperator.run_invoke_shell : 使用ssh_priKey密钥登录")
                 ssh_client.connect(hostname=self.hostname, port=self.port, username=self.username,
                                    pkey=pri_key, timeout=self.timeout)
             else:
                 pass
         except paramiko.AuthenticationException as e:
-            # print(f"Authentication Error: {e}")
+            print(f"SSHOperator.run_invoke_shell : Authentication Error: {e}")
             raise e
-        time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
+        # ★★连接后，创建invoke_shell交互式shell★★
         ssh_shell = ssh_client.invoke_shell()  # 创建一个交互式shell
+        time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
         try:
             recv = ssh_shell.recv(65535)  # 获取登录后的输出信息，此时未执行任何命令
         except Exception as e:
             print(e)
             return
         # 创建命令输出对象<SSHOperatorOutput>，一条命令对应一个<SSHOperatorOutput>对象
-        invoke_shell_output_str = recv.decode('utf8').replace('\r', '')  # 登录后的输出信息，换行符为\r\n，这里去除一个\r，只留\n
+        invoke_shell_output_str_list = recv.decode('utf8').split('\r\n')
+        invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
+        # invoke_shell_output_str = recv.decode('utf8').replace('\r', '')  # 登录后的输出信息，换行符为\r\n，这里去除一个\r，只留\n
         output = SSHOperatorOutput(code_index=-1, code_exec_method=CODE_EXEC_METHOD_INVOKE_SHELL,
                                    invoke_shell_output_str=invoke_shell_output_str)
         self.output_list.append(output)  # 刚登录后的输出信息保存到output_list里
-        print("登录后输出内容如下 #############################################")
+        print("SSHOperator.run_invoke_shell : 登录后输出内容如下 #####################")
         print(invoke_shell_output_str)
         # ★★开始执行正式命令★★
         cmd_index = 0
@@ -1573,9 +1584,10 @@ class SSHOperator:
                                        code_content=one_line_code.code_content, invoke_shell_output_str=invoke_shell_output_str,
                                        invoke_shell_output_last_line=output_last_line)
             self.output_list.append(output)  # 命令输出结果保存到output_list里
-            print(f"$$ 命令{cmd_index} $$ 输出结果如下 #############################################")
+            print(f"SSHOperator.run_invoke_shell : $$ 命令{cmd_index} $$ 输出结果如下 ##############")
             print(invoke_shell_output_str)
-            print(f"命令输出最后一行（shell提示符，不带换行符的）为:  {output_last_line.encode('utf8')}")  # 有的提示符末尾有个空格
+            # 有的shell提示符末尾有个空格，当然了，也有的shell提示符末尾没有空格
+            print(f"SSHOperator.run_invoke_shell : 命令输出最后一行（shell提示符，不带换行符的）为:  {output_last_line.encode('utf8')}")
             if one_line_code.need_interactive:  # 命令如果需要处理交互情况，则判断交互提问关键词
                 self.process_code_interactive(one_line_code, output_last_line, ssh_shell, output)
             cmd_index += 1
@@ -1595,8 +1607,9 @@ class SSHOperator:
         :return:
         """
         ret = re.search(code.interactive_question_keyword, output_last_line, re.I)
+        interactive_times = 0
         if ret is not None:  # 如果匹配上需要交互的提问判断字符串
-            print(f"★★匹配到交互关键字 {ret} ，执行交互回答:")
+            print(f"SSHOperator.process_code_interactive : 匹配到交互关键字 {ret} ，执行交互回答:")
             ssh_shell.send(code.interactive_answer.encode('utf8'))  # 发送交互回答内容，这里不会额外发送\n换行
             # ssh_shell.send("\n".encode('utf8'))  # 命令strip()后，不带\n换行，需要额外发送一个换行符
             time.sleep(code.code_post_wait_time)  # 发送完命令后，要等待系统回复
@@ -1611,8 +1624,11 @@ class SSHOperator:
             print(interactive_output_str)
             output.interactive_output_str_list.append(interactive_output_str)
             if second_time is True:
-                print("上面输出为twice的★★★★★")
+                print("SSHOperator.process_code_interactive : 上面输出为twice的★★★★★")
                 return
+            if interactive_times > MAX_INTERACTIVE_TIME:
+                return
+            interactive_times += 1
             interactive_output_str_lines = interactive_output_str.split('\n')
             interactive_output_last_line_index = len(interactive_output_str_lines) - 1
             if code.interactive_process_method == INTERACTIVE_PROCESS_METHOD_LOOP and len(interactive_output_str_lines) != 0:
@@ -1941,7 +1957,7 @@ class GlobalInfo:
         self.load_inspection_code_list_from_dbfile(obj_list)
         return obj_list
 
-    def load_inspection_code_list_from_dbfile(self, inspection_code_list):
+    def load_inspection_code_list_from_dbfile(self, inspection_code_block_obj_list):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★查询是否有名为'tb_inspection_code_block_include_code_list'的表★
@@ -1953,8 +1969,9 @@ class GlobalInfo:
         if len(result) == 0:
             return []
         # 读取数据
-        for inspection_code in inspection_code_list:
-            sql = f"select * from tb_inspection_code_block_include_code_list where inspection_code_block_oid='{inspection_code.oid}'"
+        for inspection_code_block_obj in inspection_code_block_obj_list:
+            sql = f"select * from tb_inspection_code_block_include_code_list where \
+            inspection_code_block_oid='{inspection_code_block_obj.oid}'"
             sqlite_cursor.execute(sql)
             search_result = sqlite_cursor.fetchall()
             for obj_info_tuple in search_result:
@@ -1964,7 +1981,7 @@ class GlobalInfo:
                                    interactive_question_keyword=obj_info_tuple[5],
                                    interactive_answer=obj_info_tuple[6],
                                    interactive_process_method=obj_info_tuple[7])
-                inspection_code.code_list.append(code)
+                inspection_code_block_obj.code_list.append(code)
 
     def load_inspection_template_from_dbfile(self):
         """
@@ -2402,12 +2419,12 @@ class GlobalInfo:
         if len(result) != 0:  # 若查询到有此表，才删除相应数据
             sql = f"delete from tb_inspection_template_include_group_list where inspection_template_oid='{obj.oid}' "
             sqlite_cursor.execute(sql)
-        # ★查询是否有名为'tb_inspection_template_include_inspection_code_list'的表★
+        # ★查询是否有名为'tb_inspection_template_include_inspection_code_block_list'的表★
         sql = f'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_template_include_inspection_code_block_list"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()
         if len(result) != 0:  # 若查询到有此表，才删除相应数据
-            sql = f"delete from tb_inspection_template_include_inspection_code_list where inspection_template_oid='{obj.oid}' "
+            sql = f"delete from tb_inspection_template_include_inspection_code_block_list where inspection_template_oid='{obj.oid}' "
             sqlite_cursor.execute(sql)
         sqlite_cursor.close()
         sqlite_conn.commit()
@@ -3107,11 +3124,167 @@ class CreateResourceInFrame:
         self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
-        # ★添加巡检代码内容
-        label_inspection_code_block_code_content = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码内容")
+        # ★★★添加巡检代码内容并在treeview里显示★★★
+        self.resource_info_dict["one_line_code_obj_list"] = []
+        label_inspection_code_block_code_content = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码内容:")
+        label_inspection_code_block_code_content.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_code_block_code_content.grid(row=4, column=0, padx=self.padx, pady=self.pady)
-        self.resource_info_dict["text_code_content"] = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], width=40, height=12)
-        self.resource_info_dict["text_code_content"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        button_add_code_list = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="添加",
+                                              command=lambda: self.click_button_add_code_list(treeview_code_content))  # 添加代码
+        button_add_code_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        button_add_code_list.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        treeview_code_content = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=7,
+                                             columns=("index", "code_content", "need_interactive"), show="headings")
+        # 设置每一个列的宽度和对齐的方式
+        treeview_code_content.column("index", width=50, anchor="w")
+        treeview_code_content.column("code_content", width=300, anchor="w")
+        treeview_code_content.column("need_interactive", width=80, anchor="w")
+        # 设置每个列的标题
+        treeview_code_content.heading("index", text="index", anchor="w")
+        treeview_code_content.heading("code_content", text="code_content", anchor="w")
+        treeview_code_content.heading("need_interactive", text="需要交互", anchor="w")
+        treeview_code_content.grid(row=5, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+        treeview_code_content.bind("<<TreeviewSelect>>", lambda event: self.edit_treeview_code_content_item(event, treeview_code_content))
+
+    def click_button_add_code_list(self, treeview_code_content):
+        self.resource_info_dict["one_line_code_obj_list"] = []
+        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window.title("添加巡检代码内容")
+        screen_width = self.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.main_window.window_obj.winfo_screenheight()
+        width = 420
+        height = 300
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        label_inspection_code_block_code_content = tkinter.Label(pop_window, text="巡检代码内容")
+        label_inspection_code_block_code_content.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        text_code_content = tkinter.Text(master=pop_window, width=50, height=16)
+        text_code_content.grid(row=1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+        ok_button = tkinter.Button(pop_window, text="确定",
+                                   command=lambda: self.click_button_add_code_list_ok(treeview_code_content, text_code_content, pop_window))
+        ok_button.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        cancel_button = tkinter.Button(pop_window, text="取消", command=pop_window.destroy)
+        cancel_button.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+
+    def click_button_add_code_list_ok(self, treeview_code_content, text_code_content, pop_window):
+        code_content_str = text_code_content.get("1.0", tkinter.END).strip()
+        code_index = 0
+        for code_line_str in code_content_str.split("\n"):
+            code_line_str_strip = code_line_str.strip()
+            if code_line_str_strip != "":
+                one_line_code_obj = OneLineCode(code_index=code_index, code_content=code_line_str_strip)
+                self.resource_info_dict["one_line_code_obj_list"].append(one_line_code_obj)
+                code_index += 1
+        print("CreateResourceInFrame.click_button_add_code_list_ok: 添加代码行数:",
+              len(self.resource_info_dict["one_line_code_obj_list"]))
+        pop_window.destroy()
+        # 刷新一次treeview
+        treeview_code_content.delete(*treeview_code_content.get_children())
+        index = 0
+        need_interactive_value = ["No", "Yes"]
+        for code_obj in self.resource_info_dict["one_line_code_obj_list"]:
+            treeview_code_content.insert("", index,
+                                         values=(index, code_obj.code_content, need_interactive_value[code_obj.need_interactive]))
+            index += 1
+
+    def edit_treeview_code_content_item(self, _, treeview_code_content):
+        item_index = treeview_code_content.focus()
+        one_line_code_index = treeview_code_content.item(item_index, "values")[0]
+        print("one_line_code_index", one_line_code_index)
+        one_line_code_obj = self.resource_info_dict["one_line_code_obj_list"][int(one_line_code_index)]  # 获取选中的命令对象
+        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window.title("设置巡检代码")
+        screen_width = self.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.main_window.window_obj.winfo_screenheight()
+        width = 420
+        height = 300
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        one_line_code_info_dict = {}
+        # OneLineCode-code_index
+        label_code_index = tkinter.Label(pop_window, text="巡检代码index")
+        label_code_index.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        entry_code_index = tkinter.Entry(pop_window)
+        entry_code_index.insert(0, str(one_line_code_obj.code_index))  # 显示初始值，index不可编辑★
+        entry_code_index.grid(row=0, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-code_content
+        label_code_content = tkinter.Label(pop_window, text="巡检代码内容")
+        label_code_content.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_code_content"] = tkinter.StringVar()
+        entry_code_content = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_code_content"])
+        entry_code_content.insert(0, str(one_line_code_obj.code_content))  # 显示初始值，可编辑
+        entry_code_content.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-code_post_wait_time
+        label_code_post_wait_time = tkinter.Label(pop_window, text="代码执行后等待时间")
+        label_code_post_wait_time.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_code_post_wait_time"] = tkinter.StringVar()
+        entry_code_post_wait_time = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_code_post_wait_time"])
+        entry_code_post_wait_time.insert(0, str(one_line_code_obj.code_post_wait_time))  # 显示初始值，可编辑
+        entry_code_post_wait_time.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-need_interactive
+        label_need_interactive = tkinter.Label(pop_window, text="是否需要交互")
+        label_need_interactive.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        need_interactive_name_list = ["No", "Yes"]
+        one_line_code_info_dict["combobox_need_interactive"] = ttk.Combobox(pop_window,
+                                                                            values=need_interactive_name_list,
+                                                                            state="readonly")
+        one_line_code_info_dict["combobox_need_interactive"].current(one_line_code_obj.need_interactive)
+        one_line_code_info_dict["combobox_need_interactive"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-interactive_question_keyword
+        label_interactive_question_keyword = tkinter.Label(pop_window, text="交互问题关键词")
+        label_interactive_question_keyword.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_interactive_question_keyword"] = tkinter.StringVar()
+        entry_interactive_question_keyword = tkinter.Entry(pop_window,
+                                                           textvariable=one_line_code_info_dict["sv_interactive_question_keyword"])
+        entry_interactive_question_keyword.insert(0, str(one_line_code_obj.interactive_question_keyword))  # 显示初始值，可编辑
+        entry_interactive_question_keyword.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-interactive_answer
+        label_interactive_answer = tkinter.Label(pop_window, text="交互问题回答")
+        label_interactive_answer.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_interactive_answer"] = tkinter.StringVar()
+        entry_interactive_answer = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_interactive_answer"])
+        entry_interactive_answer.insert(0, str(one_line_code_obj.interactive_answer))  # 显示初始值，可编辑
+        entry_interactive_answer.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-interactive_process_method
+        label_interactive_process_method = tkinter.Label(pop_window, text="交互回答次数")
+        label_interactive_process_method.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        interactive_process_method_name_list = ["ONETIME", "TWICE", "LOOP"]
+        one_line_code_info_dict["combobox_interactive_process_method"] = ttk.Combobox(pop_window,
+                                                                                      values=interactive_process_method_name_list,
+                                                                                      state="readonly")
+        one_line_code_info_dict["combobox_interactive_process_method"].current(one_line_code_obj.interactive_process_method)
+        one_line_code_info_dict["combobox_interactive_process_method"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # 添加按钮
+        ok_button = tkinter.Button(pop_window, text="确定",
+                                   command=lambda: self.edit_treeview_code_content_item_save(one_line_code_info_dict,
+                                                                                             one_line_code_obj,
+                                                                                             pop_window, treeview_code_content))
+        ok_button.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        cancel_button = tkinter.Button(pop_window, text="取消", command=pop_window.destroy)
+        cancel_button.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+
+    def edit_treeview_code_content_item_save(self, one_line_code_info_dict, one_line_code_obj, pop_window, treeview_code_content):
+        one_line_code_obj.code_content = one_line_code_info_dict["sv_code_content"].get()
+        one_line_code_obj.code_post_wait_time = float(one_line_code_info_dict["sv_code_post_wait_time"].get())
+        if one_line_code_info_dict["combobox_need_interactive"].current() == -1:
+            one_line_code_obj.need_interactive = 0
+        else:
+            one_line_code_obj.need_interactive = one_line_code_info_dict["combobox_need_interactive"].current()
+        one_line_code_obj.interactive_question_keyword = one_line_code_info_dict["sv_interactive_question_keyword"].get()
+        one_line_code_obj.interactive_answer = one_line_code_info_dict["sv_interactive_answer"].get()
+        if one_line_code_info_dict["combobox_interactive_process_method"].current() == -1:
+            one_line_code_obj.interactive_process_method = 0
+        else:
+            one_line_code_obj.interactive_process_method = one_line_code_info_dict["combobox_interactive_process_method"].current()
+        pop_window.destroy()
+        # ★刷新一次treeview
+        item_id_list = treeview_code_content.get_children()
+        index = 0
+        need_interactive_value = ["No", "Yes"]
+        for code_obj in self.resource_info_dict["one_line_code_obj_list"]:
+            treeview_code_content.set(item_id_list[index], 1, code_obj.code_content)
+            treeview_code_content.set(item_id_list[index], 2, need_interactive_value[code_obj.need_interactive])
+            index += 1
 
     def create_inspection_template(self):
         # ★创建-inspection_template
@@ -3159,7 +3332,7 @@ class CreateResourceInFrame:
         label_inspection_template_update_code_on_launch = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行前更新code")
         label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_template_update_code_on_launch.grid(row=5, column=0, padx=self.padx, pady=self.pady)
-        update_code_on_launch_name_list = ["Yes", "No"]
+        update_code_on_launch_name_list = ["No", "Yes"]
         self.resource_info_dict["combobox_update_code_on_launch"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
                                                                                  values=update_code_on_launch_name_list,
                                                                                  state="readonly")
@@ -3346,6 +3519,8 @@ class ViewResourceInFrame:
         self.resource_obj = resource_obj
         self.resource_type = resource_type
         self.view_width = 20
+        self.padx = 2
+        self.pady = 2
 
     def show(self):  # 入口函数
         for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
@@ -3659,28 +3834,101 @@ class ViewResourceInFrame:
         label_code_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检命令内容")
         label_code_list.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_code_list.pack()
-        # list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
-        # list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         treeview_code_content = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=7,
-                                             columns=("index", "code_content"), show="headings")
+                                             columns=("index", "code_content", "need_interactive"), show="headings")
         # 设置每一个列的宽度和对齐的方式
-        treeview_code_content.column("index", width=60, anchor="w")
-        treeview_code_content.column("code_content", width=320, anchor="w")
+        treeview_code_content.column("index", width=50, anchor="w")
+        treeview_code_content.column("code_content", width=300, anchor="w")
+        treeview_code_content.column("need_interactive", width=80, anchor="w")
         # 设置每个列的标题
-        treeview_code_content.heading("index", text="index")
-        treeview_code_content.heading("code_content", text="code_content")
+        treeview_code_content.heading("index", text="index", anchor="w")
+        treeview_code_content.heading("code_content", text="code_content", anchor="w")
+        treeview_code_content.heading("need_interactive", text="需要交互", anchor="w")
         # 插入数据
         index = 0
+        need_interactive_value = ["No", "Yes"]
         for code_obj in self.resource_obj.code_list:
-            treeview_code_content.insert("", index, values=(index, code_obj.code_content))  # 添加item选项
+            treeview_code_content.insert("", index,
+                                         values=(index, code_obj.code_content, need_interactive_value[code_obj.need_interactive]))
             index += 1
-        # list_scrollbar.config(command=listbox_code_content.yview)
         treeview_code_content.pack()
+        treeview_code_content.bind("<<TreeviewSelect>>", lambda event: self.view_treeview_code_content_item(event, treeview_code_content))
         # ★★添加“返回主机组列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回巡检代码块列表",
                                        command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
                                            RESOURCE_TYPE_INSPECTION_CODE_BLOCK))  # 返回巡检代码块列表
         button_return.pack()
+
+    def view_treeview_code_content_item(self, _, treeview_code_content):
+        item_index = treeview_code_content.focus()
+        one_line_code_index = treeview_code_content.item(item_index, "values")[0]
+        print("one_line_code_index", one_line_code_index)
+        one_line_code_obj = self.resource_obj.code_list[int(one_line_code_index)]  # 获取选中的命令对象
+        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window.title("设置巡检代码")
+        screen_width = self.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.main_window.window_obj.winfo_screenheight()
+        width = 420
+        height = 300
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        one_line_code_info_dict = {}
+        # OneLineCode-code_index
+        label_code_index = tkinter.Label(pop_window, text="巡检代码index")
+        label_code_index.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        entry_code_index = tkinter.Entry(pop_window)
+        entry_code_index.insert(0, str(one_line_code_obj.code_index))  # 显示初始值，index不可编辑★
+        entry_code_index.grid(row=0, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-code_content
+        label_code_content = tkinter.Label(pop_window, text="巡检代码内容")
+        label_code_content.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_code_content"] = tkinter.StringVar()
+        entry_code_content = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_code_content"])
+        entry_code_content.insert(0, str(one_line_code_obj.code_content))  # 显示初始值，可编辑
+        entry_code_content.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-code_post_wait_time
+        label_code_post_wait_time = tkinter.Label(pop_window, text="代码执行后等待时间")
+        label_code_post_wait_time.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_code_post_wait_time"] = tkinter.StringVar()
+        entry_code_post_wait_time = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_code_post_wait_time"])
+        entry_code_post_wait_time.insert(0, str(one_line_code_obj.code_post_wait_time))  # 显示初始值，可编辑
+        entry_code_post_wait_time.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-need_interactive
+        label_need_interactive = tkinter.Label(pop_window, text="是否需要交互")
+        label_need_interactive.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        need_interactive_name_list = ["No", "Yes"]
+        one_line_code_info_dict["combobox_need_interactive"] = ttk.Combobox(pop_window,
+                                                                            values=need_interactive_name_list,
+                                                                            state="readonly")
+        one_line_code_info_dict["combobox_need_interactive"].current(one_line_code_obj.need_interactive)
+        one_line_code_info_dict["combobox_need_interactive"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-interactive_question_keyword
+        label_interactive_question_keyword = tkinter.Label(pop_window, text="交互问题关键词")
+        label_interactive_question_keyword.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_interactive_question_keyword"] = tkinter.StringVar()
+        entry_interactive_question_keyword = tkinter.Entry(pop_window,
+                                                           textvariable=one_line_code_info_dict["sv_interactive_question_keyword"])
+        entry_interactive_question_keyword.insert(0, str(one_line_code_obj.interactive_question_keyword))  # 显示初始值，可编辑
+        entry_interactive_question_keyword.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-interactive_answer
+        label_interactive_answer = tkinter.Label(pop_window, text="交互问题回答")
+        label_interactive_answer.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_interactive_answer"] = tkinter.StringVar()
+        entry_interactive_answer = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_interactive_answer"])
+        entry_interactive_answer.insert(0, str(one_line_code_obj.interactive_answer))  # 显示初始值，可编辑
+        entry_interactive_answer.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-interactive_process_method
+        label_interactive_process_method = tkinter.Label(pop_window, text="交互回答次数")
+        label_interactive_process_method.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        interactive_process_method_name_list = ["ONETIME", "TWICE", "LOOP"]
+        one_line_code_info_dict["combobox_interactive_process_method"] = ttk.Combobox(pop_window,
+                                                                                      values=interactive_process_method_name_list,
+                                                                                      state="readonly")
+        one_line_code_info_dict["combobox_interactive_process_method"].current(one_line_code_obj.interactive_process_method)
+        one_line_code_info_dict["combobox_interactive_process_method"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # 添加按钮
+        exit_button = tkinter.Button(pop_window, text="返回", command=pop_window.destroy)
+        exit_button.grid(row=7, column=1, padx=self.padx, pady=self.pady)
 
     def view_inspection_template(self):
         # 查看-inspection_template
@@ -3710,7 +3958,7 @@ class ViewResourceInFrame:
             self.resource_obj.execution_method] + "\n"
         obj_info_text.insert(tkinter.END, inspection_template_name)
         # ★inspection_template-update_code_on_launch
-        update_code_on_launch_name_list = ["Yes", "No"]
+        update_code_on_launch_name_list = ["No", "Yes"]
         inspection_template_name = "运行前更新code".ljust(self.view_width - 5, " ") + ": " + update_code_on_launch_name_list[
             self.resource_obj.update_code_on_launch] + "\n"
         obj_info_text.insert(tkinter.END, inspection_template_name)
@@ -4240,27 +4488,176 @@ class EditResourceInFrame:
         self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★命令内容-列表
-        label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检命令内容")
-        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_host_list.grid(row=4, column=0, padx=self.padx, pady=self.pady)
-        # frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
-        # list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
-        # list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
-        # self.resource_info_dict["listbox_code_content"] = tkinter.Listbox(frame, selectmode="single", bg="white", bd=2, cursor="arrow",
-        #                                                                   yscrollcommand=list_scrollbar.set, selectbackground='pink',
-        #                                                                   selectforeground='black', exportselection=False,
-        #                                                                   selectborderwidth=2, activestyle='dotbox', height=7, width=40)
-        # for code_obj in self.resource_obj.code_list:
-        #     self.resource_info_dict["listbox_code_content"].insert(tkinter.END, code_obj.code_content)  # 添加item选项
-        # self.resource_info_dict["listbox_code_content"].pack(side="left")
-        # list_scrollbar.config(command=self.resource_info_dict["listbox_code_content"].yview)
-        # frame.grid(row=4, column=1, padx=self.padx, pady=self.pady)
-        self.resource_info_dict["text_code_content"] = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], width=40, height=12)
+        # ★★★编辑巡检代码内容并在treeview里显示★★★
+        self.resource_info_dict["one_line_code_obj_list"] = []
+        label_inspection_code_block_code_content = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码内容:")
+        label_inspection_code_block_code_content.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_code_content.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        button_add_code_list = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑",
+                                              command=lambda: self.click_button_add_code_list(treeview_code_content))  # 编辑代码
+        button_add_code_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        button_add_code_list.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        treeview_code_content = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=7,
+                                             columns=("index", "code_content", "need_interactive"), show="headings")
+        # 设置每一个列的宽度和对齐的方式
+        treeview_code_content.column("index", width=50, anchor="w")
+        treeview_code_content.column("code_content", width=300, anchor="w")
+        treeview_code_content.column("need_interactive", width=80, anchor="w")
+        # 设置每个列的标题
+        treeview_code_content.heading("index", text="index", anchor="w")
+        treeview_code_content.heading("code_content", text="code_content", anchor="w")
+        treeview_code_content.heading("need_interactive", text="需要交互", anchor="w")
+        # 插入code item
+        index = 0
+        need_interactive_value = ["No", "Yes"]
         for code_obj in self.resource_obj.code_list:
-            self.resource_info_dict["text_code_content"].insert(tkinter.END, code_obj.code_content + "\n")
-        self.resource_info_dict["text_code_content"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
+            treeview_code_content.insert("", index,
+                                         values=(index, code_obj.code_content, need_interactive_value[code_obj.need_interactive]))
+            index += 1
+        treeview_code_content.grid(row=5, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+        treeview_code_content.bind("<<TreeviewSelect>>", lambda event: self.edit_treeview_code_content_item(event, treeview_code_content))
         # ★★更新row_index
-        self.current_row_index = 4
+        self.current_row_index = 5
+
+    def click_button_add_code_list(self, treeview_code_content):
+        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window.title("添加巡检代码内容")
+        screen_width = self.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.main_window.window_obj.winfo_screenheight()
+        width = 420
+        height = 300
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        label_inspection_code_block_code_content = tkinter.Label(pop_window, text="巡检代码内容")
+        label_inspection_code_block_code_content.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        text_code_content = tkinter.Text(master=pop_window, width=50, height=16)
+        text_code_content.grid(row=1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+        ok_button = tkinter.Button(pop_window, text="确定",
+                                   command=lambda: self.click_button_add_code_list_ok(treeview_code_content, text_code_content, pop_window))
+        ok_button.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        cancel_button = tkinter.Button(pop_window, text="取消", command=pop_window.destroy)
+        cancel_button.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+
+    def click_button_add_code_list_ok(self, treeview_code_content, text_code_content, pop_window):
+        self.resource_obj.code_list = []
+        code_content_str = text_code_content.get("1.0", tkinter.END).strip()
+        code_index = 0
+        for code_line_str in code_content_str.split("\n"):
+            code_line_str_strip = code_line_str.strip()
+            if code_line_str_strip != "":
+                one_line_code_obj = OneLineCode(code_index=code_index, code_content=code_line_str_strip)
+                self.resource_obj.code_list.append(one_line_code_obj)
+                code_index += 1
+        print("CreateResourceInFrame.click_button_add_code_list_ok: 添加代码行数:",
+              len(self.resource_obj.code_list))
+        pop_window.destroy()
+        # 刷新一次treeview
+        treeview_code_content.delete(*treeview_code_content.get_children())
+        index = 0
+        need_interactive_value = ["No", "Yes"]
+        for code_obj in self.resource_obj.code_list:
+            treeview_code_content.insert("", index,
+                                         values=(index, code_obj.code_content, need_interactive_value[code_obj.need_interactive]))
+            index += 1
+
+    def edit_treeview_code_content_item(self, _, treeview_code_content):
+        item_index = treeview_code_content.focus()
+        one_line_code_index = treeview_code_content.item(item_index, "values")[0]
+        print("one_line_code_index", one_line_code_index)
+        one_line_code_obj = self.resource_obj.code_list[int(one_line_code_index)]  # 获取选中的命令对象
+        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window.title("设置巡检代码")
+        screen_width = self.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.main_window.window_obj.winfo_screenheight()
+        width = 420
+        height = 300
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        one_line_code_info_dict = {}
+        # OneLineCode-code_index
+        label_code_index = tkinter.Label(pop_window, text="巡检代码index")
+        label_code_index.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        entry_code_index = tkinter.Entry(pop_window)
+        entry_code_index.insert(0, str(one_line_code_obj.code_index))  # 显示初始值，index不可编辑★
+        entry_code_index.grid(row=0, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-code_content
+        label_code_content = tkinter.Label(pop_window, text="巡检代码内容")
+        label_code_content.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_code_content"] = tkinter.StringVar()
+        entry_code_content = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_code_content"])
+        entry_code_content.insert(0, str(one_line_code_obj.code_content))  # 显示初始值，可编辑
+        entry_code_content.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-code_post_wait_time
+        label_code_post_wait_time = tkinter.Label(pop_window, text="代码执行后等待时间")
+        label_code_post_wait_time.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_code_post_wait_time"] = tkinter.StringVar()
+        entry_code_post_wait_time = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_code_post_wait_time"])
+        entry_code_post_wait_time.insert(0, str(one_line_code_obj.code_post_wait_time))  # 显示初始值，可编辑
+        entry_code_post_wait_time.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-need_interactive
+        label_need_interactive = tkinter.Label(pop_window, text="是否需要交互")
+        label_need_interactive.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        need_interactive_name_list = ["No", "Yes"]
+        one_line_code_info_dict["combobox_need_interactive"] = ttk.Combobox(pop_window,
+                                                                            values=need_interactive_name_list,
+                                                                            state="readonly")
+        one_line_code_info_dict["combobox_need_interactive"].current(one_line_code_obj.need_interactive)
+        one_line_code_info_dict["combobox_need_interactive"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-interactive_question_keyword
+        label_interactive_question_keyword = tkinter.Label(pop_window, text="交互问题关键词")
+        label_interactive_question_keyword.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_interactive_question_keyword"] = tkinter.StringVar()
+        entry_interactive_question_keyword = tkinter.Entry(pop_window,
+                                                           textvariable=one_line_code_info_dict["sv_interactive_question_keyword"])
+        entry_interactive_question_keyword.insert(0, str(one_line_code_obj.interactive_question_keyword))  # 显示初始值，可编辑
+        entry_interactive_question_keyword.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-interactive_answer
+        label_interactive_answer = tkinter.Label(pop_window, text="交互问题回答")
+        label_interactive_answer.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_interactive_answer"] = tkinter.StringVar()
+        entry_interactive_answer = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_interactive_answer"])
+        entry_interactive_answer.insert(0, str(one_line_code_obj.interactive_answer))  # 显示初始值，可编辑
+        entry_interactive_answer.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-interactive_process_method
+        label_interactive_process_method = tkinter.Label(pop_window, text="交互回答次数")
+        label_interactive_process_method.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        interactive_process_method_name_list = ["ONETIME", "TWICE", "LOOP"]
+        one_line_code_info_dict["combobox_interactive_process_method"] = ttk.Combobox(pop_window,
+                                                                                      values=interactive_process_method_name_list,
+                                                                                      state="readonly")
+        one_line_code_info_dict["combobox_interactive_process_method"].current(one_line_code_obj.interactive_process_method)
+        one_line_code_info_dict["combobox_interactive_process_method"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # 添加按钮
+        ok_button = tkinter.Button(pop_window, text="保存修改",
+                                   command=lambda: self.edit_treeview_code_content_item_save(one_line_code_info_dict,
+                                                                                             one_line_code_obj,
+                                                                                             pop_window, treeview_code_content))
+        ok_button.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        cancel_button = tkinter.Button(pop_window, text="取消", command=pop_window.destroy)
+        cancel_button.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+
+    def edit_treeview_code_content_item_save(self, one_line_code_info_dict, one_line_code_obj, pop_window, treeview_code_content):
+        one_line_code_obj.code_content = one_line_code_info_dict["sv_code_content"].get()
+        one_line_code_obj.code_post_wait_time = float(one_line_code_info_dict["sv_code_post_wait_time"].get())
+        if one_line_code_info_dict["combobox_need_interactive"].current() == -1:
+            one_line_code_obj.need_interactive = 0
+        else:
+            one_line_code_obj.need_interactive = one_line_code_info_dict["combobox_need_interactive"].current()
+        one_line_code_obj.interactive_question_keyword = one_line_code_info_dict["sv_interactive_question_keyword"].get()
+        one_line_code_obj.interactive_answer = one_line_code_info_dict["sv_interactive_answer"].get()
+        if one_line_code_info_dict["combobox_interactive_process_method"].current() == -1:
+            one_line_code_obj.interactive_process_method = 0
+        else:
+            one_line_code_obj.interactive_process_method = one_line_code_info_dict["combobox_interactive_process_method"].current()
+        pop_window.destroy()  # 关闭编辑窗口
+        # ★刷新一次treeview
+        item_id_list = treeview_code_content.get_children()
+        index = 0
+        need_interactive_value = ["No", "Yes"]
+        for code_obj in self.resource_info_dict["one_line_code_obj_list"]:
+            treeview_code_content.set(item_id_list[index], 1, code_obj.code_content)
+            treeview_code_content.set(item_id_list[index], 2, need_interactive_value[code_obj.need_interactive])
+            index += 1
 
     def edit_inspection_template(self):
         # ★创建-inspection_template
@@ -4317,7 +4714,7 @@ class EditResourceInFrame:
         label_inspection_template_update_code_on_launch = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行前更新code")
         label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_template_update_code_on_launch.grid(row=5, column=0, padx=self.padx, pady=self.pady)
-        update_code_on_launch_name_list = ["Yes", "No"]
+        update_code_on_launch_name_list = ["No", "Yes"]
         self.resource_info_dict["combobox_update_code_on_launch"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
                                                                                  values=update_code_on_launch_name_list,
                                                                                  state="readonly")
@@ -4603,15 +5000,7 @@ class UpdateResourceInFrame:
             project_oid = self.global_info.project_obj_list[0].oid
         else:
             project_oid = self.global_info.project_obj_list[combobox_project_current].oid
-        # 先更新inspection_code_block的 code_list
-        self.resource_obj.code_list = []
-        code_content_str = self.resource_info_dict["text_code_content"].get("1.0", tkinter.END).strip()
-        code_index = 0
-        for code_line_str in code_content_str.split("\n"):
-            code_line_str_strip = code_line_str.strip()
-            if code_line_str_strip != "":
-                one_line_code_obj = OneLineCode(code_index=code_index, code_content=code_line_str_strip)
-                self.resource_obj.add_code_line(one_line_code_obj)
+        # 这里不用更新inspection_code_block的 code_list，已在编辑窗口那里完成了
         # 更新-inspection_code_block-对象本身
         if inspection_code_block_name == '':
             messagebox.showinfo("编辑巡检代码块-Error", f"巡检代码块名称不能为空")
@@ -4948,14 +5337,7 @@ class SaveResourceInMainWindow:
             inspection_code_block = InspectionCodeBlock(name=inspection_code_block_name, description=inspection_code_block_description,
                                                         project_oid=project_oid,
                                                         global_info=self.global_info)
-            # ★inspection_code_block对象添加code_line列表
-            code_content_str = self.resource_info_dict["text_code_content"].get("1.0", tkinter.END).strip()
-            code_index = 0
-            for code_line_str in code_content_str.split("\n"):
-                code_line_str_strip = code_line_str.strip()
-                if code_line_str_strip != "":
-                    one_line_code_obj = OneLineCode(code_index=code_index, code_content=code_line_str_strip)
-                    inspection_code_block.add_code_line(one_line_code_obj)
+            inspection_code_block.code_list = self.resource_info_dict["one_line_code_obj_list"]  # inspection_code_block对象添加code_line列表
             inspection_code_block.save()  # 保存资源对象
             self.global_info.inspection_code_block_obj_list.append(inspection_code_block)
             self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_INSPECTION_CODE_BLOCK)  # 保存后，返回展示页面
@@ -5040,16 +5422,14 @@ class StartInspectionTemplateInFrame:
         existed_inspection_job_obj_list = self.global_info.get_inspection_job_obj_by_inspection_template_oid(
             self.inspection_template_obj.oid)
         if len(existed_inspection_job_obj_list) > 0:
-            print("已有历史巡检作业！")
+            print("StartInspectionTemplateInFrame.start: 已有历史巡检作业！")
             for job in existed_inspection_job_obj_list:
                 if job.job_state == INSPECTION_CODE_JOB_EXEC_STATE_STARTED:
                     messagebox.showinfo("启动巡检作业", "还有历史作业未完成，无法启动新的巡检作业！")
                     return
-        else:
-            pass
         result = messagebox.askyesno("启动巡检作业", "是否立即启动巡检作业？")
         if result:
-            print(f"开始启动巡检作业: {self.inspection_template_obj.name}")
+            print(f"StartInspectionTemplateInFrame.start: 开始启动巡检作业: {self.inspection_template_obj.name}")
             inspect_job_name = "job-" + self.inspection_template_obj.name + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
             # template_project_name=self.global_info.get_project_by_oid(self.inspection_template_obj.project_oid)
             self.current_inspection_job_obj = LaunchInspectionJob(name=inspect_job_name,
@@ -5066,7 +5446,7 @@ class StartInspectionTemplateInFrame:
             self.add_return_button()
             self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
         else:
-            print("取消启动巡检作业")
+            print("StartInspectionTemplateInFrame.start: 取消启动巡检作业")
 
     def proces_mouse_scroll(self, event):
         if event.delta > 0:
@@ -5131,7 +5511,7 @@ class StartInspectionTemplateInFrame:
         label_inspection_template_update_code_on_launch = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行前更新code")
         label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_template_update_code_on_launch.grid(row=4, column=0, padx=self.padx, pady=self.pady)
-        update_code_on_launch_name_list = ["Yes", "No"]
+        update_code_on_launch_name_list = ["No", "Yes"]
         self.resource_info_dict["combobox_update_code_on_launch"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
                                                                                  values=update_code_on_launch_name_list,
                                                                                  state="readonly")
