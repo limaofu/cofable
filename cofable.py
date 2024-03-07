@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-06
+# update: 2024-03-07
 
 """
 解决问题：
@@ -36,6 +36,7 @@
 
 巡检流程：
 ★列出-巡检模板列表   ListResourceInFrame.show
+                   触发↓
 ★启动-巡检模板      StartInspectionTemplateInFrame.start()  →  StartInspectionTemplateInFrame.show_inspection_job_status()
                    线程|→ LaunchInspectionJob.start_job()                                      ↓
                           线程|→ LaunchInspectionJob.operator_job_thread()                    ←|查询状态
@@ -1195,9 +1196,11 @@ class LaunchInspectionJob:
             except Exception as e:
                 print("LaunchInspectionJob.operator_job_thread: 查找可用的凭据错误，", e)
                 self.job_find_credential_failed_host_oid_list.append(host_obj.oid)
+                self.unduplicated_host_job_status_list[host_index] = INSPECTION_CODE_JOB_EXEC_STATE_FAILED
                 return
             if cred is None:
                 print("LaunchInspectionJob.operator_job_thread: Credential is None, Could not find correct credential")
+                self.unduplicated_host_job_status_list[host_index] = INSPECTION_CODE_JOB_EXEC_STATE_FAILED
                 return
             self.create_ssh_operator_invoke_shell(host_obj, host_index, cred)  # ★★开始正式作业工作，执行巡检命令，将输出信息保存到文件及数据库★★
         elif host_obj.login_protocol == LOGIN_PROTOCOL_TELNET:
@@ -3156,6 +3159,9 @@ class CreateResourceInFrame:
         height = 300
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        pop_window.focus_force()  # 使子窗口获得焦点
+        pop_window.protocol("WM_DELETE_WINDOW", self.edit_or_add_treeview_code_content_on_closing)  # 子窗口点击右上角的关闭按钮后，触发此函数
         label_inspection_code_block_code_content = tkinter.Label(pop_window, text="巡检代码内容")
         label_inspection_code_block_code_content.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         text_code_content = tkinter.Text(master=pop_window, width=50, height=16)
@@ -3163,8 +3169,13 @@ class CreateResourceInFrame:
         ok_button = tkinter.Button(pop_window, text="确定",
                                    command=lambda: self.click_button_add_code_list_ok(treeview_code_content, text_code_content, pop_window))
         ok_button.grid(row=2, column=0, padx=self.padx, pady=self.pady)
-        cancel_button = tkinter.Button(pop_window, text="取消", command=pop_window.destroy)
+        cancel_button = tkinter.Button(pop_window, text="取消", command=lambda: self.click_button_add_code_list_cancel(pop_window))
         cancel_button.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+
+    def click_button_add_code_list_cancel(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def click_button_add_code_list_ok(self, treeview_code_content, text_code_content, pop_window):
         code_content_str = text_code_content.get("1.0", tkinter.END).strip()
@@ -3177,7 +3188,9 @@ class CreateResourceInFrame:
                 code_index += 1
         print("CreateResourceInFrame.click_button_add_code_list_ok: 添加代码行数:",
               len(self.resource_info_dict["one_line_code_obj_list"]))
-        pop_window.destroy()
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
         # 刷新一次treeview
         treeview_code_content.delete(*treeview_code_content.get_children())
         index = 0
@@ -3189,7 +3202,10 @@ class CreateResourceInFrame:
 
     def edit_treeview_code_content_item(self, _, treeview_code_content):
         item_index = treeview_code_content.focus()
-        one_line_code_index = treeview_code_content.item(item_index, "values")[0]
+        print("item_index=", item_index)
+        if item_index == "":
+            return
+        one_line_code_index, _, _ = treeview_code_content.item(item_index, "values")
         print("one_line_code_index", one_line_code_index)
         one_line_code_obj = self.resource_info_dict["one_line_code_obj_list"][int(one_line_code_index)]  # 获取选中的命令对象
         pop_window = tkinter.Toplevel(self.main_window.window_obj)
@@ -3200,6 +3216,9 @@ class CreateResourceInFrame:
         height = 300
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        pop_window.focus_force()  # 使子窗口获得焦点
+        pop_window.protocol("WM_DELETE_WINDOW", self.edit_or_add_treeview_code_content_on_closing)  # 子窗口点击右上角的关闭按钮后，触发此函数
         one_line_code_info_dict = {}
         # OneLineCode-code_index
         label_code_index = tkinter.Label(pop_window, text="巡检代码index")
@@ -3260,8 +3279,13 @@ class CreateResourceInFrame:
                                                                                              one_line_code_obj,
                                                                                              pop_window, treeview_code_content))
         ok_button.grid(row=7, column=0, padx=self.padx, pady=self.pady)
-        cancel_button = tkinter.Button(pop_window, text="取消", command=pop_window.destroy)
+        cancel_button = tkinter.Button(pop_window, text="取消", command=lambda: self.edit_treeview_code_content_item_cancel(pop_window))
         cancel_button.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+
+    def edit_treeview_code_content_item_cancel(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def edit_treeview_code_content_item_save(self, one_line_code_info_dict, one_line_code_obj, pop_window, treeview_code_content):
         one_line_code_obj.code_content = one_line_code_info_dict["sv_code_content"].get()
@@ -3276,7 +3300,9 @@ class CreateResourceInFrame:
             one_line_code_obj.interactive_process_method = 0
         else:
             one_line_code_obj.interactive_process_method = one_line_code_info_dict["combobox_interactive_process_method"].current()
-        pop_window.destroy()
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
         # ★刷新一次treeview
         item_id_list = treeview_code_content.get_children()
         index = 0
@@ -3285,6 +3311,10 @@ class CreateResourceInFrame:
             treeview_code_content.set(item_id_list[index], 1, code_obj.code_content)
             treeview_code_content.set(item_id_list[index], 2, need_interactive_value[code_obj.need_interactive])
             index += 1
+
+    def edit_or_add_treeview_code_content_on_closing(self):
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def create_inspection_template(self):
         # ★创建-inspection_template
@@ -4528,6 +4558,9 @@ class EditResourceInFrame:
         height = 300
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        pop_window.focus_force()  # 使子窗口获得焦点
+        pop_window.protocol("WM_DELETE_WINDOW", self.edit_or_add_treeview_code_content_on_closing)  # 子窗口点击右上角的关闭按钮后，触发此函数
         label_inspection_code_block_code_content = tkinter.Label(pop_window, text="巡检代码内容")
         label_inspection_code_block_code_content.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         text_code_content = tkinter.Text(master=pop_window, width=50, height=16)
@@ -4535,8 +4568,13 @@ class EditResourceInFrame:
         ok_button = tkinter.Button(pop_window, text="确定",
                                    command=lambda: self.click_button_add_code_list_ok(treeview_code_content, text_code_content, pop_window))
         ok_button.grid(row=2, column=0, padx=self.padx, pady=self.pady)
-        cancel_button = tkinter.Button(pop_window, text="取消", command=pop_window.destroy)
+        cancel_button = tkinter.Button(pop_window, text="取消", command=lambda: self.click_button_add_code_list_cancel(pop_window))
         cancel_button.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+
+    def click_button_add_code_list_cancel(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def click_button_add_code_list_ok(self, treeview_code_content, text_code_content, pop_window):
         self.resource_obj.code_list = []
@@ -4550,7 +4588,9 @@ class EditResourceInFrame:
                 code_index += 1
         print("CreateResourceInFrame.click_button_add_code_list_ok: 添加代码行数:",
               len(self.resource_obj.code_list))
-        pop_window.destroy()
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
         # 刷新一次treeview
         treeview_code_content.delete(*treeview_code_content.get_children())
         index = 0
@@ -4562,7 +4602,10 @@ class EditResourceInFrame:
 
     def edit_treeview_code_content_item(self, _, treeview_code_content):
         item_index = treeview_code_content.focus()
-        one_line_code_index = treeview_code_content.item(item_index, "values")[0]
+        print("item_index=", item_index)
+        if item_index == "":
+            return
+        one_line_code_index, _, _ = treeview_code_content.item(item_index, "values")
         print("one_line_code_index", one_line_code_index)
         one_line_code_obj = self.resource_obj.code_list[int(one_line_code_index)]  # 获取选中的命令对象
         pop_window = tkinter.Toplevel(self.main_window.window_obj)
@@ -4573,6 +4616,9 @@ class EditResourceInFrame:
         height = 300
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        pop_window.focus_force()  # 使子窗口获得焦点
+        pop_window.protocol("WM_DELETE_WINDOW", self.edit_or_add_treeview_code_content_on_closing)  # 子窗口点击右上角的关闭按钮后，触发此函数
         one_line_code_info_dict = {}
         # OneLineCode-code_index
         label_code_index = tkinter.Label(pop_window, text="巡检代码index")
@@ -4633,8 +4679,13 @@ class EditResourceInFrame:
                                                                                              one_line_code_obj,
                                                                                              pop_window, treeview_code_content))
         ok_button.grid(row=7, column=0, padx=self.padx, pady=self.pady)
-        cancel_button = tkinter.Button(pop_window, text="取消", command=pop_window.destroy)
+        cancel_button = tkinter.Button(pop_window, text="取消", command=lambda: self.edit_treeview_code_content_item_cancel(pop_window))
         cancel_button.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+
+    def edit_treeview_code_content_item_cancel(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def edit_treeview_code_content_item_save(self, one_line_code_info_dict, one_line_code_obj, pop_window, treeview_code_content):
         one_line_code_obj.code_content = one_line_code_info_dict["sv_code_content"].get()
@@ -4649,15 +4700,21 @@ class EditResourceInFrame:
             one_line_code_obj.interactive_process_method = 0
         else:
             one_line_code_obj.interactive_process_method = one_line_code_info_dict["combobox_interactive_process_method"].current()
-        pop_window.destroy()  # 关闭编辑窗口
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
         # ★刷新一次treeview
         item_id_list = treeview_code_content.get_children()
         index = 0
         need_interactive_value = ["No", "Yes"]
-        for code_obj in self.resource_info_dict["one_line_code_obj_list"]:
+        for code_obj in self.resource_obj.code_list:
             treeview_code_content.set(item_id_list[index], 1, code_obj.code_content)
             treeview_code_content.set(item_id_list[index], 2, need_interactive_value[code_obj.need_interactive])
             index += 1
+
+    def edit_or_add_treeview_code_content_on_closing(self):
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def edit_inspection_template(self):
         # ★创建-inspection_template
