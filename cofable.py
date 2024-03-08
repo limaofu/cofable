@@ -26,6 +26,7 @@
 ★. 巡检命令中有sleep N 之类的命令时，要判断是否完成，根据shell提示符进行判断
 ★. 遗留：编辑或创建巡检代码时，要求能设置每条命令的 交互回复
 ★. 没有创建项目时，就创建其他资源，要生成默认的项目，名为default的项目                     2024年3月7日 完成
+★. shell通道设置字符界面宽度及长度
 
 资源操作逻辑：
 ★创建-资源      CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -83,10 +84,10 @@ EXECUTION_METHOD_NONE = 0
 EXECUTION_METHOD_AT = 1
 EXECUTION_METHOD_CROND = 2
 EXECUTION_METHOD_AFTER = 3
-CODE_POST_WAIT_TIME_DEFAULT = 0.1  # 命令发送后等待的时间，秒
-CODE_POST_WAIT_TIME_MAX_TIMEOUT_INTERVAL = 0.1
-CODE_POST_WAIT_TIME_MAX_TIMEOUT_COUNT = 30
-LOGIN_AUTH_TIMEOUT = 10  # 登录等待超时，秒
+CODE_POST_WAIT_TIME_DEFAULT = 0.05  # 命令发送后等待的时间，秒，这里不能为0
+MAX_INTERACTIVE_COUNT = 5000  # 最大交互处理次数，在 SSHOperator.process_code_interactive()里使用
+MAX_EXEC_WAIT_COUNT = 10000  # 判断巡检线程超时最大等待次数，此参数乘以CODE_POST_WAIT_TIME_DEFAULT为等待超时时间
+LOGIN_AUTH_TIMEOUT = 30  # 登录等待超时，秒
 CODE_EXEC_METHOD_INVOKE_SHELL = 0
 CODE_EXEC_METHOD_EXEC_COMMAND = 1
 AUTH_METHOD_SSH_PASS = 0
@@ -120,7 +121,8 @@ OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME_DATE = 4
 OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME_DATE_TIME = 5
 LOGIN_PROTOCOL_SSH = 0
 LOGIN_PROTOCOL_TELNET = 1
-MAX_INTERACTIVE_TIME = 5000  # 最大交互处理次数
+SHELL_TERMINAL_WIDTH = 140
+SHELL_TERMINAL_HEIGHT = 48
 
 
 class Project:
@@ -1181,13 +1183,13 @@ class LaunchInspectionJob:
                 return  # 验证失败则直接退出本函数
             max_timeout_index = 0
             while True:  # 这里是判断 ssh_operator.run_invoke_shell() 是否完成，否就等待直到最大超时
-                if max_timeout_index >= CODE_POST_WAIT_TIME_MAX_TIMEOUT_COUNT:
+                if max_timeout_index >= MAX_EXEC_WAIT_COUNT:  # 判断巡检线程超时最大等待次数
                     print("LaunchInspectionJob.create_ssh_operator_invoke_shell:",
                           f"巡检代码块: {inspection_code_block_obj.name} 已达最大超时-未完成")
                     host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_FAILED
                     host_job_status_obj.exec_timeout = COF_YES
                     break
-                time.sleep(CODE_POST_WAIT_TIME_MAX_TIMEOUT_INTERVAL)
+                time.sleep(CODE_POST_WAIT_TIME_DEFAULT)
                 max_timeout_index += 1
                 if ssh_operator.is_finished:
                     print("LaunchInspectionJob.create_ssh_operator_invoke_shell:",
@@ -1609,8 +1611,7 @@ class SSHOperator:
             if self.auth_method == AUTH_METHOD_SSH_PASS:
                 print("SSHOperator.run_invoke_shell : 使用ssh_password密码登录")
                 ssh_client.connect(hostname=self.hostname, port=self.port, username=self.username,
-                                   password=self.password,
-                                   timeout=self.timeout)
+                                   password=self.password, timeout=self.timeout)
             elif self.auth_method == AUTH_METHOD_SSH_KEY:
                 prikey_string_io = io.StringIO(self.private_key)
                 pri_key = paramiko.RSAKey.from_private_key(prikey_string_io)
@@ -1623,7 +1624,7 @@ class SSHOperator:
             print(f"SSHOperator.run_invoke_shell : Authentication Error: {e}")
             raise e
         # ★★连接后，创建invoke_shell交互式shell★★
-        ssh_shell = ssh_client.invoke_shell()  # 创建一个交互式shell
+        ssh_shell = ssh_client.invoke_shell(width=SHELL_TERMINAL_WIDTH, height=SHELL_TERMINAL_HEIGHT)  # 创建一个交互式shell
         time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
         try:
             recv = ssh_shell.recv(65535)  # 获取登录后的输出信息，此时未执行任何命令
@@ -1703,7 +1704,7 @@ class SSHOperator:
             if second_time is True:
                 print("SSHOperator.process_code_interactive : 上面输出为twice的★★★★★")
                 return
-            if interactive_times > MAX_INTERACTIVE_TIME:
+            if interactive_times > MAX_INTERACTIVE_COUNT:
                 return
             interactive_times += 1
             interactive_output_str_lines = interactive_output_str.split('\n')
