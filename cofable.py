@@ -2311,6 +2311,43 @@ class GlobalInfo:
         self.load_inspection_job_record_host_job_status_from_dbfile(obj_list)
         return obj_list
 
+    def load_inspection_job_log_for_host(self, inspection_job_record_oid, host_oid, inspection_code_block_oid):
+        """
+        从sqlite3数据库文件，查询某台主机的巡检作业日志，输出为<SSHOperatorOutput>对象列表
+        :return:
+        """
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_job_invoke_shell_output'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_invoke_shell_output"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        ssh_operator_output_obj_list = []
+        sql_list = ['select * from tb_inspection_job_invoke_shell_output where',
+                    f'"job_oid"="{inspection_job_record_oid}"',
+                    f'and "host_oid"="{host_oid}"',
+                    f'and "inspection_code_oid"="{inspection_code_block_oid}"']
+        sqlite_cursor.execute(" ".join(sql_list))
+        search_result = sqlite_cursor.fetchall()
+        for obj_info_tuple in search_result:
+            obj = SSHOperatorOutput(code_index=obj_info_tuple[4],
+                                    code_content='',
+                                    code_exec_method=int(obj_info_tuple[5]),
+                                    invoke_shell_output_str=base64.b64decode(obj_info_tuple[6]).decode("utf8"),
+                                    invoke_shell_output_last_line=base64.b64decode(obj_info_tuple[7]).decode("utf8"),
+                                    interactive_output_str_list=base64.b64decode(obj_info_tuple[8]).decode("utf8")
+                                    )
+            ssh_operator_output_obj_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+        return ssh_operator_output_obj_list
+
     def load_inspection_job_record_host_job_status_from_dbfile(self, inspection_job_record_obj_list):
         """
         从sqlite3数据库文件，xxx
@@ -3474,7 +3511,8 @@ class CreateResourceInFrame:
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
-        pop_window.protocol("WM_DELETE_WINDOW", self.edit_or_add_treeview_code_content_on_closing)  # 子窗口点击右上角的关闭按钮后，触发此函数
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.edit_or_add_treeview_code_content_on_closing(pop_window))
         label_inspection_code_block_code_content = tkinter.Label(pop_window, text="巡检代码内容")
         label_inspection_code_block_code_content.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         text_code_content = tkinter.Text(master=pop_window, width=50, height=16)
@@ -3531,7 +3569,8 @@ class CreateResourceInFrame:
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
-        pop_window.protocol("WM_DELETE_WINDOW", self.edit_or_add_treeview_code_content_on_closing)  # 子窗口点击右上角的关闭按钮后，触发此函数
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.edit_or_add_treeview_code_content_on_closing(pop_window))
         one_line_code_info_dict = {}
         # OneLineCode-code_index
         label_code_index = tkinter.Label(pop_window, text="巡检代码index")
@@ -3625,7 +3664,8 @@ class CreateResourceInFrame:
             treeview_code_content.set(item_id_list[index], 2, need_interactive_value[code_obj.need_interactive])
             index += 1
 
-    def edit_or_add_treeview_code_content_on_closing(self):
+    def edit_or_add_treeview_code_content_on_closing(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
         self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
@@ -4873,7 +4913,8 @@ class EditResourceInFrame:
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
-        pop_window.protocol("WM_DELETE_WINDOW", self.edit_or_add_treeview_code_content_on_closing)  # 子窗口点击右上角的关闭按钮后，触发此函数
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.edit_or_add_treeview_code_content_on_closing(pop_window))
         label_inspection_code_block_code_content = tkinter.Label(pop_window, text="巡检代码内容")
         label_inspection_code_block_code_content.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         text_code_content = tkinter.Text(master=pop_window, width=50, height=16)
@@ -4931,7 +4972,8 @@ class EditResourceInFrame:
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
-        pop_window.protocol("WM_DELETE_WINDOW", self.edit_or_add_treeview_code_content_on_closing)  # 子窗口点击右上角的关闭按钮后，触发此函数
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.edit_or_add_treeview_code_content_on_closing(pop_window))
         one_line_code_info_dict = {}
         # OneLineCode-code_index
         label_code_index = tkinter.Label(pop_window, text="巡检代码index")
@@ -5025,7 +5067,8 @@ class EditResourceInFrame:
             treeview_code_content.set(item_id_list[index], 2, need_interactive_value[code_obj.need_interactive])
             index += 1
 
-    def edit_or_add_treeview_code_content_on_closing(self):
+    def edit_or_add_treeview_code_content_on_closing(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
         self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
@@ -5931,7 +5974,12 @@ class StartInspectionTemplateInFrame:
                 time_usage_2))
             index += 1
         inspection_host_treeview.grid(row=6, column=0, columnspan=2, padx=self.padx, pady=self.pady)
-        inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)  # 定时刷新主机巡检作业状态
+        inspection_host_treeview.bind("<<TreeviewSelect>>", lambda event: self.view_inspection_host_item(event, inspection_host_treeview))
+        # 只有巡检作业未完成时才刷新主机巡检作业状态，完成（包含失败）都不再去更新主机状态
+        if self.current_inspection_job_obj.job_state == INSPECTION_JOB_EXEC_STATE_UNKNOWN:
+            inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
+        elif self.current_inspection_job_obj.job_state == INSPECTION_JOB_EXEC_STATE_STARTED:
+            inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
         # ★★更新row_index
         self.current_row_index = 7
 
@@ -5958,6 +6006,89 @@ class StartInspectionTemplateInFrame:
             inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
         elif self.current_inspection_job_obj.job_state == INSPECTION_JOB_EXEC_STATE_STARTED:
             inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
+
+    def view_inspection_host_item(self, _, inspection_host_treeview):
+        item_index = inspection_host_treeview.focus()
+        print("view_inspection_host_item: item_index=", item_index)
+        if item_index == "":
+            return
+        host_job_status_obj_index, _, _, _ = inspection_host_treeview.item(item_index, "values")
+        # 获取选中的命令对象
+        host_job_status_obj = self.current_inspection_job_obj.unduplicated_host_job_status_obj_list[int(host_job_status_obj_index)]
+        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window.title("主机巡检详情")
+        screen_width = self.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.main_window.window_obj.winfo_screenheight()
+        width = 640
+        height = 480
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.on_closing_view_inspection_host_item(pop_window))
+        # Host-name
+        host_obj = self.global_info.get_host_by_oid(host_job_status_obj.host_oid)
+        label_host_name = tkinter.Label(pop_window, text="主机名称")
+        label_host_name.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        entry_host_name = tkinter.Entry(pop_window)
+        entry_host_name.insert(0, host_obj.name)  # 显示初始值，不可编辑★
+        entry_host_name.grid(row=0, column=1, padx=self.padx, pady=self.pady)
+        # Host-job_status
+        label_host_job_status = tkinter.Label(pop_window, text="作业状态")
+        label_host_job_status.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        status_name_list = ["unknown", "started", "completed", "part_completed", "failed"]
+        combobox_job_status = ttk.Combobox(pop_window, values=status_name_list, state="readonly")
+        combobox_job_status.current(host_job_status_obj.job_status)
+        combobox_job_status.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # Host-find_credential_status
+        label_host_find_credential_status = tkinter.Label(pop_window, text="凭据验证情况")
+        label_host_find_credential_status.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        status_name_list = ["Succeed", "Timeout", "Failed"]
+        combobox_find_credential_status = ttk.Combobox(pop_window, values=status_name_list, state="readonly")
+        combobox_find_credential_status.current(host_job_status_obj.find_credential_status)
+        combobox_find_credential_status.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # Host-time_usage
+        label_host_time_usage = tkinter.Label(pop_window, text="执行时长(秒)")
+        label_host_time_usage.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        entry_host_time_usage = tkinter.Entry(pop_window)
+        if host_job_status_obj.exec_timeout == COF_YES:
+            time_usage = "执行超时"
+        elif host_job_status_obj.find_credential_status != FIND_CREDENTIAL_STATUS_SUCCEED:
+            time_usage = "登录验证失败"
+        else:
+            time_usage = str(host_job_status_obj.end_time - host_job_status_obj.start_time)
+        entry_host_time_usage.insert(0, time_usage)  # 显示初始值，不可编辑★
+        entry_host_time_usage.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # 显示巡检命令及输出结果
+        code_exec_log_text = tkinter.Text(master=pop_window)  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
+        for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
+            # <SSHOperatorOutput>对象列表，一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
+            code_exec_output_obj_list = self.global_info.load_inspection_job_log_for_host(self.current_inspection_job_obj.oid,
+                                                                                          host_job_status_obj.host_oid,
+                                                                                          inspection_code_block_oid)
+            inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
+            code_exec_log_text.insert(tkinter.END, f"\n★★ {inspection_code_block_obj.name} 巡检命令详情 ★★\n")
+            for output_obj in code_exec_output_obj_list:
+                code_exec_log_text.insert(tkinter.END, output_obj.invoke_shell_output_str)
+                code_exec_log_text.insert(tkinter.END, output_obj.interactive_output_str_list)
+        # 显示info Text文本框
+        code_exec_log_text.grid(row=4, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+        # 添加按钮
+        ok_button = tkinter.Button(pop_window, text="xxx")
+        ok_button.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        cancel_button = tkinter.Button(pop_window, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
+        cancel_button.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+
+    def exit_view_inspection_host_item(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+
+    def on_closing_view_inspection_host_item(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
 
 class ListInspectionJobInFrame:
@@ -6142,7 +6273,12 @@ class ViewInspectionJobInFrame:
                 time_usage_2))
             index += 1
         inspection_host_treeview.grid(row=6, column=0, columnspan=2, padx=self.padx, pady=self.pady)
-        inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)  # 定时刷新主机巡检作业状态
+        inspection_host_treeview.bind("<<TreeviewSelect>>", lambda event: self.view_inspection_host_item(event, inspection_host_treeview))
+        # 只有巡检作业未完成时才刷新主机巡检作业状态，完成（包含失败）都不再去更新主机状态
+        if self.inspection_job_record_obj.job_state == INSPECTION_JOB_EXEC_STATE_UNKNOWN:
+            inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
+        elif self.inspection_job_record_obj.job_state == INSPECTION_JOB_EXEC_STATE_STARTED:
+            inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
         # ★★更新row_index
         self.current_row_index = 6
 
@@ -6168,6 +6304,89 @@ class ViewInspectionJobInFrame:
             inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
         elif self.inspection_job_record_obj.job_state == INSPECTION_JOB_EXEC_STATE_STARTED:
             inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
+
+    def view_inspection_host_item(self, _, inspection_host_treeview):
+        item_index = inspection_host_treeview.focus()
+        print("view_inspection_host_item: item_index=", item_index)
+        if item_index == "":
+            return
+        host_job_status_obj_index, _, _, _ = inspection_host_treeview.item(item_index, "values")
+        # 获取选中的命令对象
+        host_job_status_obj = self.inspection_job_record_obj.unduplicated_host_job_status_obj_list[int(host_job_status_obj_index)]
+        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window.title("主机巡检详情")
+        screen_width = self.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.main_window.window_obj.winfo_screenheight()
+        width = 640
+        height = 480
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.on_closing_view_inspection_host_item(pop_window))
+        # Host-name
+        host_obj = self.global_info.get_host_by_oid(host_job_status_obj.host_oid)
+        label_host_name = tkinter.Label(pop_window, text="主机名称")
+        label_host_name.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        entry_host_name = tkinter.Entry(pop_window)
+        entry_host_name.insert(0, host_obj.name)  # 显示初始值，不可编辑★
+        entry_host_name.grid(row=0, column=1, padx=self.padx, pady=self.pady)
+        # Host-job_status
+        label_host_job_status = tkinter.Label(pop_window, text="作业状态")
+        label_host_job_status.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        status_name_list = ["unknown", "started", "completed", "part_completed", "failed"]
+        combobox_job_status = ttk.Combobox(pop_window, values=status_name_list, state="readonly")
+        combobox_job_status.current(host_job_status_obj.job_status)
+        combobox_job_status.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # Host-find_credential_status
+        label_host_find_credential_status = tkinter.Label(pop_window, text="凭据验证情况")
+        label_host_find_credential_status.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        status_name_list = ["Succeed", "Timeout", "Failed"]
+        combobox_find_credential_status = ttk.Combobox(pop_window, values=status_name_list, state="readonly")
+        combobox_find_credential_status.current(host_job_status_obj.find_credential_status)
+        combobox_find_credential_status.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # Host-time_usage
+        label_host_time_usage = tkinter.Label(pop_window, text="执行时长(秒)")
+        label_host_time_usage.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        entry_host_time_usage = tkinter.Entry(pop_window)
+        if host_job_status_obj.exec_timeout == COF_YES:
+            time_usage = "执行超时"
+        elif host_job_status_obj.find_credential_status != FIND_CREDENTIAL_STATUS_SUCCEED:
+            time_usage = "登录验证失败"
+        else:
+            time_usage = str(host_job_status_obj.end_time - host_job_status_obj.start_time)
+        entry_host_time_usage.insert(0, time_usage)  # 显示初始值，不可编辑★
+        entry_host_time_usage.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # 显示巡检命令及输出结果
+        code_exec_log_text = tkinter.Text(master=pop_window)  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
+        for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
+            # <SSHOperatorOutput>对象列表，一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
+            code_exec_output_obj_list = self.global_info.load_inspection_job_log_for_host(self.inspection_job_record_obj.oid,
+                                                                                          host_job_status_obj.host_oid,
+                                                                                          inspection_code_block_oid)
+            inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
+            code_exec_log_text.insert(tkinter.END, f"\n★★ {inspection_code_block_obj.name} 巡检命令详情 ★★\n")
+            for output_obj in code_exec_output_obj_list:
+                code_exec_log_text.insert(tkinter.END, output_obj.invoke_shell_output_str)
+                code_exec_log_text.insert(tkinter.END, output_obj.interactive_output_str_list)
+        # 显示info Text文本框
+        code_exec_log_text.grid(row=4, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+        # 添加按钮
+        ok_button = tkinter.Button(pop_window, text="xxx")
+        ok_button.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        cancel_button = tkinter.Button(pop_window, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
+        cancel_button.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+
+    def exit_view_inspection_host_item(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+
+    def on_closing_view_inspection_host_item(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
 
 if __name__ == '__main__':
