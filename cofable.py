@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-08
+# update: 2024-03-12
 
 """
 解决问题：
@@ -26,7 +26,7 @@
 ★. 巡检命令中有sleep N 之类的命令时，要判断是否完成，根据shell提示符进行判断
 ★. 遗留：编辑或创建巡检代码时，要求能设置每条命令的 交互回复
 ★. 没有创建项目时，就创建其他资源，要生成默认的项目，名为default的项目                     2024年3月7日 完成
-★. shell通道设置字符界面宽度及长度
+★. shell通道设置字符界面宽度及长度                         2024年3月8日 完成
 
 资源操作逻辑：
 ★创建-资源      CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -168,7 +168,7 @@ class Project:
         # 开始插入数据
         sql = f"select * from tb_project where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
-        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项记录，则创建此项记录 ★★
             sql_list = [f"insert into tb_project (oid,name,description,create_timestamp,last_modify_timestamp) values",
                         f"('{self.oid}',",
                         f"'{self.name}',",
@@ -176,7 +176,7 @@ class Project:
                         f"{self.create_timestamp},",
                         f"{self.last_modify_timestamp} )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+        else:  # ★★ 若查询到有此项记录，则更新此项记录 ★★
             sql_list = [f"update tb_project set ",
                         f"name='{self.name}',",
                         f"description='{self.description}',",
@@ -270,7 +270,7 @@ class Credential:
         sql = f"select * from tb_credential where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
         private_key_b64 = base64.b64encode(self.private_key.encode("utf8")).decode("utf8")
-        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项记录，则创建此项记录 ★★
             sql_list = ["insert into tb_credential (oid,",
                         "name,",
                         "description,",
@@ -302,7 +302,7 @@ class Credential:
                         f"{self.ssl_verify},",
                         f"{self.last_modify_timestamp} )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+        else:  # ★★ 若查询到有此项记录，则更新此项记录 ★★
             sql_list = ["update tb_credential  set ",
                         f"description='{self.name}',",
                         f"description='{self.description}',",
@@ -441,7 +441,7 @@ class Host:
         # 开始插入数据
         sql = f"select * from tb_host where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
-        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项记录，则创建此项记录 ★★
             sql_list = [f"insert into tb_host (oid,",
                         "name,",
                         "description,",
@@ -465,7 +465,7 @@ class Host:
                         f"{self.login_protocol},"
                         f"{self.first_auth_method} )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+        else:  # ★★ 若查询到有此项记录，则更新此项记录 ★★
             sql_list = [f"update tb_host set ",
                         f"name='{self.name}',",
                         f"description='{self.description}',",
@@ -493,9 +493,9 @@ class Host:
         sql = f"delete from tb_host_include_credential_oid_list where host_oid='{self.oid}'"
         sqlite_cursor.execute(sql)  # ★先清空Host所有的凭据，再重新插入（既可用于新建，又可用于更新）
         for cred_oid in self.credential_oid_list:
-            # sql = f"select * from tb_host_include_credential_oid_list where host_oid='{self.oid}' and credential_oid='{cred_oid}'"
-            # sqlite_cursor.execute(sql)
-            if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
+            sql = f"select * from tb_host_include_credential_oid_list where host_oid='{self.oid}' and credential_oid='{cred_oid}'"
+            sqlite_cursor.execute(sql)
+            if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项记录，则创建此项记录
                 sql_list = [f"insert into tb_host_include_credential_oid_list (host_oid,",
                             "credential_oid ) values ",
                             f"('{self.oid}',",
@@ -588,7 +588,7 @@ class HostGroup:
         # 开始插入数据
         sql = f"select * from tb_host_group where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
-        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项记录，则创建此项记录 ★★
             sql_list = ["insert into tb_host_group (oid,",
                         "name,",
                         "description,",
@@ -602,7 +602,7 @@ class HostGroup:
                         f"{self.create_timestamp},",
                         f"{self.last_modify_timestamp} )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+        else:  # ★★ 若查询到有此项记录，则更新此项记录 ★★
             sql_list = ["update tb_host_group set ",
                         f"name='{self.name}',",
                         f"description='{self.description}',",
@@ -725,7 +725,7 @@ class InspectionCodeBlock:
         # 开始插入数据
         sql = f"select * from tb_inspection_code_block where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
-        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项记录，则创建此项记录 ★★
             sql_list = ["insert into tb_inspection_code_block (oid,",
                         "name,",
                         "description,",
@@ -741,7 +741,7 @@ class InspectionCodeBlock:
                         f"{self.code_source},",
                         f"{self.last_modify_timestamp} )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+        else:  # ★★ 若查询到有此项记录，则更新此项记录 ★★
             sql_list = ["update tb_inspection_code_block set ",
                         f"name='{self.name}',",
                         f"description='{self.description}',",
@@ -890,7 +890,7 @@ class InspectionTemplate:
         # 开始插入数据
         sql = f"select * from tb_inspection_template where oid='{self.oid}'"
         sqlite_cursor.execute(sql)
-        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项目记录，则创建此项目记录 ★★
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项记录，则创建此项记录 ★★
             sql_list = ["insert into tb_inspection_template (oid,",
                         "name,",
                         "description,",
@@ -920,7 +920,7 @@ class InspectionTemplate:
                         f"{self.save_output_to_file},",
                         f"{self.output_file_name_style} )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        else:  # ★★ 若查询到有此项目记录，则更新此项目记录 ★★
+        else:  # ★★ 若查询到有此项记录，则更新此项记录 ★★
             sql_list = ["update tb_inspection_template set ",
                         f"name='{self.name}',",
                         f"description='{self.description}',",
@@ -1090,12 +1090,12 @@ class HostJobStatus:
     记录被巡检主机的巡检作业状态
     """
 
-    def __init__(self, host_oid='', job_status=INSPECTION_JOB_EXEC_STATE_UNKNOWN, start_time=0, end_time=0,
-                 find_credential_status=INSPECTION_JOB_EXEC_STATE_UNKNOWN):
+    def __init__(self, host_oid='', job_status=INSPECTION_JOB_EXEC_STATE_UNKNOWN, start_time=0.0, end_time=0.0,
+                 find_credential_status=INSPECTION_JOB_EXEC_STATE_UNKNOWN, exec_timeout=COF_NO):
         self.host_oid = host_oid  # <str>
         self.job_status = job_status  # <int> INSPECTION_JOB_EXEC_STATE_UNKNOWN
         self.find_credential_status = find_credential_status  # <int>
-        self.exec_timeout = COF_NO  # <int>
+        self.exec_timeout = exec_timeout  # <int>
         self.start_time = start_time  # <float>
         self.end_time = end_time  # <float>
 
@@ -1202,7 +1202,7 @@ class LaunchInspectionJob:
                 if self.inspection_template.save_output_to_file == COF_YES:
                     self.save_ssh_operator_output_to_file(ssh_operator.output_list, host_obj,
                                                           self.inspection_template.output_file_name_style)
-                # 输出信息保存到sqlite数据库 这里可能需要整改一下★★★★★
+                # 输出信息保存到sqlite数据库★★★★★
                 self.save_ssh_operator_invoke_shell_output_to_sqlite(ssh_operator.output_list, host_obj, inspection_code_block_obj)
         if host_job_status_obj.exec_timeout == COF_NO and host_job_status_obj.find_credential_status == FIND_CREDENTIAL_STATUS_SUCCEED:
             host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_COMPLETED  # 全部完成，没有超时的，没有验证失败的
@@ -1373,14 +1373,14 @@ class LaunchInspectionJob:
                         "code_invoke_shell_output_last_line_b64 varchar(2048),",
                         "code_interactive_output_str_lines_b64 varchar(8192) )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        # 开始插入数据，一条命令的输出为一行记录
+        # 开始插入数据，一条命令的输出为一行记录（job_oid为LaunchInspectionJob的oid，也同InspectionJobRecord的oid）
         for code_output in ssh_operator_output_obj_list:
             sql_list = ["select * from tb_inspection_job_invoke_shell_output where",
                         f"job_oid='{self.oid}' and host_oid='{host.oid}'",
                         f"and inspection_code_oid='{inspection_code_obj.oid}'",
                         f"and code_index='{code_output.code_index}' "]
             sqlite_cursor.execute(" ".join(sql_list))
-            if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
+            if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项记录，则创建此项记录
                 code_invoke_shell_output_str_b64 = base64.b64encode(
                     code_output.invoke_shell_output_str.encode('utf8')).decode('utf8')
                 code_invoke_shell_output_last_line_b64 = base64.b64encode(
@@ -1445,7 +1445,7 @@ class LaunchInspectionJob:
         sql_list = ["select * from tb_inspection_job where",
                     f"job_oid='{self.oid}'"]
         sqlite_cursor.execute(" ".join(sql_list))
-        if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项目记录，则创建此项目记录
+        if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项记录，则创建此项记录
             sql_list = ["insert into tb_inspection_job (job_oid,",
                         "job_name,",
                         "inspection_code_oid,",
@@ -1467,11 +1467,19 @@ class LaunchInspectionJob:
 
     def start_job(self):
         print("开始巡检任务 ############################################################")
+        self.job_state = INSPECTION_JOB_EXEC_STATE_STARTED
         if self.inspection_template is None:
             print("巡检模板对象为空，结束本次任务")
+            self.job_state = INSPECTION_JOB_EXEC_STATE_FAILED
             return
         self.start_time = time.time()
         self.get_unduplicated_host_oid_from_inspection_template()  # ★主机去重，去重后生成主机列表及对应的主机状态信息对象列表
+        job_record_obj = InspectionJobRecord(name=self.name, description=self.description, oid=self.oid,
+                                             create_timestamp=self.create_timestamp, project_oid=self.project_oid,
+                                             inspection_template_oid=self.inspection_template_oid, job_state=self.job_state,
+                                             unduplicated_host_job_status_obj_list=self.unduplicated_host_job_status_obj_list,
+                                             start_time=self.start_time, end_time=self.end_time, global_info=self.global_info)
+        self.global_info.inspection_job_record_obj_list.insert(0, job_record_obj)
         print("巡检模板名称：", self.inspection_template.name)
         thread_pool = ThreadPool(processes=self.inspection_template.forks)  # 创建线程池，线程数量由<InspectionTemplate>.forks决定
         thread_pool.map(self.operator_job_thread, range(len(self.unduplicated_host_oid_list)))  # ★★线程池调用巡检作业函数★★
@@ -1481,13 +1489,11 @@ class LaunchInspectionJob:
         print("巡检任务完成 ############################################################")
         print(f"巡检并发数为{self.inspection_template.forks}")
         print("用时 {:<6.4f} 秒".format(self.end_time - self.start_time))
-        # 将作业信息保存到数据库，从数据库读取出来时，不可重构为一个<LaunchInspectionJob>对象
+        # 将作业信息保存到数据库，从数据库读取出来时，不可重构为一个<LaunchInspectionJob>对象，可重构为<InspectionJobRecord>对象
         self.judge_completion_of_job()  # 先判断作业完成情况
-        job_record_obj = InspectionJobRecord(name=self.name, description=self.description, oid=self.oid,
-                                             create_timestamp=self.create_timestamp, project_oid=self.project_oid,
-                                             inspection_template_oid=self.inspection_template_oid, job_state=self.job_state,
-                                             unduplicated_host_job_status_obj_list=self.unduplicated_host_job_status_obj_list,
-                                             start_time=self.start_time, end_time=self.end_time, global_info=self.global_info)
+        job_record_obj.end_time = self.end_time
+        job_record_obj.job_state = self.job_state
+        job_record_obj.unduplicated_host_job_status_obj_list = self.unduplicated_host_job_status_obj_list
         job_record_obj.save()  # 保存巡检作业情况到数据库，这里不是保存每台主机的巡检命令巡出，而是每台主机的巡检完成情况
 
 
@@ -1509,19 +1515,96 @@ class InspectionJobRecord:
             self.create_timestamp = time.time()  # <float> 同<LaunchInspectionJob>对象的属性
         else:
             self.create_timestamp = create_timestamp
-        self.project_oid = project_oid  # 同<LaunchInspectionJob>对象的属性
-        self.inspection_template_oid = inspection_template_oid  # InspectionTemplate对象oid
+        self.project_oid = project_oid  # <str> 同<LaunchInspectionJob>对象的属性
+        self.inspection_template_oid = inspection_template_oid  # <str> InspectionTemplate对象oid
         if unduplicated_host_job_status_obj_list is None:
             self.unduplicated_host_job_status_obj_list = []  # host的巡检作业状态信息<HostJobStatus>对象
         else:
             self.unduplicated_host_job_status_obj_list = unduplicated_host_job_status_obj_list  # 同<LaunchInspectionJob>对象的属性
-        self.job_state = job_state  # 同<LaunchInspectionJob>对象的属性
+        self.job_state = job_state  # <int> 同<LaunchInspectionJob>对象的属性
         self.global_info = global_info  # 同<LaunchInspectionJob>对象的属性
         self.start_time = start_time  # <float> 同<LaunchInspectionJob>对象的属性
         self.end_time = end_time  # <float> 同<LaunchInspectionJob>对象的属性
 
     def save(self):
-        pass
+        sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_job_record'的表★
+        sql = f'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_record"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则创建此表
+        if len(result) == 0:
+            sql_list = ["create table tb_inspection_job_record  ( oid varchar(36) NOT NULL PRIMARY KEY,",
+                        "name varchar(128),",
+                        "description varchar(256),",
+                        "project_oid varchar(36),",
+                        "inspection_template_oid varchar(36),",
+                        "job_state int,",
+                        "start_time double,",
+                        "end_time double )"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        # 开始插入数据
+        sql = f"select * from tb_inspection_job_record where oid='{self.oid}'"
+        sqlite_cursor.execute(sql)
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项记录，则创建此项记录 ★★
+            sql_list = [f"insert into tb_inspection_job_record (oid,",
+                        "name,",
+                        "description,",
+                        "project_oid,",
+                        "inspection_template_oid,",
+                        "job_state,",
+                        "start_time,",
+                        "end_time ) values",
+                        f"('{self.oid}',",
+                        f"'{self.name}',",
+                        f"'{self.description}',",
+                        f"'{self.project_oid}',",
+                        f"'{self.inspection_template_oid}',",
+                        f"{self.job_state},",
+                        f"{self.start_time},",
+                        f"{self.end_time} )"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        else:  # ★★ 若查询到有此项记录，则不用更新此项记录 ★★
+            pass
+        # ★查询是否有名为'tb_inspection_job_record_host_job_status_obj_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_record_host_job_status_obj_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        if len(result) == 0:  # 若未查询到有此表，则创建此表
+            sql_list = ["create table tb_inspection_job_record_host_job_status_obj_list",
+                        "(job_record_oid varchar(36),",
+                        "host_oid varchar(36),",
+                        "job_status int,",
+                        "find_credential_status int,",
+                        "exec_timeout int,",
+                        "start_time double,",
+                        "end_time double );"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        # 开始插入数据
+        sql = f"delete from tb_inspection_job_record_host_job_status_obj_list where host_oid='{self.oid}'"
+        sqlite_cursor.execute(sql)  # ★先清空所有，再重新插入（既可用于新建，又可用于更新）
+        for host_job_status_obj in self.unduplicated_host_job_status_obj_list:
+            sql_list = [f"insert into tb_inspection_job_record_host_job_status_obj_list (job_record_oid,",
+                        "host_oid,",
+                        "job_status,",
+                        "find_credential_status,",
+                        "exec_timeout,",
+                        "start_time,",
+                        "end_time ) values ",
+                        f"('{self.oid}',",
+                        f"'{host_job_status_obj.host_oid}',",
+                        f"{host_job_status_obj.job_status},",
+                        f"{host_job_status_obj.find_credential_status},",
+                        f"{host_job_status_obj.exec_timeout},",
+                        f"{host_job_status_obj.start_time},",
+                        f"{host_job_status_obj.end_time} )"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
 
 
 class OneLineCode:
@@ -1674,9 +1757,10 @@ class SSHOperator:
         self.is_finished = True
 
     @staticmethod
-    def process_code_interactive(code, output_last_line, ssh_shell, output, second_time=False):
+    def process_code_interactive(code, output_last_line, ssh_shell, output, second_time=False, interactive_times=0):
         """
         处理命令的交互式应答，有时执行某些命令执后，系统会提示输入[Y/N]?，要求回复
+        :param interactive_times:
         :param code:
         :param output_last_line:
         :param ssh_shell:
@@ -1685,7 +1769,6 @@ class SSHOperator:
         :return:
         """
         ret = re.search(code.interactive_question_keyword, output_last_line, re.I)
-        interactive_times = 0
         if ret is not None:  # 如果匹配上需要交互的提问判断字符串
             print(f"SSHOperator.process_code_interactive : 匹配到交互关键字 {ret} ，执行交互回答:")
             ssh_shell.send(code.interactive_answer.encode('utf8'))  # 发送交互回答内容，这里不会额外发送\n换行
@@ -1711,10 +1794,10 @@ class SSHOperator:
             interactive_output_last_line_index = len(interactive_output_str_lines) - 1
             if code.interactive_process_method == INTERACTIVE_PROCESS_METHOD_LOOP and len(interactive_output_str_lines) != 0:
                 SSHOperator.process_code_interactive(code, interactive_output_str_lines[interactive_output_last_line_index], ssh_shell,
-                                                     output)
+                                                     output, interactive_times=interactive_times)
             if code.interactive_process_method == INTERACTIVE_PROCESS_METHOD_TWICE and len(interactive_output_str_lines) != 0:
                 SSHOperator.process_code_interactive(code, interactive_output_str_lines[interactive_output_last_line_index], ssh_shell,
-                                                     output, second_time=True)
+                                                     output, second_time=True, interactive_times=interactive_times)
         else:
             # 如果没有匹配上需要交互的提问判断字符串，就结束交互
             return
@@ -1930,6 +2013,9 @@ class GlobalInfo:
             for obj_info_tuple in search_result:
                 # print('tuple: ', obj_info_tuple)
                 host.credential_oid_list.append(obj_info_tuple[1])
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
 
     def load_host_group_from_dbfile(self):
         """
@@ -1983,6 +2069,9 @@ class GlobalInfo:
             for obj_info_tuple in search_result:
                 # print('tuple: ', obj_info_tuple)
                 host_group.host_oid_list.append(obj_info_tuple[2])
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
 
     def load_host_group_include_host_group_from_dbfile(self, host_group_list):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
@@ -2003,6 +2092,9 @@ class GlobalInfo:
             for obj_info_tuple in search_result:
                 # print('tuple: ', obj_info_tuple)
                 host_group.host_group_oid_list.append(obj_info_tuple[2])
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
 
     def load_inspection_code_block_from_dbfile(self):
         """
@@ -2062,6 +2154,9 @@ class GlobalInfo:
                                    interactive_answer=obj_info_tuple[6],
                                    interactive_process_method=obj_info_tuple[7])
                 inspection_code_block_obj.code_list.append(code)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
 
     def load_inspection_template_from_dbfile(self):
         """
@@ -2126,6 +2221,9 @@ class GlobalInfo:
             for obj_info_tuple in search_result:
                 # print('tuple: ', obj_info_tuple)
                 inspection_template.host_oid_list.append(obj_info_tuple[2])
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
 
     def load_inspection_template_include_host_group_from_dbfile(self, inspection_template_list):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
@@ -2147,6 +2245,9 @@ class GlobalInfo:
             for obj_info_tuple in search_result:
                 # print('tuple: ', obj_info_tuple)
                 inspection_template.host_group_oid_list.append(obj_info_tuple[2])
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
 
     def load_inspection_template_include_inspection_code_block_from_dbfile(self, inspection_template_list):
         sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
@@ -2168,6 +2269,9 @@ class GlobalInfo:
             search_result = sqlite_cursor.fetchall()
             for obj_info_tuple in search_result:
                 inspection_template.inspection_code_block_oid_list.append(obj_info_tuple[2])
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
 
     def load_inspection_job_record_from_dbfile(self):
         """
@@ -2191,12 +2295,54 @@ class GlobalInfo:
         obj_list = []
         for obj_info_tuple in search_result:
             # print('tuple: ', obj_info_tuple)
-            obj = InspectionJobRecord(global_info=self)
+            obj = InspectionJobRecord(oid=obj_info_tuple[0],
+                                      name=obj_info_tuple[1],
+                                      description=obj_info_tuple[2],
+                                      project_oid=obj_info_tuple[3],
+                                      inspection_template_oid=obj_info_tuple[4],
+                                      job_state=int(obj_info_tuple[5]),
+                                      start_time=float(obj_info_tuple[6]),
+                                      end_time=float(obj_info_tuple[7]),
+                                      global_info=self)
             obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
+        self.load_inspection_job_record_host_job_status_from_dbfile(obj_list)
         return obj_list
+
+    def load_inspection_job_record_host_job_status_from_dbfile(self, inspection_job_record_obj_list):
+        """
+        从sqlite3数据库文件，xxx
+        :return:
+        """
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_job_record_host_job_status_obj_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_record_host_job_status_obj_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        for job_record_obj in inspection_job_record_obj_list:
+            sql = f'select * from tb_inspection_job_record_host_job_status_obj_list where "job_record_oid"="{job_record_obj.oid}"'
+            sqlite_cursor.execute(sql)
+            search_result = sqlite_cursor.fetchall()
+            for obj_info_tuple in search_result:
+                # print('tuple: ', obj_info_tuple)
+                obj = HostJobStatus(host_oid=obj_info_tuple[1],
+                                    job_status=int(obj_info_tuple[2]),
+                                    find_credential_status=int(obj_info_tuple[3]),
+                                    exec_timeout=int(obj_info_tuple[4]),
+                                    start_time=float(obj_info_tuple[5]),
+                                    end_time=float(obj_info_tuple[6]))
+                job_record_obj.unduplicated_host_job_status_obj_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
 
     def is_project_name_existed(self, project_name):  # 判断项目名称是否已存在项目obj_list里
         for project in self.project_obj_list:
@@ -2540,6 +2686,35 @@ class GlobalInfo:
         sqlite_conn.close()
         # ★最后再从内存obj_list删除
         self.inspection_template_obj_list.remove(obj)
+
+    def delete_inspection_job_record_obj(self, obj):
+        """
+        直接删除 inspection_job_record 对象
+        :param obj:
+        :return:
+        """
+        # ★先从数据库删除
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_job_record'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_job_record"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_inspection_job_record where oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_inspection_job_record_host_job_status_obj_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_record_host_job_status_obj_list"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_inspection_job_record_host_job_status_obj_list where job_record_oid='{obj.oid}' "
+            sqlite_cursor.execute(sql)
+        sqlite_cursor.close()
+        sqlite_conn.commit()
+        sqlite_conn.close()
+        # ★最后再从内存obj_list删除
+        self.inspection_job_record_obj_list.remove(obj)
 
 
 class MainWindow:
@@ -5300,6 +5475,8 @@ class DeleteResourceInFrame:
                 self.delete_inspection_code_block()
             elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
                 self.delete_inspection_template()
+            elif self.resource_type == RESOURCE_TYPE_INSPECTION_JOB:
+                self.delete_inspection_job_record()
             else:
                 print("<class DeleteResourceInFrame> resource_type is Unknown")
         else:
@@ -5328,6 +5505,10 @@ class DeleteResourceInFrame:
     def delete_inspection_template(self):
         self.global_info.delete_inspection_template_obj(self.resource_obj)
         self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_INSPECTION_TEMPLATE)
+
+    def delete_inspection_job_record(self):
+        self.global_info.delete_inspection_job_record_obj(self.resource_obj)
+        self.main_window.list_inspection_job_of_nav_frame_r_page()
 
 
 class SaveResourceInMainWindow:
@@ -5609,7 +5790,7 @@ class StartInspectionTemplateInFrame:
         self.inspection_template_obj = inspection_template_obj
         self.padx = 2
         self.pady = 2
-        self.resource_info_dict = {}  # 用于存储资源对象信息的diction，这个可不要了
+        # self.resource_info_dict = {}  # 用于存储资源对象信息的diction，这个可不要了
         self.current_inspection_job_obj = None  # 为 <LaunchInspectionJob> 类对象
         self.current_row_index = 0
 
@@ -5625,13 +5806,12 @@ class StartInspectionTemplateInFrame:
         result = messagebox.askyesno("启动巡检作业", "是否立即启动巡检作业？")
         if result:
             print(f"StartInspectionTemplateInFrame.start: 开始启动巡检作业: {self.inspection_template_obj.name}")
-            inspect_job_name = "job-" + self.inspection_template_obj.name + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            inspect_job_name = "job@" + self.inspection_template_obj.name + "@" + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
             # template_project_name=self.global_info.get_project_by_oid(self.inspection_template_obj.project_oid)
             self.current_inspection_job_obj = LaunchInspectionJob(name=inspect_job_name,
                                                                   project_oid=self.inspection_template_obj.project_oid,
                                                                   inspection_template=self.inspection_template_obj,
                                                                   global_info=self.global_info)
-            # self.global_info.inspection_job_record_obj_list.append(self.current_inspection_job_obj)
             launch_job_thread = threading.Thread(target=self.current_inspection_job_obj.start_job)
             launch_job_thread.start()  # 线程start后，不要join()，主界面才不会卡住
             # ★进入作业详情页面★
@@ -5676,9 +5856,7 @@ class StartInspectionTemplateInFrame:
         label_inspection_template_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检模板名称")
         label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_template_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
-        self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_inspection_template_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
-                                                       textvariable=self.resource_info_dict["sv_name"], width=42)
+        entry_inspection_template_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], width=42)
         entry_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
         entry_inspection_template_name.insert(0, self.inspection_template_obj.name)  # 显示初始值，可编辑
         entry_inspection_template_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
@@ -5686,9 +5864,7 @@ class StartInspectionTemplateInFrame:
         label_inspection_job_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检作业名称")
         label_inspection_job_name.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_job_name.grid(row=2, column=0, padx=self.padx, pady=self.pady)
-        self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_inspection_job_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
-                                                  textvariable=self.resource_info_dict["sv_name"], width=42)
+        entry_inspection_job_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], width=42)
         entry_inspection_job_name.bind("<MouseWheel>", self.proces_mouse_scroll)
         entry_inspection_job_name.insert(0, self.current_inspection_job_obj.name)  # 显示初始值，可编辑
         entry_inspection_job_name.grid(row=2, column=1, padx=self.padx, pady=self.pady)
@@ -5697,29 +5873,29 @@ class StartInspectionTemplateInFrame:
         label_inspection_template_execution_method.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_template_execution_method.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         execution_method_name_list = ["无", "定时执行", "周期执行", "After"]
-        self.resource_info_dict["combobox_execution_method"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
-                                                                            values=execution_method_name_list,
-                                                                            state="readonly")
-        self.resource_info_dict["combobox_execution_method"].current(self.inspection_template_obj.execution_method)
-        self.resource_info_dict["combobox_execution_method"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        combobox_execution_method = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                 values=execution_method_name_list,
+                                                 state="readonly")
+        combobox_execution_method.current(self.inspection_template_obj.execution_method)
+        combobox_execution_method.grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-update_code_on_launch
         label_inspection_template_update_code_on_launch = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行前更新code")
         label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_template_update_code_on_launch.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         update_code_on_launch_name_list = ["No", "Yes"]
-        self.resource_info_dict["combobox_update_code_on_launch"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
-                                                                                 values=update_code_on_launch_name_list,
-                                                                                 state="readonly")
-        self.resource_info_dict["combobox_update_code_on_launch"].current(self.inspection_template_obj.update_code_on_launch)
-        self.resource_info_dict["combobox_update_code_on_launch"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        combobox_update_code_on_launch = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                      values=update_code_on_launch_name_list,
+                                                      state="readonly")
+        combobox_update_code_on_launch.current(self.inspection_template_obj.update_code_on_launch)
+        combobox_update_code_on_launch.grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-forks
         label_inspection_template_forks = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行线程数")
         label_inspection_template_forks.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_template_forks.grid(row=5, column=0, padx=self.padx, pady=self.pady)
-        self.resource_info_dict["sv_forks"] = tkinter.StringVar()
+        sv_forks = tkinter.StringVar()
         spinbox_inspection_template_forks = tkinter.Spinbox(self.nav_frame_r_widget_dict["frame"], from_=1, to=256, increment=1,
-                                                            textvariable=self.resource_info_dict["sv_forks"])
-        self.resource_info_dict["sv_forks"].set(self.inspection_template_obj.forks)  # 显示初始值，可编辑
+                                                            textvariable=sv_forks)
+        sv_forks.set(self.inspection_template_obj.forks)  # 显示初始值，可编辑
         spinbox_inspection_template_forks.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_job-作业完成情况
         label_inspection_job_status = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="作业完成情况:")
@@ -5780,6 +5956,8 @@ class StartInspectionTemplateInFrame:
         # 只有巡检作业未完成时才刷新主机巡检作业状态，完成（包含失败）都不再去更新主机状态
         if self.current_inspection_job_obj.job_state == INSPECTION_JOB_EXEC_STATE_UNKNOWN:
             inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
+        elif self.current_inspection_job_obj.job_state == INSPECTION_JOB_EXEC_STATE_STARTED:
+            inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
 
 
 class ListInspectionJobInFrame:
@@ -5804,36 +5982,192 @@ class ListInspectionJobInFrame:
         for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
             widget.destroy()
         resource_display_frame_title = "★★ 巡检作业列表 ★★"
-        resource_obj_list = self.global_info.inspection_job_record_obj_list  # 未导入历史信息-->未完善
+        inspection_job_record_obj_list = self.global_info.inspection_job_record_obj_list
         # 列出资源
         label_display_resource = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
-                                               text=resource_display_frame_title + "    数量: " + str(len(resource_obj_list)))
+                                               text=resource_display_frame_title + "    数量: " + str(len(inspection_job_record_obj_list)))
         label_display_resource.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         index = 0
-        for obj in resource_obj_list:
+        for obj in inspection_job_record_obj_list:
             print(obj.name)
-            label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index + 1) + " : ")
+            label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index + 1) + " : " + obj.name)
             label_index.bind("<MouseWheel>", self.proces_mouse_scroll)
             label_index.grid(row=index + 1, column=0, padx=self.padx, pady=self.pady)
-            label_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=obj.name)
-            label_name.bind("<MouseWheel>", self.proces_mouse_scroll)
-            label_name.grid(row=index + 1, column=1, padx=self.padx, pady=self.pady)
-            # 查看对象信息-->未完善
-            view_obj = ViewResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj)
+            # 查看对象信息
+            view_obj = ViewInspectionJobInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj)
             button_view = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="查看", command=view_obj.show)
             button_view.bind("<MouseWheel>", self.proces_mouse_scroll)
-            button_view.grid(row=index + 1, column=2, padx=self.padx, pady=self.pady)
+            button_view.grid(row=index + 1, column=1, padx=self.padx, pady=self.pady)
             # 删除对象-->未完善
-            delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj)
+            delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
+                                               resource_type=RESOURCE_TYPE_INSPECTION_JOB)
             button_delete = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="删除", command=delete_obj.show)
             button_delete.bind("<MouseWheel>", self.proces_mouse_scroll)
-            button_delete.grid(row=index + 1, column=4, padx=self.padx, pady=self.pady)
+            button_delete.grid(row=index + 1, column=2, padx=self.padx, pady=self.pady)
             index += 1
         # 信息控件添加完毕
         self.nav_frame_r_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
         self.nav_frame_r_widget_dict["canvas"].configure(
             scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(), self.nav_frame_r_widget_dict["frame"].winfo_height()))
         self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
+
+
+class ViewInspectionJobInFrame:
+    """
+    在主窗口的查看资源界面，显示巡检模板执行作业的详情
+    """
+
+    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, inspection_job_record_obj=None):
+        self.main_window = main_window
+        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.global_info = global_info
+        self.inspection_job_record_obj = inspection_job_record_obj
+        self.padx = 2
+        self.pady = 2
+        # self.current_inspection_job_obj = None  # 为 <LaunchInspectionJob> 类对象
+        self.current_row_index = 0
+        self.inspection_template_obj = self.global_info.get_inspection_template_by_oid(inspection_job_record_obj.inspection_template_oid)
+
+    def show(self):
+        # ★进入作业详情页面★
+        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+            widget.destroy()
+        self.show_inspection_job_status()
+        self.add_return_button()
+        self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
+
+    def proces_mouse_scroll(self, event):
+        if event.delta > 0:
+            self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+        else:
+            self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+
+    def update_frame(self):
+        # 更新Frame的尺寸
+        self.nav_frame_r_widget_dict["frame"].update_idletasks()
+        self.nav_frame_r_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
+                          self.nav_frame_r_widget_dict["frame"].winfo_height()))
+        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
+        # 滚动条移到最开头
+        self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+
+    def add_return_button(self):
+        # ★★添加“返回资源列表”按钮★★
+        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回巡检作业列表",
+                                       command=lambda: self.main_window.list_inspection_job_of_nav_frame_r_page())
+        button_return.bind("<MouseWheel>", self.proces_mouse_scroll)
+        button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
+
+    def show_inspection_job_status(self):
+        # ★巡检作业详情
+        label_show_inspection_job_status = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 巡检作业详情 ★★")
+        label_show_inspection_job_status.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_show_inspection_job_status.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        # ★inspection_template-名称
+        label_inspection_template_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检模板名称")
+        label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        entry_inspection_template_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], width=42)
+        entry_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_name.insert(0, self.inspection_template_obj.name)  # 显示初始值，可编辑
+        entry_inspection_template_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_job-名称
+        label_inspection_job_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检作业名称")
+        label_inspection_job_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_job_name.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        entry_inspection_job_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], width=42)
+        entry_inspection_job_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_job_name.insert(0, self.inspection_job_record_obj.name)  # 显示初始值，可编辑
+        entry_inspection_job_name.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_template-execution_method
+        label_inspection_template_execution_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="execution_method")
+        label_inspection_template_execution_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_execution_method.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        execution_method_name_list = ["无", "定时执行", "周期执行", "After"]
+        combobox_execution_method = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                 values=execution_method_name_list,
+                                                 state="readonly")
+        combobox_execution_method.current(self.inspection_template_obj.execution_method)
+        combobox_execution_method.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_template-update_code_on_launch
+        label_inspection_template_update_code_on_launch = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行前更新code")
+        label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_update_code_on_launch.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        update_code_on_launch_name_list = ["No", "Yes"]
+        combobox_update_code_on_launch = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+                                                      values=update_code_on_launch_name_list,
+                                                      state="readonly")
+        combobox_update_code_on_launch.current(self.inspection_template_obj.update_code_on_launch)
+        combobox_update_code_on_launch.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_template-forks
+        label_inspection_template_forks = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行线程数")
+        label_inspection_template_forks.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_forks.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        sv_forks = tkinter.StringVar()
+        spinbox_inspection_template_forks = tkinter.Spinbox(self.nav_frame_r_widget_dict["frame"], from_=1, to=256, increment=1,
+                                                            textvariable=sv_forks)
+        sv_forks.set(self.inspection_template_obj.forks)  # 显示初始值，可编辑
+        spinbox_inspection_template_forks.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_job-作业完成情况
+        label_inspection_job_status = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="作业完成情况:")
+        label_inspection_job_status.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_job_status.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        # ★host-列表
+        inspection_host_treeview = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=6,
+                                                columns=("index", "host", "status", "time"), show="headings")
+        # 设置每一个列的宽度和对齐的方式
+        inspection_host_treeview.column("index", width=60, anchor="w")
+        inspection_host_treeview.column("host", width=180, anchor="w")
+        inspection_host_treeview.column("status", width=100, anchor="w")
+        inspection_host_treeview.column("time", width=60, anchor="w")
+        # 设置每个列的标题
+        inspection_host_treeview.heading("index", text="index", anchor="w")
+        inspection_host_treeview.heading("host", text="host", anchor="w")
+        inspection_host_treeview.heading("status", text="status", anchor="w")
+        inspection_host_treeview.heading("time", text="耗时", anchor="w")  # 单位：秒
+        # 插入数据，这里需要定时刷新★★
+        index = 0
+        status_name_list = ["unknown", "started", "completed", "part_completed", "failed"]
+        for host_job_status_obj in self.inspection_job_record_obj.unduplicated_host_job_status_obj_list:
+            host_obj = self.global_info.get_host_by_oid(host_job_status_obj.host_oid)
+            time_usage = host_job_status_obj.end_time - host_job_status_obj.start_time
+            if time_usage < 0:
+                time_usage_2 = 0
+            else:
+                time_usage_2 = time_usage
+            inspection_host_treeview.insert("", index, values=(
+                index, host_obj.name,
+                status_name_list[host_job_status_obj.job_status],
+                time_usage_2))
+            index += 1
+        inspection_host_treeview.grid(row=6, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+        inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)  # 定时刷新主机巡检作业状态
+        # ★★更新row_index
+        self.current_row_index = 6
+
+    def refresh_host_status(self, inspection_host_treeview):
+        inspection_host_treeview.delete(*inspection_host_treeview.get_children())
+        # 插入数据，这里需要定时刷新★★
+        index = 0
+        status_name_list = ["unknown", "started", "completed", "part_completed", "failed"]
+        for host_job_status_obj in self.inspection_job_record_obj.unduplicated_host_job_status_obj_list:
+            host_obj = self.global_info.get_host_by_oid(host_job_status_obj.host_oid)
+            time_usage = host_job_status_obj.end_time - host_job_status_obj.start_time
+            if time_usage < 0:
+                time_usage_2 = 0
+            else:
+                time_usage_2 = time_usage
+            inspection_host_treeview.insert("", index, values=(
+                index, host_obj.name,
+                status_name_list[host_job_status_obj.job_status],
+                time_usage_2))
+            index += 1
+        # 只有巡检作业未完成时才刷新主机巡检作业状态，完成（包含失败）都不再去更新主机状态
+        if self.inspection_job_record_obj.job_state == INSPECTION_JOB_EXEC_STATE_UNKNOWN:
+            inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
+        elif self.inspection_job_record_obj.job_state == INSPECTION_JOB_EXEC_STATE_STARTED:
+            inspection_host_treeview.after(1000, self.refresh_host_status, inspection_host_treeview)
 
 
 if __name__ == '__main__':
