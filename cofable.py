@@ -5,19 +5,19 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-12
+# update: 2024-03-13
 
 """
 解决问题：
-★. 执行命令时进行判断回复                                 2024年1月23日 基本完成
+★. 执行命令时进行判断回复                                                           2024年1月23日 基本完成
 ★. 登录凭据的选择与多次尝试各同类凭据（当同类型凭据有多个时），只选择第一个能成功登录的cred     2024年1月23日 完成
-★. ssh密码登录，ssh密钥登录                              2024年1月23日 完成
-★. 所有输出整理到txt文件                                 2024年1月24日 完成
+★. ssh密码登录，ssh密钥登录                                                        2024年1月23日 完成
+★. 所有输出整理到txt文件                                                           2024年1月24日 完成
 ★. 所有输出根据模板设置，确认是否自动保存到txt文件以及文件名风格                           2024年3月4日 完成
-★. 使用多线程，每台主机用一个线程去巡检，并发几个线程          2024年1月25日 完成
-★. 巡检作业执行完成情况的统计，执行完成，连接超时，认证失败     2024年1月28日 基本完成
-★. 程序运行后，所有类的对象都要分别加载到一个全局列表里
-★. 巡检命令输出保存到数据库                               2024年1月27日 基本完成
+★. 使用多线程，每台主机用一个线程去巡检，并发几个线程                                    2024年1月25日 完成
+★. 巡检作业执行完成情况的统计，执行完成，连接超时，认证失败                               2024年1月28日 基本完成
+★. 程序运行后，所有类的对象都要分别加载到一个全局列表里                                  已完成
+★. 巡检命令输出保存到数据库                                                         2024年1月27日 基本完成
 ★. 定时/周期触发巡检模板作业
 ★. 本次作业命令输出与最近一次（上一次）输出做对比
 ★. 巡检命令输出做基础信息提取与判断并触发告警，告警如何通知人类用户？
@@ -26,24 +26,30 @@
 ★. 巡检命令中有sleep N 之类的命令时，要判断是否完成，根据shell提示符进行判断
 ★. 遗留：编辑或创建巡检代码时，要求能设置每条命令的 交互回复
 ★. 没有创建项目时，就创建其他资源，要生成默认的项目，名为default的项目                     2024年3月7日 完成
-★. shell通道设置字符界面宽度及长度                         2024年3月8日 完成
+★. shell通道设置字符界面宽度及长度                                                  2024年3月8日 完成
+★. 输出巡检实时状态，及进度条展示
+★. 更新资源名称时，要检查新名称是否和已存在的同类资源名称重复
 
 资源操作逻辑：
-★创建-资源      CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
-★列出-资源列表   ListResourceInFrame.show()
-★列出-作业列表   ListInspectionJobInFrame.show()
-★查看-资源      ViewResourceInFrame.show()
-★编辑-资源      EditResourceInFrame.show()    →  UpdateResourceInFrame.update()
-★删除-资源      DeleteResourceInFrame.show()
+★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
+★列出-资源列表     ListResourceInFrame.show()
+★列出-作业列表     ListInspectionJobInFrame.show()
+★查看-资源        ViewResourceInFrame.show()
+★编辑-资源        EditResourceInFrame.show()    →  UpdateResourceInFrame.update()
+★删除-资源        DeleteResourceInFrame.show()
 
 巡检流程：
 ★列出-巡检模板列表   ListResourceInFrame.show
                    触发↓
 ★启动-巡检模板      StartInspectionTemplateInFrame.start()  →  StartInspectionTemplateInFrame.show_inspection_job_status()
-                   1级子线程|→ LaunchInspectionJob.start_job()                                             ←|查询状态
-                             2级子线程            |→operator_job_thread()                                   |
-                                      3级子线程                 |→SSHOperator.run_invoke_shell()            |
-★列出-作业列表      ListInspectionJobInFrame.show()                                                        ←|退出作业详情
+                   1级子线程|→ LaunchInspectionJob.start_job()                                  ←|查询状态
+                             2级子线程 |→operator_job_thread()                                   |
+                                      3级子线程 |→SSHOperator.run_invoke_shell()                 |
+★列出-作业列表      ListInspectionJobInFrame.show()                                             ←|退出作业详情
+                                            ↓查看某个作业详情
+                  ViewInspectionJobInFrame.show_inspection_job_status()
+                                            ↓点击单台主机
+                  ViewInspectionJobInFrame.view_inspection_host_item()
 """
 
 import io
@@ -121,6 +127,7 @@ OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME_DATE = 4
 OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME_DATE_TIME = 5
 LOGIN_PROTOCOL_SSH = 0
 LOGIN_PROTOCOL_TELNET = 1
+# vt100 shell终端的默认宽度和高度
 SHELL_TERMINAL_WIDTH = 140
 SHELL_TERMINAL_HEIGHT = 48
 
@@ -387,7 +394,7 @@ class Credential:
 
 class Host:
     """
-    目标主机，受管主机
+    目标主机，受管主机，巡检操作对象
     """
 
     def __init__(self, name='default', description='default', project_oid='default', address='default',
@@ -817,7 +824,7 @@ class InspectionCodeBlock:
 
 class InspectionTemplate:
     """
-    巡检模板，包含目标主机，可手动触发执行，可定时执行，可周期执行
+    巡检模板，包含目标主机，巡检代码段。可手动触发执行，可定时执行，可周期执行
     每创建一个<InspecionTemplate>巡检模板 就要求绑定一个<LaunchTemplateTrigger>巡检触发检测对象
     """
 
@@ -1087,7 +1094,7 @@ class LaunchTemplateTrigger:
 
 class HostJobStatus:
     """
-    记录被巡检主机的巡检作业状态
+    记录被巡检主机的巡检作业状态，一个HostJobStatus对象 对应一台主机的作业状态
     """
 
     def __init__(self, host_oid='', job_status=INSPECTION_JOB_EXEC_STATE_UNKNOWN, start_time=0.0, end_time=0.0,
@@ -1102,7 +1109,7 @@ class HostJobStatus:
 
 class LaunchInspectionJob:
     """
-    执行巡检任务，一次性的，具有实时性，由巡检触发检测类<LaunchTemplateTrigger>对象去创建并执行巡检工作，完成后输出日志
+    执行巡检任务，一次性的，具有实时性，由巡检触发检测类<LaunchTemplateTrigger>对象去创建并执行巡检工作（也可手动触发），完成后输出日志
     """
 
     def __init__(self, name='default', description='default', oid=None, create_timestamp=None, project_oid='',
@@ -1246,7 +1253,7 @@ class LaunchInspectionJob:
 
     def find_ssh_credential(self, host):
         """
-        查找可用的ssh凭据，会登录一次目标主机
+        查找可用的ssh凭据，会登录一次目标主机（因为一台主机可以绑定多个同类型的凭据，依次尝试，直到找到可用的凭据）
         :param host:
         :return:
         """
@@ -1289,7 +1296,7 @@ class LaunchInspectionJob:
 
     def save_ssh_operator_output_to_file(self, ssh_operator_output_obj_list, host, output_file_name_style):
         """
-        主机的所有巡检命令输出信息都保存在一个文件里
+        主机的一个巡检代码段所有命令输出信息都保存在一个文件里，不同的巡检代码段输出保存在不同文件里
         :param ssh_operator_output_obj_list:
         :param host:
         :param output_file_name_style:
@@ -1299,7 +1306,7 @@ class LaunchInspectionJob:
         timestamp_date_list = [str(localtime.tm_year), self.fmt_time(localtime.tm_mon), self.fmt_time(localtime.tm_mday)]
         timestamp_time_list = [str(localtime.tm_hour), str(localtime.tm_min), str(localtime.tm_sec)]
         timestamp_date = "-".join(timestamp_date_list)  # 年月日，例：2024-01-25
-        timestamp_time = ".".join(timestamp_time_list)  # 年月日，例：8.50.01
+        timestamp_time = ".".join(timestamp_time_list)  # 时分秒，例：8.50.01
         if output_file_name_style == OUTPUT_FILE_NAME_STYLE_HOSTNAME:
             file_name = host.name + '.log'
         elif output_file_name_style == OUTPUT_FILE_NAME_STYLE_HOSTNAME_DATE:
@@ -1320,7 +1327,7 @@ class LaunchInspectionJob:
             file_name = os.path.join(timestamp_date, file_namex)
         else:
             file_name = host.name + '.log'
-        # 一台主机的所有巡检命令输出信息都保存在一个文件里：主机名_巡检模板名_日期.log
+        # 一台主机的所有巡检命令输出信息都保存在一个文件里
         with open(file_name, 'a', encoding='utf8') as file_obj:
             for ssh_operator_output_obj in ssh_operator_output_obj_list:
                 if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_INVOKE_SHELL:
@@ -1489,7 +1496,7 @@ class LaunchInspectionJob:
         print("巡检任务完成 ############################################################")
         print(f"巡检并发数为{self.inspection_template.forks}")
         print("用时 {:<6.4f} 秒".format(self.end_time - self.start_time))
-        # 将作业信息保存到数据库，从数据库读取出来时，不可重构为一个<LaunchInspectionJob>对象，可重构为<InspectionJobRecord>对象
+        # 将作业信息保存到数据库，从数据库读取出来时，不可重构为一个<LaunchInspectionJob>对象，只可重构为<InspectionJobRecord>对象
         self.judge_completion_of_job()  # 先判断作业完成情况
         job_record_obj.end_time = self.end_time
         job_record_obj.job_state = self.job_state
@@ -1609,7 +1616,7 @@ class InspectionJobRecord:
 
 class OneLineCode:
     """
-    InspectionCodeBlock.code_list列表包含的元素，一行命令为一个<OneLineCode>对象
+    InspectionCodeBlock.code_list列表包含的元素，巡检任务中要执行的每一行命令都是一个<OneLineCode>对象
     """
 
     def __init__(self, code_index=0, code_content='', code_post_wait_time=CODE_POST_WAIT_TIME_DEFAULT,
@@ -1804,7 +1811,7 @@ class SSHOperator:
 
     def exec_command(self):
         """
-        与 run_invoke_shell 相对应，非invoke_shell，不适用于交换机等设备
+        与 run_invoke_shell 相对应，非invoke_shell，不适用于交换机等设备，本函数暂时用不上，CofAble主要使用invoke_shell这类交互式的处理方式
         :return:
         """
         if self.command_list is None:
@@ -1854,7 +1861,7 @@ class SSHOperator:
 
 class GlobalInfo:
     """
-    全局变量类，用于存储所有资源类的实例信息
+    全局变量类，用于存储所有资源类的实例信息，从数据库导入数据变为内存中的类对象，以及新建的类对象追加到某个list列表中
     """
 
     def __init__(self, sqlite3_dbfile_name="cofable_default.db"):
@@ -2759,23 +2766,19 @@ class MainWindow:
     CofAble主界面类，包含菜单栏及左右2个frame
     """
 
-    def __init__(self, width=640, height=400, title='', current_project=None, global_info=None):
+    def __init__(self, width=800, height=480, title='', current_project=None, global_info=None):
         self.title = title
         self.width = width
         self.height = height
-        self.position = "480x320+100+100"
         self.resizable = True  # True 表示宽度和高度可由用户手动调整
         self.minsize = (480, 320)
         self.maxsize = (1920, 1080)
         self.background = "#3A3A3A"  # 设置背景色，RGB
-        self.window_obj = tkinter.Tk()  # ★★★创建主窗口对象★★★
-        self.screen_width = self.window_obj.winfo_screenwidth()
-        self.screen_height = self.window_obj.winfo_screenheight()
-        self.win_pos_x = self.screen_width // 2 - self.width // 2
-        self.win_pos_y = self.screen_height // 2 - self.height // 2
-        self.win_pos = f"{self.width}x{self.height}+{self.win_pos_x}+{self.win_pos_y}"
-        self.nav_frame_l = None
-        self.nav_frame_r = None
+        self.window_obj = None  # 在 MainWindow.show()里创建
+        self.nav_frame_l = None  # 在 MainWindow.create_nav_frame_l_init()里创建
+        self.nav_frame_r = None  # 在 MainWindow.create_nav_frame_r_init()里创建
+        self.screen_width = 0  # 在 MainWindow.show()里赋值
+        self.screen_height = 0  # 在 MainWindow.show()里赋值
         self.nav_frame_l_width = int(self.width * 0.2)
         self.nav_frame_r_width = int(self.width * 0.8)
         self.global_info = global_info  # <GlobalInfo>对象
@@ -2786,13 +2789,8 @@ class MainWindow:
         self.view_width = 20
 
     @staticmethod
-    def clear_tkinter_frame(frame):
-        for widget in frame.winfo_children():
-            widget.destroy()
-
-    @staticmethod
-    def clear_tkinter_window(window):
-        for widget in window.winfo_children():
+    def clear_tkinter_widget(root):
+        for widget in root.winfo_children():
             widget.destroy()
 
     def load_main_window_init_widget(self):
@@ -2801,12 +2799,12 @@ class MainWindow:
         :return:
         """
         # 首先清空主window
-        self.clear_tkinter_window(self.window_obj)
+        self.clear_tkinter_widget(self.window_obj)
         # 加载菜单栏
         self.create_menu_bar_init()
-        # 创建导航框架1
+        # 创建导航框架1，主界面左边的导航框
         self.create_nav_frame_l_init()
-        # 创建导航框架2
+        # 创建导航框架2，主界面右边的资源信息框
         self.create_nav_frame_r_init()
 
     def create_menu_bar_init(self):  # 创建菜单栏-init界面的
@@ -2820,7 +2818,7 @@ class MainWindow:
         menu_bar.add_cascade(label="Help", menu=menu_about)
         self.window_obj.config(menu=menu_bar)
 
-    def create_nav_frame_l_init(self):  # 创建导航框架1-init界面的 ★★★★★
+    def create_nav_frame_l_init(self):  # 创建导航框架1-init界面的，主界面左边的导航框 ★★★★★
         self.nav_frame_l = tkinter.Frame(self.window_obj, bg="green", width=self.nav_frame_l_width, height=self.height)
         self.nav_frame_l.grid_propagate(False)
         self.nav_frame_l.pack_propagate(False)
@@ -2872,13 +2870,13 @@ class MainWindow:
             label_current_project_content = "当前项目-" + self.global_info.current_project_obj.name
         print(label_current_project_content)
 
-    def create_nav_frame_r_init(self):  # 创建导航框架2-init界面的
+    def create_nav_frame_r_init(self):  # 创建导航框架2-init界面的，主界面右边的资源信息框
         self.nav_frame_r = tkinter.Frame(self.window_obj, bg="blue", width=self.nav_frame_r_width, height=self.height)
         self.nav_frame_r.grid_propagate(False)
         self.nav_frame_r.pack_propagate(False)
         self.nav_frame_r.grid(row=0, column=1)
         # 在框架2中添加canvas-frame滚动框
-        self.clear_tkinter_frame(self.nav_frame_r)
+        self.clear_tkinter_widget(self.nav_frame_r)
         scrollbar = tkinter.Scrollbar(self.nav_frame_r)
         scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
         canvas = tkinter.Canvas(self.nav_frame_r, yscrollcommand=scrollbar.set)  # 创建画布
@@ -2962,7 +2960,7 @@ class MainWindow:
         nav_frame_r.__setitem__("bg", "green")
         nav_frame_r_widget_dict = {}
         # 在框架2中添加canvas-frame滚动框
-        self.clear_tkinter_frame(nav_frame_r)
+        self.clear_tkinter_widget(nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
         nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)  # 创建画布
@@ -2993,7 +2991,7 @@ class MainWindow:
         nav_frame_r.__setitem__("bg", "green")
         nav_frame_r_widget_dict = {}
         # 在框架2中添加canvas-frame滚动框
-        self.clear_tkinter_frame(nav_frame_r)
+        self.clear_tkinter_widget(nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
         nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
@@ -3028,7 +3026,7 @@ class MainWindow:
         nav_frame_r = self.window_obj.winfo_children()[2]
         nav_frame_r.__setitem__("bg", "gray")
         # 在框架2中添加功能控件
-        self.clear_tkinter_frame(nav_frame_r)
+        self.clear_tkinter_widget(nav_frame_r)
         if resource_type == RESOURCE_TYPE_PROJECT:
             text_create = "创建项目"
             text_display = "列出项目"
@@ -3070,7 +3068,7 @@ class MainWindow:
         nav_frame_r.__setitem__("bg", "green")
         nav_frame_r_widget_dict = {}
         # 在框架2中添加canvas-frame滚动框
-        self.clear_tkinter_frame(nav_frame_r)
+        self.clear_tkinter_widget(nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
         nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
@@ -3084,9 +3082,15 @@ class MainWindow:
         list_obj.show()
 
     def show(self):
+        self.window_obj = tkinter.Tk()  # ★★★创建主窗口对象★★★
+        self.screen_width = self.window_obj.winfo_screenwidth()
+        self.screen_height = self.window_obj.winfo_screenheight()
         self.window_obj.title(self.title)  # 设置窗口标题
         # self.window_obj.iconbitmap(bitmap="D:\\test.ico")  # 设置窗口图标，默认为羽毛图标
-        self.window_obj.geometry(self.win_pos)  # 设置窗口大小及位置，居中
+        win_pos_x = self.screen_width // 2 - self.width // 2
+        win_pos_y = self.screen_height // 2 - self.height // 2
+        win_pos = f"{self.width}x{self.height}+{win_pos_x}+{win_pos_y}"
+        self.window_obj.geometry(win_pos)  # 设置窗口大小及位置，居中
         self.window_obj.resizable(width=self.resizable, height=self.resizable)  # True 表示宽度和高度可由用户手动调整
         self.window_obj.minsize(*self.minsize)  # 可调整的最小宽度及高度
         self.window_obj.maxsize(*self.maxsize)  # 可调整的最大宽度及高度
@@ -6120,21 +6124,23 @@ class ListInspectionJobInFrame:
         label_display_resource.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         index = 0
         for obj in inspection_job_record_obj_list:
-            print(obj.name)
-            label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index + 1) + " : " + obj.name)
+            label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index + 1) + " :")
             label_index.bind("<MouseWheel>", self.proces_mouse_scroll)
             label_index.grid(row=index + 1, column=0, padx=self.padx, pady=self.pady)
+            label_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=obj.name)
+            label_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+            label_name.grid(row=index + 1, column=1, padx=self.padx, pady=self.pady)
             # 查看对象信息
             view_obj = ViewInspectionJobInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj)
             button_view = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="查看", command=view_obj.show)
             button_view.bind("<MouseWheel>", self.proces_mouse_scroll)
-            button_view.grid(row=index + 1, column=1, padx=self.padx, pady=self.pady)
+            button_view.grid(row=index + 1, column=2, padx=self.padx, pady=self.pady)
             # 删除对象-->未完善
             delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
                                                resource_type=RESOURCE_TYPE_INSPECTION_JOB)
             button_delete = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="删除", command=delete_obj.show)
             button_delete.bind("<MouseWheel>", self.proces_mouse_scroll)
-            button_delete.grid(row=index + 1, column=2, padx=self.padx, pady=self.pady)
+            button_delete.grid(row=index + 1, column=3, padx=self.padx, pady=self.pady)
             index += 1
         # 信息控件添加完毕
         self.nav_frame_r_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
@@ -6155,7 +6161,6 @@ class ViewInspectionJobInFrame:
         self.inspection_job_record_obj = inspection_job_record_obj
         self.padx = 2
         self.pady = 2
-        # self.current_inspection_job_obj = None  # 为 <LaunchInspectionJob> 类对象
         self.current_row_index = 0
         self.inspection_template_obj = self.global_info.get_inspection_template_by_oid(inspection_job_record_obj.inspection_template_oid)
 
@@ -6317,8 +6322,8 @@ class ViewInspectionJobInFrame:
         pop_window.title("主机巡检详情")
         screen_width = self.main_window.window_obj.winfo_screenwidth()
         screen_height = self.main_window.window_obj.winfo_screenheight()
-        width = 640
-        height = 480
+        width = self.main_window.width - 20
+        height = self.main_window.height
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
@@ -6396,5 +6401,5 @@ if __name__ == '__main__':
         project_default = Project(global_info=global_info_obj)
         global_info_obj.project_obj_list.append(project_default)
         project_default.save()
-    main_window_obj = MainWindow(width=640, height=400, title='CofAble', global_info=global_info_obj)  # 创建程序主界面
+    main_window_obj = MainWindow(width=800, height=480, title='CofAble', global_info=global_info_obj)  # 创建程序主界面
     main_window_obj.show()
