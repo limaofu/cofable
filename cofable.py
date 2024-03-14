@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # coding=utf-8
 # module name: cofable
-# dependencies:  cofnet  (https://github.com/limaofu/cofnet)  &  paramiko
+# external_dependencies:  cofnet (https://github.com/limaofu/cofnet)  &  paramiko  &  schedule
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-13
+# update: 2024-03-14
 
 """
 解决问题：
@@ -29,6 +29,11 @@
 ★. shell通道设置字符界面宽度及长度                                                  2024年3月8日 完成
 ★. 输出巡检实时状态，及进度条展示
 ★. 更新资源名称时，要检查新名称是否和已存在的同类资源名称重复
+★. 巡检前进行ping检测及tcp端口连通检测
+★. 查看历史巡检作业日志时，如果巡检模板已更改，则显示的是更改后对应的输出，而不是更改前的，这个需要改进，
+    对历史巡检模板做一个快照，展示历史作业日志时按旧的资源来显示
+★. 支持工作流，一个工作流包含多个巡检模板，依次进行，可进行分支判断
+★. 在host_job_item的text界面看巡检输出信息，不全，有很多缺失，估计是esc或\0字符导致的
 
 资源操作逻辑：
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -60,6 +65,7 @@ import time
 import re
 import sqlite3
 import base64
+import sched
 import tkinter
 from tkinter import messagebox
 from tkinter import filedialog
@@ -67,6 +73,7 @@ from tkinter import ttk
 from multiprocessing.dummy import Pool as ThreadPool
 
 import paramiko
+import schedule
 
 # Here we go, 全局常量
 COF_TRUE = 1
@@ -829,8 +836,8 @@ class InspectionTemplate:
     """
 
     def __init__(self, name='default', description='default', project_oid='default',
-                 execution_method=EXECUTION_METHOD_NONE, execution_at_time=0,
-                 execution_after_time=0, execution_crond_time='default', update_code_on_launch=COF_FALSE,
+                 execution_method=EXECUTION_METHOD_NONE, execution_at_time=0.0,
+                 execution_after_time=0.0, execution_crond_time='default', update_code_on_launch=COF_FALSE,
                  last_modify_timestamp=0, oid=None, create_timestamp=None, forks=DEFAULT_JOB_FORKS, save_output_to_file=COF_YES,
                  output_file_name_style=OUTPUT_FILE_NAME_STYLE_DATE_DIR__HOSTNAME, global_info=None):
         if oid is None:
@@ -1064,32 +1071,81 @@ class LaunchTemplateTrigger:
     巡检触发检测类，周期检查是否需要执行某巡检模板，每创建一个<InspecionTemplate>巡检模板 就要求绑定一个<LaunchTemplateTrigger>巡检触发检测对象
     """
 
-    def __init__(self, name='default', description='default', project_oid='default',
-                 inspection_template_oid='uuid', last_modify_timestamp=0, oid=None, create_timestamp=None, global_info=None):
+    def __init__(self, name='', description='', inspection_template_obj=None, last_modify_timestamp=0.0, oid=None, create_timestamp=None,
+                 global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
             self.oid = oid
         self.name = name  # <str>
         self.description = description  # <str>
-        self.project_oid = project_oid  # <str>
+        if inspection_template_obj is None:
+            self.project_oid = ''  # <str>
+        else:
+            self.project_oid = inspection_template_obj.project_oid  # <str>
         if create_timestamp is None:
             self.create_timestamp = time.time()  # <float>
         else:
             self.create_timestamp = create_timestamp
-        self.inspection_template_oid = inspection_template_oid
+        self.inspection_template_obj = inspection_template_obj  # <InspectionTemplate>
         self.last_modify_timestamp = last_modify_timestamp  # <float>
         self.is_time_up = False
         self.global_info = global_info
 
-    def start_crontab_job(self):
-        if self.is_time_up:
-            self.start_template()
+    def start_crond_job(self):  # 入口函数
+        if self.inspection_template_obj.execution_method == EXECUTION_METHOD_AT:
+            self.start_template_at()
+        elif self.inspection_template_obj.execution_method == EXECUTION_METHOD_AFTER:
+            self.start_template_after()
+        elif self.inspection_template_obj.execution_method == EXECUTION_METHOD_CROND:
+            self.start_template_crond()
         else:
             pass
 
-    def start_template(self):
+    def existed_uncompleted_inspection_job(self):
+        existed_inspection_job_obj_list = self.global_info.get_inspection_job_record_obj_by_inspection_template_oid(
+            self.inspection_template_obj.oid)
+        if len(existed_inspection_job_obj_list) > 0:
+            print("LaunchTemplateTrigger.existed_uncompleted_inspection_job: 已有历史巡检作业！")
+            for job in existed_inspection_job_obj_list:
+                if job.job_state == INSPECTION_JOB_EXEC_STATE_STARTED:
+                    print("LaunchTemplateTrigger.existed_uncompleted_inspection_job: 还有历史作业未完成，无法启动新的巡检作业！")
+                    return True
+            return False
+        else:
+            return False
+
+    def sched_start_job(self):
+        print(f"LaunchTemplateTrigger.sched_start_job: 开始启动巡检作业: {self.inspection_template_obj.name}")
+        inspect_job_name = "job@" + self.inspection_template_obj.name + "@" + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        current_inspection_job_obj = LaunchInspectionJob(name=inspect_job_name,
+                                                         project_oid=self.inspection_template_obj.project_oid,
+                                                         inspection_template=self.inspection_template_obj,
+                                                         global_info=self.global_info)
+        launch_job_thread = threading.Thread(target=current_inspection_job_obj.start_job)
+        launch_job_thread.start()  # 线程start后，不要join()，主界面才不会卡住
+
+    def start_template_at(self):
+        current_time = time.time()
+        if self.inspection_template_obj.execution_at_time > current_time:
+            sched_obj = sched.scheduler(time.time, time.sleep)  # 创建一个调度器
+            # enter()函数参数1为等待的时间（秒），参数2为优先级，参数3为到时间后要调度的函数
+            sched_obj.enter(self.inspection_template_obj.execution_at_time - current_time, 1, self.sched_start_job)
+            # 运行调度器，默认是blocking=True，阻塞模式，等时间到了才运行，运行回调函数后才继续
+            sched_t = threading.Thread(target=sched_obj.run)
+            sched_t.start()  # 线程start后，不要join()，主界面才不会卡住
+        else:
+            at_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.inspection_template_obj.execution_at_time))
+            print(f"LaunchTemplateTrigger.start_template_at: 巡检模板 {self.inspection_template_obj.name} 时间已过: {at_time}")
+
+    def start_template_after(self):
         pass
+
+    def start_template_crond(self):
+        pass
+
+    def update(self):
+        self.start_crond_job()
 
 
 class HostJobStatus:
@@ -1873,6 +1929,7 @@ class GlobalInfo:
         self.inspection_code_block_obj_list = []
         self.inspection_template_obj_list = []
         self.inspection_job_record_obj_list = []
+        self.launch_template_trigger_obj_list = []
         self.current_project_obj = None  # 需要在项目界面将某个项目设置为当前项目，才会赋值
 
     def set_sqlite3_dbfile_name(self, file_name):
@@ -1894,6 +1951,18 @@ class GlobalInfo:
             self.inspection_template_obj_list = self.load_inspection_template_from_dbfile()
             self.inspection_job_record_obj_list = self.load_inspection_job_record_from_dbfile()
             self.inspection_job_record_obj_list.reverse()  # 逆序，按时间从新到旧
+            # 加载完成所有资源后，创建定时作业监听器
+            self.launch_template_trigger()
+
+    def launch_template_trigger(self):
+        for inspection_template in self.inspection_template_obj_list:
+            if inspection_template.execution_method != EXECUTION_METHOD_NONE:
+                cron_trigger1 = LaunchTemplateTrigger(inspection_template_obj=inspection_template,
+                                                      global_info=self)
+                inspection_template.launch_template_trigger_oid = cron_trigger1.oid  # 将触发器id添加到巡检模板对象上
+                self.launch_template_trigger_obj_list.append(cron_trigger1)
+                # 开始执行监视任务，达到触发条件就执行相应巡检模板（由LaunchTemplateTrigger.start_crontab_job()方法触发）
+                cron_trigger1.start_crond_job()
 
     def load_project_from_dbfile(self):
         """
@@ -2521,6 +2590,14 @@ class GlobalInfo:
                 existed_inspection_job_obj_list.append(obj)
             index += 1
         return existed_inspection_job_obj_list
+
+    def get_launch_template_trigger_obj_by_oid(self, oid):
+        index = 0
+        for obj in self.launch_template_trigger_obj_list:
+            if obj.oid == oid:
+                return obj
+            index += 1
+        return None
 
     def delete_project_obj_by_oid(self, oid):
         """
@@ -3715,47 +3792,56 @@ class CreateResourceInFrame:
                                                                             values=execution_method_name_list,
                                                                             state="readonly")
         self.resource_info_dict["combobox_execution_method"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_template-execution_at_time 这里应该使用日历框及时间设置框，先简化为直接输入 "2024-03-14 09:51:26" 这类字符串
+        label_inspection_template_execution_at_time = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="execution_at_time")
+        label_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_execution_at_time.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_execution_at_time"] = tkinter.StringVar()
+        entry_inspection_template_execution_at_time = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                                    textvariable=self.resource_info_dict["sv_execution_at_time"])
+        entry_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_execution_at_time.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-update_code_on_launch
         label_inspection_template_update_code_on_launch = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行前更新code")
         label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_template_update_code_on_launch.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_template_update_code_on_launch.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         update_code_on_launch_name_list = ["No", "Yes"]
         self.resource_info_dict["combobox_update_code_on_launch"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
                                                                                  values=update_code_on_launch_name_list,
                                                                                  state="readonly")
-        self.resource_info_dict["combobox_update_code_on_launch"].grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_update_code_on_launch"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-forks
         label_inspection_template_forks = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行线程数")
         label_inspection_template_forks.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_template_forks.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_template_forks.grid(row=7, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_forks"] = tkinter.StringVar()
         spinbox_inspection_template_forks = tkinter.Spinbox(self.nav_frame_r_widget_dict["frame"], from_=1, to=256, increment=1,
                                                             textvariable=self.resource_info_dict["sv_forks"])
-        spinbox_inspection_template_forks.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        spinbox_inspection_template_forks.grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-save_output_to_file
         label_inspection_template_save_output_to_file = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="自动保存巡检日志到文件")
         label_inspection_template_save_output_to_file.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_template_save_output_to_file.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_template_save_output_to_file.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         save_output_to_file_name_list = ["No", "Yes"]
         self.resource_info_dict["combobox_save_output_to_file"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
                                                                                values=save_output_to_file_name_list,
                                                                                state="readonly")
-        self.resource_info_dict["combobox_save_output_to_file"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_save_output_to_file"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-output_file_name_style
         label_inspection_template_output_file_name_style = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检日志文件名称")
         label_inspection_template_output_file_name_style.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_template_output_file_name_style.grid(row=8, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_template_output_file_name_style.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         output_file_name_style_name_list = ["HOSTNAME", "HOSTNAME-DATE", "HOSTNAME-DATE-TIME", "DATE_DIR/HOSTNAME",
                                             "DATE_DIR/HOSTNAME-DATE",
                                             "DATE_DIR/HOSTNAME-DATE-TIME"]
         self.resource_info_dict["combobox_output_file_name_style"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
                                                                                   values=output_file_name_style_name_list,
                                                                                   state="readonly", width=32)
-        self.resource_info_dict["combobox_output_file_name_style"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_output_file_name_style"].grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★添加host_group列表
         label_host_group_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组列表")
         label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_host_group_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
+        label_host_group_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -3767,11 +3853,11 @@ class CreateResourceInFrame:
             self.resource_info_dict["listbox_host_group"].insert(tkinter.END, host_group.name)  # 添加item选项
         self.resource_info_dict["listbox_host_group"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_host_group"].yview)
-        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
         # ★添加host列表
         label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机列表")
         label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_host_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
+        label_host_list.grid(row=11, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -3783,11 +3869,11 @@ class CreateResourceInFrame:
             self.resource_info_dict["listbox_host"].insert(tkinter.END, host.name)  # 添加item选项
         self.resource_info_dict["listbox_host"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_host"].yview)
-        frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=11, column=1, padx=self.padx, pady=self.pady)
         # ★添加-巡检代码块列表
         label_inspection_code_block_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码块列表")
         label_inspection_code_block_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_code_block_list.grid(row=11, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_code_block_list.grid(row=12, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -3801,7 +3887,7 @@ class CreateResourceInFrame:
             self.resource_info_dict["listbox_inspection_code_block"].insert(tkinter.END, cred.name)  # 添加item选项
         self.resource_info_dict["listbox_inspection_code_block"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_inspection_code_block"].yview)
-        frame.grid(row=11, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=12, column=1, padx=self.padx, pady=self.pady)
 
 
 class ListResourceInFrame:
@@ -4344,6 +4430,12 @@ class ViewResourceInFrame:
         inspection_template_name = "execution_method".ljust(self.view_width, " ") + ": " + execution_method_name_list[
             self.resource_obj.execution_method] + "\n"
         obj_info_text.insert(tkinter.END, inspection_template_name)
+        # ★inspection_template-execution_at_time
+        execution_at_time_list = ["execution_at_time".ljust(self.view_width, " "),
+                                  ": ",
+                                  time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.execution_at_time)),
+                                  "\n"]
+        obj_info_text.insert(tkinter.END, "".join(execution_at_time_list))
         # ★inspection_template-update_code_on_launch
         update_code_on_launch_name_list = ["No", "Yes"]
         inspection_template_name = "运行前更新code".ljust(self.view_width - 5, " ") + ": " + update_code_on_launch_name_list[
@@ -4404,9 +4496,9 @@ class ViewResourceInFrame:
         # 显示info Text文本框
         obj_info_text.pack()
         # ★★添加“返回巡检代码块列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回巡检代码块列表",
+        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回巡检模板列表",
                                        command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
-                                           RESOURCE_TYPE_INSPECTION_TEMPLATE))  # 返回巡检代码块列表
+                                           RESOURCE_TYPE_INSPECTION_TEMPLATE))  # 返回巡检模板列表
         button_return.pack()
 
 
@@ -5127,39 +5219,50 @@ class EditResourceInFrame:
                                                                             state="readonly")
         self.resource_info_dict["combobox_execution_method"].current(self.resource_obj.execution_method)
         self.resource_info_dict["combobox_execution_method"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # ★inspection_template-execution_at_time 这里应该使用日历框及时间设置框，先简化为直接输入 "2024-03-14 09:51:26" 这类字符串
+        label_inspection_template_execution_at_time = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="execution_at_time")
+        label_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_execution_at_time.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_execution_at_time"] = tkinter.StringVar()
+        entry_inspection_template_execution_at_time = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                                    textvariable=self.resource_info_dict["sv_execution_at_time"])
+        execution_at_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.execution_at_time))
+        entry_inspection_template_execution_at_time.insert(0, execution_at_time)
+        entry_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_execution_at_time.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-update_code_on_launch
         label_inspection_template_update_code_on_launch = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行前更新code")
         label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_template_update_code_on_launch.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_template_update_code_on_launch.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         update_code_on_launch_name_list = ["No", "Yes"]
         self.resource_info_dict["combobox_update_code_on_launch"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
                                                                                  values=update_code_on_launch_name_list,
                                                                                  state="readonly")
         self.resource_info_dict["combobox_update_code_on_launch"].current(self.resource_obj.update_code_on_launch)
-        self.resource_info_dict["combobox_update_code_on_launch"].grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_update_code_on_launch"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-forks
         label_inspection_template_forks = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行线程数")
         label_inspection_template_forks.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_template_forks.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_template_forks.grid(row=7, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_forks"] = tkinter.StringVar()
         spinbox_inspection_template_forks = tkinter.Spinbox(self.nav_frame_r_widget_dict["frame"], from_=1, to=256, increment=1,
                                                             textvariable=self.resource_info_dict["sv_forks"])
         self.resource_info_dict["sv_forks"].set(self.resource_obj.forks)  # 显示初始值，可编辑
-        spinbox_inspection_template_forks.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        spinbox_inspection_template_forks.grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-save_output_to_file
         label_inspection_template_save_output_to_file = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="自动保存巡检日志到文件")
         label_inspection_template_save_output_to_file.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_template_save_output_to_file.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_template_save_output_to_file.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         save_output_to_file_name_list = ["No", "Yes"]
         self.resource_info_dict["combobox_save_output_to_file"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
                                                                                values=save_output_to_file_name_list,
                                                                                state="readonly")
         self.resource_info_dict["combobox_save_output_to_file"].current(self.resource_obj.save_output_to_file)
-        self.resource_info_dict["combobox_save_output_to_file"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_save_output_to_file"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-output_file_name_style
         label_inspection_template_output_file_name_style = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检日志文件名称")
         label_inspection_template_output_file_name_style.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_template_output_file_name_style.grid(row=8, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_template_output_file_name_style.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         output_file_name_style_name_list = ["HOSTNAME", "HOSTNAME-DATE", "HOSTNAME-DATE-TIME", "DATE_DIR/HOSTNAME",
                                             "DATE_DIR/HOSTNAME-DATE",
                                             "DATE_DIR/HOSTNAME-DATE-TIME"]
@@ -5167,11 +5270,11 @@ class EditResourceInFrame:
                                                                                   values=output_file_name_style_name_list,
                                                                                   state="readonly", width=32)
         self.resource_info_dict["combobox_output_file_name_style"].current(self.resource_obj.output_file_name_style)
-        self.resource_info_dict["combobox_output_file_name_style"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_output_file_name_style"].grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★host_group-列表
         label_host_group_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组列表")
         label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_host_group_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
+        label_host_group_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -5187,11 +5290,11 @@ class EditResourceInFrame:
                 self.resource_info_dict["listbox_host_group"].select_set(host_group_index)
         self.resource_info_dict["listbox_host_group"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_host_group"].yview)
-        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
         # ★host-列表
         label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机列表")
         label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_host_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
+        label_host_list.grid(row=11, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -5207,11 +5310,11 @@ class EditResourceInFrame:
                 self.resource_info_dict["listbox_host"].select_set(host_index)
         self.resource_info_dict["listbox_host"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_host"].yview)
-        frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=11, column=1, padx=self.padx, pady=self.pady)
         # ★巡检代码块-列表
         label_inspection_code_block_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码块列表")
         label_inspection_code_block_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_inspection_code_block_list.grid(row=11, column=0, padx=self.padx, pady=self.pady)
+        label_inspection_code_block_list.grid(row=12, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -5229,9 +5332,9 @@ class EditResourceInFrame:
                 self.resource_info_dict["listbox_inspection_code_block"].select_set(inspection_code_block_index)
         self.resource_info_dict["listbox_inspection_code_block"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_inspection_code_block"].yview)
-        frame.grid(row=11, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=12, column=1, padx=self.padx, pady=self.pady)
         # ★★更新row_index
-        self.current_row_index = 11
+        self.current_row_index = 12
 
 
 class UpdateResourceInFrame:
@@ -5445,6 +5548,9 @@ class UpdateResourceInFrame:
             inspection_template_execution_method = 0
         else:
             inspection_template_execution_method = self.resource_info_dict["combobox_execution_method"].current()
+        # ★execution_at_time
+        execution_at_time_str = self.resource_info_dict["sv_execution_at_time"].get()  # "2024-03-14 09:56:48"
+        execution_at_time = time.mktime(time.strptime(execution_at_time_str, "%Y-%m-%d %H:%M:%S"))
         # ★update_code_on_launch
         if self.resource_info_dict["combobox_update_code_on_launch"].current() == -1:
             inspection_template_update_code_on_launch = 0
@@ -5484,10 +5590,16 @@ class UpdateResourceInFrame:
         else:
             self.resource_obj.update(name=inspection_template_name, description=inspection_template_description,
                                      project_oid=project_oid, execution_method=inspection_template_execution_method,
+                                     execution_at_time=execution_at_time,
                                      update_code_on_launch=inspection_template_update_code_on_launch, forks=inspection_template_forks,
                                      save_output_to_file=inspection_template_save_output_to_file,
                                      output_file_name_style=inspection_template_output_file_name_style,
                                      global_info=self.global_info)
+            if self.resource_obj.launch_template_trigger_oid != "":
+                launch_template_trigger_obj = self.global_info.get_launch_template_trigger_obj_by_oid(
+                    self.resource_obj.launch_template_trigger_oid)
+                print("xxxxxxxxxxxxxxyyyyyyyyyyyy update update update")
+                launch_template_trigger_obj.update()
             self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_INSPECTION_TEMPLATE)  # 更新信息后，返回“显示资源列表”页面
 
 
@@ -5779,6 +5891,9 @@ class SaveResourceInMainWindow:
             inspection_template_execution_method = 0
         else:
             inspection_template_execution_method = self.resource_info_dict["combobox_execution_method"].current()
+        # ★execution_at_time
+        execution_at_time_str = self.resource_info_dict["sv_execution_at_time"].get()  # "2024-03-14 09:56:48"
+        execution_at_time = time.mktime(time.strptime(execution_at_time_str, "%Y-%m-%d %H:%M:%S"))
         # ★update_code_on_launch
         if self.resource_info_dict["combobox_update_code_on_launch"].current() == -1:
             inspection_template_update_code_on_launch = 0
@@ -5809,6 +5924,7 @@ class SaveResourceInMainWindow:
             inspection_template = InspectionTemplate(name=inspection_template_name, description=inspection_template_description,
                                                      project_oid=project_oid, forks=inspection_template_forks,
                                                      execution_method=inspection_template_execution_method,
+                                                     execution_at_time=execution_at_time,
                                                      update_code_on_launch=inspection_template_update_code_on_launch,
                                                      save_output_to_file=inspection_template_save_output_to_file,
                                                      output_file_name_style=inspection_template_output_file_name_style,
@@ -5822,7 +5938,17 @@ class SaveResourceInMainWindow:
                 inspection_template.add_inspection_code_block(self.global_info.inspection_code_block_obj_list[selected_code_block_index])
             inspection_template.save()  # 保存资源对象
             self.global_info.inspection_template_obj_list.append(inspection_template)
-            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_INSPECTION_TEMPLATE)  # 保存后，返回展示页面
+            # 如果巡检模板创建了定时任务，则创建触发器
+            if inspection_template.execution_method != EXECUTION_METHOD_NONE:
+                cron_trigger1 = LaunchTemplateTrigger(inspection_template_obj=inspection_template,
+                                                      global_info=self.global_info)
+                inspection_template.launch_template_trigger_oid = cron_trigger1.oid  # 将触发器id添加到巡检模板对象上
+                self.global_info.launch_template_trigger_obj_list.append(cron_trigger1)
+                # 开始执行监视任务，达到触发条件就执行相应巡检模板（由cofable.LaunchTemplateTrigger.start_crontab_job()方法触发）
+                cron_trigger1.start_crond_job()
+            else:
+                pass
+            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_INSPECTION_TEMPLATE)  # 返回顶级展示页面
 
 
 class StartInspectionTemplateInFrame:
