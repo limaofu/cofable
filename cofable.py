@@ -33,7 +33,8 @@
 ★. 查看历史巡检作业日志时，如果巡检模板已更改，则显示的是更改后对应的输出，而不是更改前的，这个需要改进，
     对历史巡检模板做一个快照，展示历史作业日志时按旧的资源来显示
 ★. 支持工作流，一个工作流包含多个巡检模板，依次进行，可进行分支判断
-★. 在host_job_item的text界面看巡检输出信息，不全，有很多缺失，估计是esc或\0字符导致的
+★. 在host_job_item的text界面看巡检输出信息，不全，有很多缺失，
+    原因是显示是未遍历SSHOperatorOutput.interactive_output_bytes_list              2024年3月14日 已解决
 
 资源操作逻辑：
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -1387,10 +1388,10 @@ class LaunchInspectionJob:
         with open(file_name, 'a', encoding='utf8') as file_obj:
             for ssh_operator_output_obj in ssh_operator_output_obj_list:
                 if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_INVOKE_SHELL:
-                    file_obj.write(ssh_operator_output_obj.invoke_shell_output_str)
-                    if len(ssh_operator_output_obj.interactive_output_str_list) != 0:
-                        for interactive_output_str in ssh_operator_output_obj.interactive_output_str_list:
-                            file_obj.write(interactive_output_str)
+                    file_obj.write(ssh_operator_output_obj.invoke_shell_output_bytes.decode("utf8"))
+                    if len(ssh_operator_output_obj.interactive_output_bytes_list) != 0:
+                        for interactive_output_bytes in ssh_operator_output_obj.interactive_output_bytes_list:
+                            file_obj.write(interactive_output_bytes.decode("utf8"))
                 if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_EXEC_COMMAND:
                     for exec_command_stderr_line in ssh_operator_output_obj.exec_command_stderr_line_list:
                         file_obj.write(exec_command_stderr_line)
@@ -1409,17 +1410,17 @@ class LaunchInspectionJob:
         else:
             return str(t)
 
-    def save_ssh_operator_invoke_shell_output_to_sqlite(self, ssh_operator_output_obj_list, host, inspection_code_obj):
+    def save_ssh_operator_invoke_shell_output_to_sqlite(self, ssh_operator_output_obj_list, host_obj, inspection_code_obj):
         """
         主机的所有巡检命令输出信息都保存到数据库里
         :param ssh_operator_output_obj_list:
-        :param host:
+        :param host_obj:
         :param inspection_code_obj:
         :return:
         """
         sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-        # ★查询是否有名为'tb_inspection_job_invoke_shell_output'的表★
+        # ★★★查询是否有名为'tb_inspection_job_invoke_shell_output'的表★★★
         sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_invoke_shell_output"'
         sqlite_cursor.execute(sql)
         result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
@@ -1432,47 +1433,80 @@ class LaunchInspectionJob:
                         "project_oid varchar(36),",
                         "code_index int,",
                         "code_exec_method int,",
-                        "code_invoke_shell_output_str_b64 varchar(8192),",
-                        "code_invoke_shell_output_last_line_b64 varchar(2048),",
-                        "code_interactive_output_str_lines_b64 varchar(8192) )"]
+                        "invoke_shell_output_bytes_b64 varchar(8192),",
+                        "invoke_shell_output_last_line_str_b64 varchar(8192) )"]
             sqlite_cursor.execute(" ".join(sql_list))
-        # 开始插入数据，一条命令的输出为一行记录（job_oid为LaunchInspectionJob的oid，也同InspectionJobRecord的oid）
+        # ★★★查询是否有名为'tb_inspection_job_invoke_shell_interactive_output'的表★★★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_invoke_shell_interactive_output"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则创建此表
+        if len(result) == 0:
+            sql_list = ["create table tb_inspection_job_invoke_shell_interactive_output  ( job_oid varchar(36),",
+                        "host_oid varchar(36),",
+                        "inspection_code_oid varchar(36),",
+                        "project_oid varchar(36),",
+                        "code_index int,",
+                        "code_exec_interactive_output_index int,",
+                        "interactive_output_bytes_b64 varchar(8192) )"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        # ★★★开始插入数据，一条命令的输出为一行记录（job_oid为LaunchInspectionJob的oid，也同InspectionJobRecord的oid）★★★
         for code_output in ssh_operator_output_obj_list:
             sql_list = ["select * from tb_inspection_job_invoke_shell_output where",
-                        f"job_oid='{self.oid}' and host_oid='{host.oid}'",
+                        f"job_oid='{self.oid}' and host_oid='{host_obj.oid}'",
                         f"and inspection_code_oid='{inspection_code_obj.oid}'",
                         f"and code_index='{code_output.code_index}' "]
             sqlite_cursor.execute(" ".join(sql_list))
             if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项记录，则创建此项记录
-                code_invoke_shell_output_str_b64 = base64.b64encode(
-                    code_output.invoke_shell_output_str.encode('utf8')).decode('utf8')
-                code_invoke_shell_output_last_line_b64 = base64.b64encode(
-                    code_output.invoke_shell_output_last_line.encode('utf8')).decode('utf8')
-                code_interactive_output_str_lines_b64 = base64.b64encode(
-                    "".join(code_output.interactive_output_str_list).encode('utf8')).decode('utf8')
+                invoke_shell_output_bytes_b64 = base64.b64encode(code_output.invoke_shell_output_bytes).decode('utf8')
+                invoke_shell_output_last_line_str_b64 = base64.b64encode(
+                    code_output.invoke_shell_output_last_line_str.encode('utf8')).decode('utf8')
                 sql_list = ["insert into tb_inspection_job_invoke_shell_output (job_oid,",
                             "host_oid,",
                             "inspection_code_oid,",
                             "project_oid,",
                             "code_index,",
                             "code_exec_method,",
-                            "code_invoke_shell_output_str_b64,",
-                            "code_invoke_shell_output_last_line_b64,",
-                            "code_interactive_output_str_lines_b64 )  values ",
+                            "invoke_shell_output_bytes_b64,",
+                            "invoke_shell_output_last_line_str_b64 )  values ",
                             f"( '{self.oid}',",
-                            f"'{host.oid}',",
+                            f"'{host_obj.oid}',",
                             f"'{inspection_code_obj.oid}',",
-                            f"'{host.project_oid}',",
+                            f"'{host_obj.project_oid}',",
                             f"{code_output.code_index},",
                             f"{code_output.code_exec_method},",
-                            f"'{code_invoke_shell_output_str_b64}',",
-                            f"'{code_invoke_shell_output_last_line_b64}',",
-                            f"'{code_interactive_output_str_lines_b64}'",
+                            f"'{invoke_shell_output_bytes_b64}',",
+                            f"'{invoke_shell_output_last_line_str_b64}'",
                             " )"]
                 sqlite_cursor.execute(" ".join(sql_list))
+                self.save_interactive_output_bytes_list(sqlite_cursor, host_obj, inspection_code_obj, code_output)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
+
+    def save_interactive_output_bytes_list(self, sqlite_cursor, host_obj, inspection_code_obj, code_output):
+        # 开始插入数据，一条记录为SSHOperatorOutput.interactive_output_bytes_list的一个元素
+        index = 0
+        for interactive_output_bytes in code_output.interactive_output_bytes_list:
+            interactive_output_bytes_b64 = base64.b64encode(interactive_output_bytes).decode("utf8")
+            sql_list = ["insert into tb_inspection_job_invoke_shell_interactive_output (job_oid,",
+                        "host_oid,",
+                        "inspection_code_oid,",
+                        "project_oid,",
+                        "code_index,",
+                        "code_exec_interactive_output_index,",
+                        "interactive_output_bytes_b64 )  values ",
+                        f"( '{self.oid}',",
+                        f"'{host_obj.oid}',",
+                        f"'{inspection_code_obj.oid}',",
+                        f"'{host_obj.project_oid}',",
+                        f"{code_output.code_index},",
+                        f"{index},",
+                        f"'{interactive_output_bytes_b64}'",
+                        " )"]
+            sqlite_cursor.execute(" ".join(sql_list))
+            index += 1
 
     def judge_completion_of_job(self):
         completed_host_num = 0
@@ -1693,25 +1727,25 @@ class SSHOperatorOutput:
     """
 
     def __init__(self, code_index=0, code_content=None, code_exec_method=CODE_EXEC_METHOD_INVOKE_SHELL,
-                 invoke_shell_output_str=None, invoke_shell_output_last_line=None, is_empty_output=False,
-                 interactive_output_str_list=None,
+                 invoke_shell_output_bytes=None, invoke_shell_output_last_line_str=None, is_empty_output=False,
+                 interactive_output_bytes_list=None,
                  exec_command_stdout_line_list=None,
                  exec_command_stderr_line_list=None):
-        self.code_index = code_index
-        self.code_content = code_content
-        self.code_exec_method = code_exec_method
-        if invoke_shell_output_str is None:
-            self.invoke_shell_output_str = ""
+        self.code_index = code_index  # <int> 命令序号
+        self.code_content = code_content  # <str> 命令内容，一行
+        self.code_exec_method = code_exec_method  # <int> 默认是CODE_EXEC_METHOD_INVOKE_SHELL
+        if invoke_shell_output_bytes is None:
+            self.invoke_shell_output_bytes = b""  # <bytes>
         else:
-            self.invoke_shell_output_str = invoke_shell_output_str  # <str> 所有输出str，可有换行符
-        if invoke_shell_output_last_line is None:
-            self.invoke_shell_output_last_line = ""
+            self.invoke_shell_output_bytes = invoke_shell_output_bytes  # <bytes> 所有输出，可有换行符，ESC，NUL等
+        if invoke_shell_output_last_line_str is None:
+            self.invoke_shell_output_last_line_str = ""  # <str>
         else:
-            self.invoke_shell_output_last_line = invoke_shell_output_last_line  # <str> 输出的最后一行
-        if interactive_output_str_list is None:
-            self.interactive_output_str_list = []
+            self.invoke_shell_output_last_line_str = invoke_shell_output_last_line_str  # <str> 命令输出的最后一行
+        if interactive_output_bytes_list is None:
+            self.interactive_output_bytes_list = []
         else:
-            self.interactive_output_str_list = interactive_output_str_list
+            self.interactive_output_bytes_list = interactive_output_bytes_list  # <list> 元素为 <bytes> 一次交互输出为一个元素
         if exec_command_stdout_line_list is None:
             self.exec_command_stdout_line_list = []
         else:
@@ -1773,47 +1807,45 @@ class SSHOperator:
         ssh_shell = ssh_client.invoke_shell(width=SHELL_TERMINAL_WIDTH, height=SHELL_TERMINAL_HEIGHT)  # 创建一个交互式shell
         time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
         try:
-            recv = ssh_shell.recv(65535)  # 获取登录后的输出信息，此时未执行任何命令
+            login_recv = ssh_shell.recv(65535)  # 获取登录后的输出信息，此时未执行任何命令
         except Exception as e:
             print(e)
             return
         # 创建命令输出对象<SSHOperatorOutput>，一条命令对应一个<SSHOperatorOutput>对象
-        invoke_shell_output_str_list = recv.decode('utf8').split('\r\n')
+        invoke_shell_output_str_list = login_recv.decode('utf8').split('\r\n')
         invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
         # invoke_shell_output_str = recv.decode('utf8').replace('\r', '')  # 登录后的输出信息，换行符为\r\n，这里去除一个\r，只留\n
-        output = SSHOperatorOutput(code_index=-1, code_exec_method=CODE_EXEC_METHOD_INVOKE_SHELL,
-                                   invoke_shell_output_str=invoke_shell_output_str)
-        self.output_list.append(output)  # 刚登录后的输出信息保存到output_list里
-        print("SSHOperator.run_invoke_shell : 登录后输出内容如下 #####################")
-        print(invoke_shell_output_str)
+        output_login = SSHOperatorOutput(code_index=-1, code_exec_method=CODE_EXEC_METHOD_INVOKE_SHELL,
+                                         invoke_shell_output_bytes=login_recv)
+        self.output_list.append(output_login)  # 刚登录后的输出信息保存到output_list里
+        print("SSHOperator.run_invoke_shell : 登录后输出内容如下 #################\n", invoke_shell_output_str)
         # ★★开始执行正式命令★★
         cmd_index = 0
         for one_line_code in self.command_list:
             if not isinstance(one_line_code, OneLineCode):
                 return
-            ssh_shell.send(one_line_code.code_content.strip().encode('utf8'))  # 发送巡检命令，一行命令
+            ssh_shell.send(one_line_code.code_content.strip().encode('utf8'))  # 发送巡检命令，一行命令（会过滤命令前后的空白字符）
             ssh_shell.send("\n".encode('utf8'))  # 命令strip()后，不带\n换行，需要额外发送一个换行符
-            time.sleep(one_line_code.code_post_wait_time)  # 发送完命令后，要等待系统回复★
+            time.sleep(one_line_code.code_post_wait_time)  # 发送完命令后，要等待系统回复★★★
             try:
-                recv = ssh_shell.recv(65535)
+                cmd_recv = ssh_shell.recv(65535)
             except Exception as e:
                 print(e)
                 return
-            invoke_shell_output_str_list = recv.decode('utf8').split('\r\n')
+            invoke_shell_output_str_list = cmd_recv.decode('utf8').split('\r\n')
             invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
             output_str_lines = invoke_shell_output_str.split('\n')
             output_last_line_index = len(output_str_lines) - 1
             output_last_line = output_str_lines[output_last_line_index]  # 命令输出最后一行（shell提示符，不带换行符的）
-            output = SSHOperatorOutput(code_index=cmd_index, code_exec_method=CODE_EXEC_METHOD_INVOKE_SHELL,
-                                       code_content=one_line_code.code_content, invoke_shell_output_str=invoke_shell_output_str,
-                                       invoke_shell_output_last_line=output_last_line)
-            self.output_list.append(output)  # 命令输出结果保存到output_list里
-            print(f"SSHOperator.run_invoke_shell : $$ 命令{cmd_index} $$ 输出结果如下 ##############")
-            print(invoke_shell_output_str)
+            output_cmd = SSHOperatorOutput(code_index=cmd_index, code_exec_method=CODE_EXEC_METHOD_INVOKE_SHELL,
+                                           code_content=one_line_code.code_content, invoke_shell_output_bytes=cmd_recv,
+                                           invoke_shell_output_last_line_str=output_last_line)
+            self.output_list.append(output_cmd)  # 命令输出结果保存到output_list里
+            print(f"SSHOperator.run_invoke_shell : $$ 命令{cmd_index} $$ 输出结果如下 ##############\n", invoke_shell_output_str)
             # 有的shell提示符末尾有个空格，当然了，也有的shell提示符末尾没有空格
-            print(f"SSHOperator.run_invoke_shell : 命令输出最后一行（shell提示符，不带换行符的）为:  {output_last_line.encode('utf8')}")
+            print(f"SSHOperator.run_invoke_shell : 命令输出最后一行（可能是shell提示符，无换行符）为:  {output_last_line.encode('utf8')}")
             if one_line_code.need_interactive:  # 命令如果需要处理交互情况，则判断交互提问关键词
-                self.process_code_interactive(one_line_code, output_last_line, ssh_shell, output)
+                self.process_code_interactive(one_line_code, output_last_line, ssh_shell, output_cmd)
             cmd_index += 1
         ssh_shell.close()
         ssh_client.close()
@@ -1823,19 +1855,18 @@ class SSHOperator:
     def process_code_interactive(code, output_last_line, ssh_shell, output, second_time=False, interactive_times=0):
         """
         处理命令的交互式应答，有时执行某些命令执后，系统会提示输入[Y/N]?，要求回复
-        :param interactive_times:
-        :param code:
-        :param output_last_line:
-        :param ssh_shell:
-        :param output:
-        :param second_time:
+        :param interactive_times: <int>
+        :param code: <OneLineCode>
+        :param output_last_line: <str>
+        :param ssh_shell: ssh_client.invoke_shell()
+        :param output: <SSHOperatorOutput>
+        :param second_time: bool
         :return:
         """
-        ret = re.search(code.interactive_question_keyword, output_last_line, re.I)
-        if ret is not None:  # 如果匹配上需要交互的提问判断字符串
+        ret = re.search(code.interactive_question_keyword, output_last_line, re.I)  # 对命令输出的最后一行进行关键词匹配，不区分大小写
+        if ret is not None:  # 如果匹配上需要交互的提问字符串
             print(f"SSHOperator.process_code_interactive : 匹配到交互关键字 {ret} ，执行交互回答:")
-            ssh_shell.send(code.interactive_answer.encode('utf8'))  # 发送交互回答内容，这里不会额外发送\n换行
-            # ssh_shell.send("\n".encode('utf8'))  # 命令strip()后，不带\n换行，需要额外发送一个换行符
+            ssh_shell.send(code.interactive_answer.encode('utf8'))  # 发送交互回答内容，这里不会额外发送\n换行，也不过滤空白字符
             time.sleep(code.code_post_wait_time)  # 发送完命令后，要等待系统回复
             try:
                 recv = ssh_shell.recv(65535)
@@ -1846,7 +1877,7 @@ class SSHOperator:
             # interactive_output_str = '\n'.join(interactive_output_str_list)  # 这与前面一行共同作用是去除'\r'
             interactive_output_str = recv.decode('utf8').replace('\r', '')
             print(interactive_output_str)
-            output.interactive_output_str_list.append(interactive_output_str)
+            output.interactive_output_bytes_list.append(recv)
             if second_time is True:
                 print("SSHOperator.process_code_interactive : 上面输出为twice的★★★★★")
                 return
@@ -2387,43 +2418,6 @@ class GlobalInfo:
         self.load_inspection_job_record_host_job_status_from_dbfile(obj_list)
         return obj_list
 
-    def load_inspection_job_log_for_host(self, inspection_job_record_oid, host_oid, inspection_code_block_oid):
-        """
-        从sqlite3数据库文件，查询某台主机的巡检作业日志，输出为<SSHOperatorOutput>对象列表
-        :return:
-        """
-        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
-        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
-        # ★查询是否有名为'tb_inspection_job_invoke_shell_output'的表★
-        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_invoke_shell_output"'
-        sqlite_cursor.execute(sql)
-        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-        print("exist tables: ", result)
-        # 若未查询到有此表，则返回None
-        if len(result) == 0:
-            return []
-        # 读取数据
-        ssh_operator_output_obj_list = []
-        sql_list = ['select * from tb_inspection_job_invoke_shell_output where',
-                    f'"job_oid"="{inspection_job_record_oid}"',
-                    f'and "host_oid"="{host_oid}"',
-                    f'and "inspection_code_oid"="{inspection_code_block_oid}"']
-        sqlite_cursor.execute(" ".join(sql_list))
-        search_result = sqlite_cursor.fetchall()
-        for obj_info_tuple in search_result:
-            obj = SSHOperatorOutput(code_index=obj_info_tuple[4],
-                                    code_content='',
-                                    code_exec_method=int(obj_info_tuple[5]),
-                                    invoke_shell_output_str=base64.b64decode(obj_info_tuple[6]).decode("utf8"),
-                                    invoke_shell_output_last_line=base64.b64decode(obj_info_tuple[7]).decode("utf8"),
-                                    interactive_output_str_list=base64.b64decode(obj_info_tuple[8]).decode("utf8")
-                                    )
-            ssh_operator_output_obj_list.append(obj)
-        sqlite_cursor.close()
-        sqlite_conn.commit()  # 保存，提交
-        sqlite_conn.close()  # 关闭数据库连接
-        return ssh_operator_output_obj_list
-
     def load_inspection_job_record_host_job_status_from_dbfile(self, inspection_job_record_obj_list):
         """
         从sqlite3数据库文件，xxx
@@ -2453,6 +2447,75 @@ class GlobalInfo:
                                     start_time=float(obj_info_tuple[5]),
                                     end_time=float(obj_info_tuple[6]))
                 job_record_obj.unduplicated_host_job_status_obj_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+
+    def load_inspection_job_log_for_host(self, inspection_job_record_oid, host_oid, inspection_code_block_oid):
+        """
+        从sqlite3数据库文件，查询某台主机的巡检作业日志，输出为<SSHOperatorOutput>对象列表
+        :return:
+        """
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_job_invoke_shell_output'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_invoke_shell_output"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        ssh_operator_output_obj_list = []
+        sql_list = ['select * from tb_inspection_job_invoke_shell_output where',
+                    f'"job_oid"="{inspection_job_record_oid}"',
+                    f'and "host_oid"="{host_oid}"',
+                    f'and "inspection_code_oid"="{inspection_code_block_oid}"']
+        sqlite_cursor.execute(" ".join(sql_list))
+        search_result = sqlite_cursor.fetchall()
+        for obj_info_tuple in search_result:
+            obj = SSHOperatorOutput(code_index=obj_info_tuple[4],
+                                    code_content='',
+                                    code_exec_method=int(obj_info_tuple[5]),
+                                    invoke_shell_output_bytes=base64.b64decode(obj_info_tuple[6]),
+                                    invoke_shell_output_last_line_str=base64.b64decode(obj_info_tuple[7]).decode("utf8"),
+                                    )
+            ssh_operator_output_obj_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+        self.load_inspection_job_interactive_output_for_host(ssh_operator_output_obj_list, inspection_job_record_oid, host_oid,
+                                                             inspection_code_block_oid)
+        return ssh_operator_output_obj_list
+
+    def load_inspection_job_interactive_output_for_host(self, ssh_operator_output_obj_list, inspection_job_record_oid, host_oid,
+                                                        inspection_code_block_oid):
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_job_invoke_shell_interactive_output'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_inspection_job_invoke_shell_interactive_output"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        index = 0
+        for output_obj in ssh_operator_output_obj_list:
+            output_obj.interactive_output_bytes_list = []
+            sql_list = ['select * from tb_inspection_job_invoke_shell_interactive_output where',
+                        f'"job_oid"="{inspection_job_record_oid}"',
+                        f'and "host_oid"="{host_oid}"',
+                        f'and "inspection_code_oid"="{inspection_code_block_oid}"',
+                        f'and "code_index"="{index}"']
+            sqlite_cursor.execute(" ".join(sql_list))
+            search_result = sqlite_cursor.fetchall()
+            for obj_info_tuple in search_result:
+                interactive_output_bytes = base64.b64decode(obj_info_tuple[6])
+                output_obj.interactive_output_bytes_list.append(interactive_output_bytes)
+            index += 1
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
@@ -2830,6 +2893,20 @@ class GlobalInfo:
         result = sqlite_cursor.fetchall()
         if len(result) != 0:  # 若查询到有此表，才删除相应数据
             sql = f"delete from tb_inspection_job_record_host_job_status_obj_list where job_record_oid='{obj.oid}' "
+            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_inspection_job_invoke_shell_output'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_job_invoke_shell_output"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_inspection_job_invoke_shell_output where job_oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_inspection_job_invoke_shell_interactive_output'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_inspection_job_invoke_shell_interactive_output"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_inspection_job_invoke_shell_interactive_output where job_oid='{obj.oid}'"
             sqlite_cursor.execute(sql)
         sqlite_cursor.close()
         sqlite_conn.commit()
@@ -6145,43 +6222,53 @@ class StartInspectionTemplateInFrame:
         host_job_status_obj_index, _, _, _ = inspection_host_treeview.item(item_index, "values")
         # 获取选中的命令对象
         host_job_status_obj = self.current_inspection_job_obj.unduplicated_host_job_status_obj_list[int(host_job_status_obj_index)]
-        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window = tkinter.Toplevel(self.main_window.window_obj)  # 创建子窗口★
         pop_window.title("主机巡检详情")
         screen_width = self.main_window.window_obj.winfo_screenwidth()
         screen_height = self.main_window.window_obj.winfo_screenheight()
-        width = 640
-        height = 480
+        width = self.main_window.width - 20
+        height = self.main_window.height
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
         pop_window.protocol("WM_DELETE_WINDOW", lambda: self.on_closing_view_inspection_host_item(pop_window))
+        # 创建滚动条
+        scrollbar = tkinter.Scrollbar(pop_window)
+        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        canvas = tkinter.Canvas(pop_window, yscrollcommand=scrollbar.set, bg="#f0f0f0", width=width, height=height)
+        canvas.pack()
+        scrollbar.config(command=canvas.yview)
+        frame = tkinter.Frame(canvas)
+        frame.pack()
+        canvas.create_window((0, 0), window=frame, anchor='nw')
+        canvas.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-name
         host_obj = self.global_info.get_host_by_oid(host_job_status_obj.host_oid)
-        label_host_name = tkinter.Label(pop_window, text="主机名称")
+        label_host_name = tkinter.Label(frame, text="主机名称")
         label_host_name.grid(row=0, column=0, padx=self.padx, pady=self.pady)
-        entry_host_name = tkinter.Entry(pop_window)
+        entry_host_name = tkinter.Entry(frame)
         entry_host_name.insert(0, host_obj.name)  # 显示初始值，不可编辑★
         entry_host_name.grid(row=0, column=1, padx=self.padx, pady=self.pady)
         # Host-job_status
-        label_host_job_status = tkinter.Label(pop_window, text="作业状态")
+        label_host_job_status = tkinter.Label(frame, text="作业状态")
         label_host_job_status.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         status_name_list = ["unknown", "started", "completed", "part_completed", "failed"]
-        combobox_job_status = ttk.Combobox(pop_window, values=status_name_list, state="readonly")
+        combobox_job_status = ttk.Combobox(frame, values=status_name_list, state="readonly")
         combobox_job_status.current(host_job_status_obj.job_status)
         combobox_job_status.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # Host-find_credential_status
-        label_host_find_credential_status = tkinter.Label(pop_window, text="凭据验证情况")
+        label_host_find_credential_status = tkinter.Label(frame, text="凭据验证情况")
         label_host_find_credential_status.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         status_name_list = ["Succeed", "Timeout", "Failed"]
-        combobox_find_credential_status = ttk.Combobox(pop_window, values=status_name_list, state="readonly")
+        combobox_find_credential_status = ttk.Combobox(frame, values=status_name_list, state="readonly")
         combobox_find_credential_status.current(host_job_status_obj.find_credential_status)
         combobox_find_credential_status.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # Host-time_usage
-        label_host_time_usage = tkinter.Label(pop_window, text="执行时长(秒)")
+        label_host_time_usage = tkinter.Label(frame, text="执行时长(秒)")
         label_host_time_usage.grid(row=3, column=0, padx=self.padx, pady=self.pady)
-        entry_host_time_usage = tkinter.Entry(pop_window)
+        entry_host_time_usage = tkinter.Entry(frame)
         if host_job_status_obj.exec_timeout == COF_YES:
             time_usage = "执行超时"
         elif host_job_status_obj.find_credential_status != FIND_CREDENTIAL_STATUS_SUCCEED:
@@ -6191,24 +6278,39 @@ class StartInspectionTemplateInFrame:
         entry_host_time_usage.insert(0, time_usage)  # 显示初始值，不可编辑★
         entry_host_time_usage.grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # 显示巡检命令及输出结果
-        code_exec_log_text = tkinter.Text(master=pop_window)  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
+        index = 0
         for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
             # <SSHOperatorOutput>对象列表，一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
             code_exec_output_obj_list = self.global_info.load_inspection_job_log_for_host(self.current_inspection_job_obj.oid,
                                                                                           host_job_status_obj.host_oid,
                                                                                           inspection_code_block_oid)
             inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
-            code_exec_log_text.insert(tkinter.END, f"\n★★ {inspection_code_block_obj.name} 巡检命令详情 ★★\n")
+            label_inspection_code_block_name = tkinter.Label(frame, text=f"{inspection_code_block_obj.name} 巡检命令详情:")
+            label_inspection_code_block_name.grid(row=4 + index * 2, column=0, padx=self.padx, pady=self.pady)
+            code_exec_log_text = tkinter.Text(master=frame, height=20)  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
             for output_obj in code_exec_output_obj_list:
-                code_exec_log_text.insert(tkinter.END, output_obj.invoke_shell_output_str)
-                code_exec_log_text.insert(tkinter.END, output_obj.interactive_output_str_list)
-        # 显示info Text文本框
-        code_exec_log_text.grid(row=4, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+                code_exec_log_text.insert(tkinter.END, output_obj.invoke_shell_output_bytes.decode("utf8"))
+                for interactive_output in output_obj.interactive_output_bytes_list:
+                    code_exec_log_text.insert(tkinter.END, interactive_output.decode("utf8"))
+            # 显示info Text文本框
+            code_exec_log_text.grid(row=4 + index * 2 + 1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+            index += 1
         # 添加按钮
-        ok_button = tkinter.Button(pop_window, text="xxx")
-        ok_button.grid(row=7, column=0, padx=self.padx, pady=self.pady)
-        cancel_button = tkinter.Button(pop_window, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
-        cancel_button.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        ok_button = tkinter.Button(frame, text="xxx")
+        ok_button.grid(row=4 + index * 2, column=0, padx=self.padx, pady=self.pady)
+        cancel_button = tkinter.Button(frame, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
+        cancel_button.grid(row=4 + index * 2, column=1, padx=self.padx, pady=self.pady)
+        # 更新Frame的尺寸
+        frame.update_idletasks()
+        canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
+        canvas.yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+
+    @staticmethod
+    def proces_mouse_scroll_on_pop_window(event, canvas):
+        if event.delta > 0:
+            canvas.yview_scroll(-1, 'units')  # 向上移动
+        else:
+            canvas.yview_scroll(1, 'units')  # 向下移
 
     def exit_view_inspection_host_item(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
@@ -6444,7 +6546,7 @@ class ViewInspectionJobInFrame:
         host_job_status_obj_index, _, _, _ = inspection_host_treeview.item(item_index, "values")
         # 获取选中的命令对象
         host_job_status_obj = self.inspection_job_record_obj.unduplicated_host_job_status_obj_list[int(host_job_status_obj_index)]
-        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window = tkinter.Toplevel(self.main_window.window_obj)  # 创建子窗口★
         pop_window.title("主机巡检详情")
         screen_width = self.main_window.window_obj.winfo_screenwidth()
         screen_height = self.main_window.window_obj.winfo_screenheight()
@@ -6456,31 +6558,41 @@ class ViewInspectionJobInFrame:
         pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
         pop_window.protocol("WM_DELETE_WINDOW", lambda: self.on_closing_view_inspection_host_item(pop_window))
+        # 创建滚动条
+        scrollbar = tkinter.Scrollbar(pop_window)
+        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        canvas = tkinter.Canvas(pop_window, yscrollcommand=scrollbar.set, bg="#f0f0f0", width=width, height=height)
+        canvas.pack()
+        scrollbar.config(command=canvas.yview)
+        frame = tkinter.Frame(canvas)
+        frame.pack()
+        canvas.create_window((0, 0), window=frame, anchor='nw')
+        canvas.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-name
         host_obj = self.global_info.get_host_by_oid(host_job_status_obj.host_oid)
-        label_host_name = tkinter.Label(pop_window, text="主机名称")
+        label_host_name = tkinter.Label(frame, text="主机名称")
         label_host_name.grid(row=0, column=0, padx=self.padx, pady=self.pady)
-        entry_host_name = tkinter.Entry(pop_window)
+        entry_host_name = tkinter.Entry(frame)
         entry_host_name.insert(0, host_obj.name)  # 显示初始值，不可编辑★
         entry_host_name.grid(row=0, column=1, padx=self.padx, pady=self.pady)
         # Host-job_status
-        label_host_job_status = tkinter.Label(pop_window, text="作业状态")
+        label_host_job_status = tkinter.Label(frame, text="作业状态")
         label_host_job_status.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         status_name_list = ["unknown", "started", "completed", "part_completed", "failed"]
-        combobox_job_status = ttk.Combobox(pop_window, values=status_name_list, state="readonly")
+        combobox_job_status = ttk.Combobox(frame, values=status_name_list, state="readonly")
         combobox_job_status.current(host_job_status_obj.job_status)
         combobox_job_status.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # Host-find_credential_status
-        label_host_find_credential_status = tkinter.Label(pop_window, text="凭据验证情况")
+        label_host_find_credential_status = tkinter.Label(frame, text="凭据验证情况")
         label_host_find_credential_status.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         status_name_list = ["Succeed", "Timeout", "Failed"]
-        combobox_find_credential_status = ttk.Combobox(pop_window, values=status_name_list, state="readonly")
+        combobox_find_credential_status = ttk.Combobox(frame, values=status_name_list, state="readonly")
         combobox_find_credential_status.current(host_job_status_obj.find_credential_status)
         combobox_find_credential_status.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # Host-time_usage
-        label_host_time_usage = tkinter.Label(pop_window, text="执行时长(秒)")
+        label_host_time_usage = tkinter.Label(frame, text="执行时长(秒)")
         label_host_time_usage.grid(row=3, column=0, padx=self.padx, pady=self.pady)
-        entry_host_time_usage = tkinter.Entry(pop_window)
+        entry_host_time_usage = tkinter.Entry(frame)
         if host_job_status_obj.exec_timeout == COF_YES:
             time_usage = "执行超时"
         elif host_job_status_obj.find_credential_status != FIND_CREDENTIAL_STATUS_SUCCEED:
@@ -6490,24 +6602,39 @@ class ViewInspectionJobInFrame:
         entry_host_time_usage.insert(0, time_usage)  # 显示初始值，不可编辑★
         entry_host_time_usage.grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # 显示巡检命令及输出结果
-        code_exec_log_text = tkinter.Text(master=pop_window)  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
+        index = 0
         for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
             # <SSHOperatorOutput>对象列表，一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
             code_exec_output_obj_list = self.global_info.load_inspection_job_log_for_host(self.inspection_job_record_obj.oid,
                                                                                           host_job_status_obj.host_oid,
                                                                                           inspection_code_block_oid)
             inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
-            code_exec_log_text.insert(tkinter.END, f"\n★★ {inspection_code_block_obj.name} 巡检命令详情 ★★\n")
+            label_inspection_code_block_name = tkinter.Label(frame, text=f"{inspection_code_block_obj.name} 巡检命令详情:")
+            label_inspection_code_block_name.grid(row=4 + index * 2, column=0, padx=self.padx, pady=self.pady)
+            code_exec_log_text = tkinter.Text(master=frame, height=20)  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
             for output_obj in code_exec_output_obj_list:
-                code_exec_log_text.insert(tkinter.END, output_obj.invoke_shell_output_str)
-                code_exec_log_text.insert(tkinter.END, output_obj.interactive_output_str_list)
-        # 显示info Text文本框
-        code_exec_log_text.grid(row=4, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+                code_exec_log_text.insert(tkinter.END, output_obj.invoke_shell_output_bytes.decode("utf8"))
+                for interactive_output in output_obj.interactive_output_bytes_list:
+                    code_exec_log_text.insert(tkinter.END, interactive_output.decode("utf8"))
+            # 显示info Text文本框
+            code_exec_log_text.grid(row=4 + index * 2 + 1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+            index += 1
         # 添加按钮
-        ok_button = tkinter.Button(pop_window, text="xxx")
-        ok_button.grid(row=5, column=0, padx=self.padx, pady=self.pady)
-        cancel_button = tkinter.Button(pop_window, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
-        cancel_button.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        ok_button = tkinter.Button(frame, text="xxx")
+        ok_button.grid(row=4 + index * 2, column=0, padx=self.padx, pady=self.pady)
+        cancel_button = tkinter.Button(frame, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
+        cancel_button.grid(row=4 + index * 2, column=1, padx=self.padx, pady=self.pady)
+        # 更新Frame的尺寸
+        frame.update_idletasks()
+        canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
+        canvas.yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+
+    @staticmethod
+    def proces_mouse_scroll_on_pop_window(event, canvas):
+        if event.delta > 0:
+            canvas.yview_scroll(-1, 'units')  # 向上移动
+        else:
+            canvas.yview_scroll(1, 'units')  # 向下移
 
     def exit_view_inspection_host_item(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
