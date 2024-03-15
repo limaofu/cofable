@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-14
+# update: 2024-03-15
 
 """
 解决问题：
@@ -18,23 +18,23 @@
 ★. 巡检作业执行完成情况的统计，执行完成，连接超时，认证失败                               2024年1月28日 基本完成
 ★. 程序运行后，所有类的对象都要分别加载到一个全局列表里                                  已完成
 ★. 巡检命令输出保存到数据库                                                         2024年1月27日 基本完成
-★. 定时/周期触发巡检模板作业
+★. 定时/周期触发巡检模板作业                                                        2024年3月14日 定时的已完成
 ★. 本次作业命令输出与最近一次（上一次）输出做对比
 ★. 巡检命令输出做基础信息提取与判断并触发告警，告警如何通知人类用户？
 ★. Credential密钥保存时，会有换行符，sql语句不支持，需要修改，已将密钥字符串转为base64      2024年2月25日 完成
 ★. 主机 允许添加若干条ip，含ip地址范围
 ★. 巡检命令中有sleep N 之类的命令时，要判断是否完成，根据shell提示符进行判断
-★. 遗留：编辑或创建巡检代码时，要求能设置每条命令的 交互回复
+★. 编辑或创建巡检代码时，要求能设置每条命令的 交互回复及其他细节                           已完成
 ★. 没有创建项目时，就创建其他资源，要生成默认的项目，名为default的项目                     2024年3月7日 完成
 ★. shell通道设置字符界面宽度及长度                                                  2024年3月8日 完成
-★. 输出巡检实时状态，及进度条展示
-★. 更新资源名称时，要检查新名称是否和已存在的同类资源名称重复
+★. 输出巡检实时状态，及进度展示                                                      2024年3月15日 完成
+★. 更新资源名称时，要检查新名称是否和已存在的同类资源名称重复                              2024年3月15日 完成
 ★. 巡检前进行ping检测及tcp端口连通检测
 ★. 查看历史巡检作业日志时，如果巡检模板已更改，则显示的是更改后对应的输出，而不是更改前的，这个需要改进，
     对历史巡检模板做一个快照，展示历史作业日志时按旧的资源来显示
 ★. 支持工作流，一个工作流包含多个巡检模板，依次进行，可进行分支判断
-★. 在host_job_item的text界面看巡检输出信息，不全，有很多缺失，
-    原因是显示是未遍历SSHOperatorOutput.interactive_output_bytes_list              2024年3月14日 已解决
+★. 在host_job_item的text界面看巡检输出信息，不全，有很多缺失，                          2024年3月14日 已解决
+    原因是显示是未遍历SSHOperatorOutput.interactive_output_bytes_list
 
 资源操作逻辑：
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -1155,13 +1155,19 @@ class HostJobStatus:
     """
 
     def __init__(self, host_oid='', job_status=INSPECTION_JOB_EXEC_STATE_UNKNOWN, start_time=0.0, end_time=0.0,
-                 find_credential_status=INSPECTION_JOB_EXEC_STATE_UNKNOWN, exec_timeout=COF_NO):
+                 find_credential_status=INSPECTION_JOB_EXEC_STATE_UNKNOWN, exec_timeout=COF_NO, sum_of_code_block=0,
+                 current_exec_code_block=0, sum_of_code_lines=0, current_exec_code_num=0):
         self.host_oid = host_oid  # <str>
         self.job_status = job_status  # <int> INSPECTION_JOB_EXEC_STATE_UNKNOWN
         self.find_credential_status = find_credential_status  # <int>
         self.exec_timeout = exec_timeout  # <int>
         self.start_time = start_time  # <float>
         self.end_time = end_time  # <float>
+        self.sum_of_code_block = sum_of_code_block  # <int> 所有巡检代码段的数量<InspectionCodeBlock>的数量
+        self.current_exec_code_block = current_exec_code_block  # <int> 当前执行的巡检代码段序号，从0开始编号
+        self.sum_of_code_lines = sum_of_code_lines  # <int> 所有巡检代码段的代码总行数<OneLineCode>的数量
+        self.current_exec_code_num = current_exec_code_num  # <int>当前执行了的总代码行数，从1开始
+        # current_exec_code_num/sum_of_code_lines 为 执行总进度
 
 
 class LaunchInspectionJob:
@@ -1226,8 +1232,18 @@ class LaunchInspectionJob:
             self.unduplicated_host_job_status_obj_list.append(host_job_status_obj)
 
     def create_ssh_operator_invoke_shell(self, host_obj, host_job_status_obj, cred):
-        for inspection_code_block_oid in self.inspection_template.inspection_code_block_oid_list:  # 注意：巡检代码块不去重
+        # 先统计巡检代码块及巡检命令总数
+        host_job_status_obj.sum_of_code_block = len(self.inspection_template.inspection_code_block_oid_list)
+        inspection_code_block_obj_list = []
+        host_job_status_obj.sum_of_code_lines = 0
+        for inspection_code_block_oid in self.inspection_template.inspection_code_block_oid_list:
             inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
+            host_job_status_obj.sum_of_code_lines += len(inspection_code_block_obj.code_list)
+            inspection_code_block_obj_list.append(inspection_code_block_obj)
+        # 巡检代码块不去重，依次执行，串行执行
+        inspection_code_block_index = 0
+        for inspection_code_block_obj in inspection_code_block_obj_list:
+            host_job_status_obj.current_exec_code_block = inspection_code_block_index
             if cred.cred_type == CRED_TYPE_SSH_PASS:
                 auth_method = AUTH_METHOD_SSH_PASS
             else:
@@ -1235,7 +1251,8 @@ class LaunchInspectionJob:
             # 一个<SSHOperator>对象操作一个<InspectionCodeBlock>巡检代码块的所有命令
             ssh_operator = SSHOperator(hostname=host_obj.address, port=host_obj.ssh_port, username=cred.username,
                                        password=cred.password, private_key=cred.private_key, auth_method=auth_method,
-                                       command_list=inspection_code_block_obj.code_list, timeout=LOGIN_AUTH_TIMEOUT)
+                                       command_list=inspection_code_block_obj.code_list, timeout=LOGIN_AUTH_TIMEOUT,
+                                       host_job_status_obj=host_job_status_obj)
             try:
                 job_thread = threading.Thread(target=ssh_operator.run_invoke_shell)  # 执行巡检命令，输出信息保存在 SSHOperator.output_list里
                 job_thread.start()  # 线程start后，不要join()，主程序才不会卡住
@@ -1268,6 +1285,7 @@ class LaunchInspectionJob:
                                                           self.inspection_template.output_file_name_style)
                 # 输出信息保存到sqlite数据库★★★★★
                 self.save_ssh_operator_invoke_shell_output_to_sqlite(ssh_operator.output_list, host_obj, inspection_code_block_obj)
+            inspection_code_block_index += 1
         if host_job_status_obj.exec_timeout == COF_NO and host_job_status_obj.find_credential_status == FIND_CREDENTIAL_STATUS_SUCCEED:
             host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_COMPLETED  # 全部完成，没有超时的，没有验证失败的
         print("LaunchInspectionJob.create_ssh_operator_invoke_shell: 目标主机",
@@ -1678,7 +1696,12 @@ class InspectionJobRecord:
                         "find_credential_status int,",
                         "exec_timeout int,",
                         "start_time double,",
-                        "end_time double );"]
+                        "end_time double,",
+                        "sum_of_code_block int,",
+                        "current_exec_code_block int,",
+                        "sum_of_code_lines int,",
+                        "current_exec_code_num int",
+                        " );"]
             sqlite_cursor.execute(" ".join(sql_list))
         # 开始插入数据
         sql = f"delete from tb_inspection_job_record_host_job_status_obj_list where host_oid='{self.oid}'"
@@ -1690,14 +1713,24 @@ class InspectionJobRecord:
                         "find_credential_status,",
                         "exec_timeout,",
                         "start_time,",
-                        "end_time ) values ",
+                        "end_time,",
+                        "sum_of_code_block,",
+                        "current_exec_code_block,",
+                        "sum_of_code_lines,",
+                        "current_exec_code_num",
+                        " ) values ",
                         f"('{self.oid}',",
                         f"'{host_job_status_obj.host_oid}',",
                         f"{host_job_status_obj.job_status},",
                         f"{host_job_status_obj.find_credential_status},",
                         f"{host_job_status_obj.exec_timeout},",
                         f"{host_job_status_obj.start_time},",
-                        f"{host_job_status_obj.end_time} )"]
+                        f"{host_job_status_obj.end_time},",
+                        f"{host_job_status_obj.sum_of_code_block},",
+                        f"{host_job_status_obj.current_exec_code_block},",
+                        f"{host_job_status_obj.sum_of_code_lines},",
+                        f"{host_job_status_obj.current_exec_code_num}",
+                        ")"]
             sqlite_cursor.execute(" ".join(sql_list))
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -1763,7 +1796,7 @@ class SSHOperator:
     """
 
     def __init__(self, hostname='', username='', password='', private_key='', port=22,
-                 timeout=30, auth_method=AUTH_METHOD_SSH_PASS, command_list=None):
+                 timeout=30, auth_method=AUTH_METHOD_SSH_PASS, command_list=None, host_job_status_obj=None):
         self.oid = uuid.uuid4().__str__()  # <str>
         self.hostname = hostname
         self.username = username
@@ -1775,6 +1808,7 @@ class SSHOperator:
         self.command_list = command_list  # ★★元素为 <OneLineCode> 对象★★
         self.is_finished = False  # False表示命令未执行完成
         self.output_list = []  # 元素类型为 <SSHOperatorOutput>，一条执行命令<OneLineCode>只产生一个output对象
+        self.host_job_status_obj = host_job_status_obj  # <HostJobStatus>
 
     def run_invoke_shell(self):
         """
@@ -1846,6 +1880,7 @@ class SSHOperator:
             print(f"SSHOperator.run_invoke_shell : 命令输出最后一行（可能是shell提示符，无换行符）为:  {output_last_line.encode('utf8')}")
             if one_line_code.need_interactive:  # 命令如果需要处理交互情况，则判断交互提问关键词
                 self.process_code_interactive(one_line_code, output_last_line, ssh_shell, output_cmd)
+            self.host_job_status_obj.current_exec_code_num += 1
             cmd_index += 1
         ssh_shell.close()
         ssh_client.close()
@@ -2445,7 +2480,11 @@ class GlobalInfo:
                                     find_credential_status=int(obj_info_tuple[3]),
                                     exec_timeout=int(obj_info_tuple[4]),
                                     start_time=float(obj_info_tuple[5]),
-                                    end_time=float(obj_info_tuple[6]))
+                                    end_time=float(obj_info_tuple[6]),
+                                    sum_of_code_block=int(obj_info_tuple[7]),
+                                    current_exec_code_block=int(obj_info_tuple[8]),
+                                    sum_of_code_lines=int(obj_info_tuple[9]),
+                                    current_exec_code_num=int(obj_info_tuple[9]))
                 job_record_obj.unduplicated_host_job_status_obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -2526,8 +2565,24 @@ class GlobalInfo:
                 return True
         return False
 
+    def is_project_name_existed_except_self(self, project_name, except_obj):  # 判断名称是否已存在obj_list里
+        for project in self.project_obj_list:
+            if project == except_obj:
+                continue
+            if project_name == project.name:
+                return True
+        return False
+
     def is_credential_name_existed(self, credential_name):  # 判断名称是否已存在obj_list里
         for credential in self.credential_obj_list:
+            if credential_name == credential.name:
+                return True
+        return False
+
+    def is_credential_name_existed_except_self(self, credential_name, except_obj):  # 判断名称是否已存在obj_list里
+        for credential in self.credential_obj_list:
+            if credential == except_obj:
+                continue
             if credential_name == credential.name:
                 return True
         return False
@@ -2538,8 +2593,24 @@ class GlobalInfo:
                 return True
         return False
 
+    def is_host_name_existed_except_self(self, host_name, except_obj):  # 判断名称是否已存在obj_list里
+        for host in self.host_obj_list:
+            if host == except_obj:
+                continue
+            if host_name == host.name:
+                return True
+        return False
+
     def is_host_group_name_existed(self, host_group_name):  # 判断名称是否已存在obj_list里
         for host_group in self.host_group_obj_list:
+            if host_group_name == host_group.name:
+                return True
+        return False
+
+    def is_host_group_name_existed_except_self(self, host_group_name, except_obj):  # 判断名称是否已存在obj_list里
+        for host_group in self.host_group_obj_list:
+            if host_group == except_obj:
+                continue
             if host_group_name == host_group.name:
                 return True
         return False
@@ -2550,9 +2621,25 @@ class GlobalInfo:
                 return True
         return False
 
+    def is_inspection_code_block_name_existed_except_self(self, inspection_code_block_name, except_obj):  # 判断名称是否已存在obj_list里
+        for inspection_code_block in self.inspection_code_block_obj_list:
+            if inspection_code_block == except_obj:
+                continue
+            if inspection_code_block_name == inspection_code_block.name:
+                return True
+        return False
+
     def is_inspection_template_name_existed(self, inspect_template_name):  # 判断名称是否已存在obj_list里
         for inspection_template in self.inspection_template_obj_list:
             if inspect_template_name == inspection_template.name:
+                return True
+        return False
+
+    def is_inspection_template_name_existed_except_self(self, inspection_template_name, except_obj):  # 判断名称是否已存在obj_list里
+        for inspection_template in self.inspection_template_obj_list:
+            if inspection_template == except_obj:
+                continue
+            if inspection_template_name == inspection_template.name:
                 return True
         return False
 
@@ -5449,11 +5536,13 @@ class UpdateResourceInFrame:
         print(project_name, project_description)
         # 更新-project
         if project_name == '':
-            messagebox.showinfo("创建项目-Error", f"项目名称不能为空")
+            messagebox.showinfo("更新项目-Error", f"项目名称不能为空")
         elif len(project_name) > 128:
-            messagebox.showinfo("创建项目-Error", f"项目名称>128字符")
+            messagebox.showinfo("更新项目-Error", f"项目名称>128字符")
         elif len(project_description) > 256:
-            messagebox.showinfo("创建项目-Error", f"项目描述>256字符")
+            messagebox.showinfo("更新项目-Error", f"项目描述>256字符")
+        elif self.global_info.is_project_name_existed_except_self(project_name, self.resource_obj):
+            messagebox.showinfo("更新项目-Error", f"项目名称已存在")
         else:
             self.resource_obj.update(name=project_name, description=project_description, global_info=self.global_info)
             self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_PROJECT)  # 更新项目信息后，返回项目展示页面
@@ -5490,11 +5579,13 @@ class UpdateResourceInFrame:
             credential_ssl_verify = self.resource_info_dict["combobox_ssl_verify"].current()
         # 更新-credential
         if credential_name == '':
-            messagebox.showinfo("创建凭据-Error", f"凭据名称不能为空")
+            messagebox.showinfo("更新凭据-Error", f"凭据名称不能为空")
         elif len(credential_name) > 128:
-            messagebox.showinfo("创建凭据-Error", f"凭据名称>128字符")
+            messagebox.showinfo("更新凭据-Error", f"凭据名称>128字符")
         elif len(credential_description) > 256:
-            messagebox.showinfo("创建凭据-Error", f"凭据描述>256字符")
+            messagebox.showinfo("更新凭据-Error", f"凭据描述>256字符")
+        elif self.global_info.is_credential_name_existed_except_self(credential_name, self.resource_obj):
+            messagebox.showinfo("更新凭据-Error", f"凭据名称已存在")
         else:
             self.resource_obj.update(name=credential_name, description=credential_description, project_oid=project_oid,
                                      cred_type=credential_cred_type,
@@ -5545,11 +5636,13 @@ class UpdateResourceInFrame:
             self.resource_obj.add_credential(self.global_info.credential_obj_list[selected_credential_index])
         # 更新-host-对象本身
         if host_name == '':
-            messagebox.showinfo("编辑主机-Error", f"主机名称不能为空")
+            messagebox.showinfo("更新主机-Error", f"主机名称不能为空")
         elif len(host_name) > 128:
-            messagebox.showinfo("编辑主机-Error", f"主机名称>128字符")
+            messagebox.showinfo("更新主机-Error", f"主机名称>128字符")
         elif len(host_description) > 256:
-            messagebox.showinfo("编辑主机-Error", f"主机描述>256字符")
+            messagebox.showinfo("更新主机-Error", f"主机描述>256字符")
+        elif self.global_info.is_host_name_existed_except_self(host_name, self.resource_obj):
+            messagebox.showinfo("更新主机-Error", f"主机名称已存在")
         else:
             self.resource_obj.update(name=host_name, description=host_description, project_oid=project_oid,
                                      address=host_address,
@@ -5578,11 +5671,13 @@ class UpdateResourceInFrame:
             self.resource_obj.add_host(self.global_info.host_obj_list[selected_host_index])
         # 更新-host_group-对象本身
         if host_group_name == '':
-            messagebox.showinfo("编辑主机组-Error", f"主机组名称不能为空")
+            messagebox.showinfo("更新主机组-Error", f"主机组名称不能为空")
         elif len(host_group_name) > 128:
-            messagebox.showinfo("编辑主机组-Error", f"主机组名称>128字符")
+            messagebox.showinfo("更新主机组-Error", f"主机组名称>128字符")
         elif len(host_group_description) > 256:
-            messagebox.showinfo("编辑主机组-Error", f"主机组描述>256字符")
+            messagebox.showinfo("更新主机组-Error", f"主机组描述>256字符")
+        elif self.global_info.is_host_group_name_existed_except_self(host_group_name, self.resource_obj):
+            messagebox.showinfo("更新主机组-Error", f"主机组名称已存在")
         else:
             self.resource_obj.update(name=host_group_name, description=host_group_description, project_oid=project_oid,
                                      global_info=self.global_info)
@@ -5600,11 +5695,13 @@ class UpdateResourceInFrame:
         # 这里不用更新inspection_code_block的 code_list，已在编辑窗口那里完成了
         # 更新-inspection_code_block-对象本身
         if inspection_code_block_name == '':
-            messagebox.showinfo("编辑巡检代码块-Error", f"巡检代码块名称不能为空")
+            messagebox.showinfo("更新巡检代码块-Error", f"巡检代码块名称不能为空")
         elif len(inspection_code_block_name) > 128:
-            messagebox.showinfo("编辑巡检代码块-Error", f"巡检代码块名称>128字符")
+            messagebox.showinfo("更新巡检代码块-Error", f"巡检代码块名称>128字符")
         elif len(inspection_code_block_description) > 256:
-            messagebox.showinfo("编辑巡检代码块-Error", f"巡检代码块名称>256字符")
+            messagebox.showinfo("更新巡检代码块-Error", f"巡检代码块名称>256字符")
+        elif self.global_info.is_inspection_code_block_name_existed_except_self(inspection_code_block_name, self.resource_obj):
+            messagebox.showinfo("更新巡检代码块-Error", f"巡检代码块名称已存在")
         else:
             self.resource_obj.update(name=inspection_code_block_name, description=inspection_code_block_description,
                                      project_oid=project_oid,
@@ -5659,11 +5756,13 @@ class UpdateResourceInFrame:
             self.resource_obj.add_inspection_code_block(self.global_info.inspection_code_block_obj_list[selected_code_block_index])
         # 更新-inspection_template-对象本身
         if inspection_template_name == '':
-            messagebox.showinfo("编辑巡检模板-Error", f"巡检模板名称不能为空")
+            messagebox.showinfo("更新巡检模板-Error", f"巡检模板名称不能为空")
         elif len(inspection_template_name) > 128:
-            messagebox.showinfo("编辑巡检模板-Error", f"巡检模板名称>128字符")
+            messagebox.showinfo("更新巡检模板-Error", f"巡检模板名称>128字符")
         elif len(inspection_template_description) > 256:
-            messagebox.showinfo("编辑巡检模板-Error", f"巡检模板描述>256字符")
+            messagebox.showinfo("更新巡检模板-Error", f"巡检模板描述>256字符")
+        elif self.global_info.is_inspection_template_name_existed_except_self(inspection_template_name, self.resource_obj):
+            messagebox.showinfo("更新巡检模板-Error", f"巡检模板名称已存在")
         else:
             self.resource_obj.update(name=inspection_template_name, description=inspection_template_description,
                                      project_oid=project_oid, execution_method=inspection_template_execution_method,
@@ -6277,6 +6376,28 @@ class StartInspectionTemplateInFrame:
             time_usage = str(host_job_status_obj.end_time - host_job_status_obj.start_time)
         entry_host_time_usage.insert(0, time_usage)  # 显示初始值，不可编辑★
         entry_host_time_usage.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # Host-sum_of_code_block
+        label_sum_of_code_block = tkinter.Label(frame, text="巡检代码段数量")
+        label_sum_of_code_block.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        entry_sum_of_code_block = tkinter.Entry(frame)
+        entry_sum_of_code_block.insert(0, host_job_status_obj.sum_of_code_block)  # 显示初始值，不可编辑★
+        entry_sum_of_code_block.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # Host-sum_of_code_lines
+        label_sum_of_code_lines = tkinter.Label(frame, text="巡检命令总行数")
+        label_sum_of_code_lines.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        entry_sum_of_code_lines = tkinter.Entry(frame)
+        entry_sum_of_code_lines.insert(0, host_job_status_obj.sum_of_code_lines)  # 显示初始值，不可编辑★
+        entry_sum_of_code_lines.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        # Host-rate_or_progress
+        label_rate_or_progress = tkinter.Label(frame, text="巡检命令执行进度")
+        label_rate_or_progress.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        entry_rate_or_progress = tkinter.Entry(frame)
+        if host_job_status_obj.sum_of_code_lines <= 0:
+            rate_or_progress = 0.0
+        else:
+            rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
+        entry_rate_or_progress.insert(0, "{:.2%}".format(rate_or_progress))
+        entry_rate_or_progress.grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # 显示巡检命令及输出结果
         index = 0
         for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
@@ -6286,20 +6407,20 @@ class StartInspectionTemplateInFrame:
                                                                                           inspection_code_block_oid)
             inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
             label_inspection_code_block_name = tkinter.Label(frame, text=f"{inspection_code_block_obj.name} 巡检命令详情:")
-            label_inspection_code_block_name.grid(row=4 + index * 2, column=0, padx=self.padx, pady=self.pady)
+            label_inspection_code_block_name.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
             code_exec_log_text = tkinter.Text(master=frame, height=20)  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
             for output_obj in code_exec_output_obj_list:
                 code_exec_log_text.insert(tkinter.END, output_obj.invoke_shell_output_bytes.decode("utf8"))
                 for interactive_output in output_obj.interactive_output_bytes_list:
                     code_exec_log_text.insert(tkinter.END, interactive_output.decode("utf8"))
             # 显示info Text文本框
-            code_exec_log_text.grid(row=4 + index * 2 + 1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+            code_exec_log_text.grid(row=7 + index * 2 + 1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
             index += 1
         # 添加按钮
         ok_button = tkinter.Button(frame, text="xxx")
-        ok_button.grid(row=4 + index * 2, column=0, padx=self.padx, pady=self.pady)
+        ok_button.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
         cancel_button = tkinter.Button(frame, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
-        cancel_button.grid(row=4 + index * 2, column=1, padx=self.padx, pady=self.pady)
+        cancel_button.grid(row=7 + index * 2, column=1, padx=self.padx, pady=self.pady)
         # 更新Frame的尺寸
         frame.update_idletasks()
         canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
@@ -6601,6 +6722,28 @@ class ViewInspectionJobInFrame:
             time_usage = str(host_job_status_obj.end_time - host_job_status_obj.start_time)
         entry_host_time_usage.insert(0, time_usage)  # 显示初始值，不可编辑★
         entry_host_time_usage.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # Host-sum_of_code_block
+        label_sum_of_code_block = tkinter.Label(frame, text="巡检代码段数量")
+        label_sum_of_code_block.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        entry_sum_of_code_block = tkinter.Entry(frame)
+        entry_sum_of_code_block.insert(0, host_job_status_obj.sum_of_code_block)  # 显示初始值，不可编辑★
+        entry_sum_of_code_block.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        # Host-sum_of_code_lines
+        label_sum_of_code_lines = tkinter.Label(frame, text="巡检命令总行数")
+        label_sum_of_code_lines.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        entry_sum_of_code_lines = tkinter.Entry(frame)
+        entry_sum_of_code_lines.insert(0, host_job_status_obj.sum_of_code_lines)  # 显示初始值，不可编辑★
+        entry_sum_of_code_lines.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        # Host-rate_or_progress
+        label_rate_or_progress = tkinter.Label(frame, text="巡检命令执行进度")
+        label_rate_or_progress.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        entry_rate_or_progress = tkinter.Entry(frame)
+        if host_job_status_obj.sum_of_code_lines <= 0:
+            rate_or_progress = 0.0
+        else:
+            rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
+        entry_rate_or_progress.insert(0, "{:.2%}".format(rate_or_progress))
+        entry_rate_or_progress.grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # 显示巡检命令及输出结果
         index = 0
         for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
@@ -6610,20 +6753,20 @@ class ViewInspectionJobInFrame:
                                                                                           inspection_code_block_oid)
             inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
             label_inspection_code_block_name = tkinter.Label(frame, text=f"{inspection_code_block_obj.name} 巡检命令详情:")
-            label_inspection_code_block_name.grid(row=4 + index * 2, column=0, padx=self.padx, pady=self.pady)
+            label_inspection_code_block_name.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
             code_exec_log_text = tkinter.Text(master=frame, height=20)  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
             for output_obj in code_exec_output_obj_list:
                 code_exec_log_text.insert(tkinter.END, output_obj.invoke_shell_output_bytes.decode("utf8"))
                 for interactive_output in output_obj.interactive_output_bytes_list:
                     code_exec_log_text.insert(tkinter.END, interactive_output.decode("utf8"))
             # 显示info Text文本框
-            code_exec_log_text.grid(row=4 + index * 2 + 1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+            code_exec_log_text.grid(row=7 + index * 2 + 1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
             index += 1
         # 添加按钮
         ok_button = tkinter.Button(frame, text="xxx")
-        ok_button.grid(row=4 + index * 2, column=0, padx=self.padx, pady=self.pady)
+        ok_button.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
         cancel_button = tkinter.Button(frame, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
-        cancel_button.grid(row=4 + index * 2, column=1, padx=self.padx, pady=self.pady)
+        cancel_button.grid(row=7 + index * 2, column=1, padx=self.padx, pady=self.pady)
         # 更新Frame的尺寸
         frame.update_idletasks()
         canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
