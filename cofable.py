@@ -98,7 +98,7 @@ EXECUTION_METHOD_NONE = 0
 EXECUTION_METHOD_AT = 1
 EXECUTION_METHOD_CROND = 2
 EXECUTION_METHOD_AFTER = 3
-CODE_POST_WAIT_TIME_DEFAULT = 0.05  # 命令发送后等待的时间，秒，这里不能为0
+CODE_POST_WAIT_TIME_DEFAULT = 0.2  # 命令发送后等待的时间，秒，这里不能为0
 MAX_INTERACTIVE_COUNT = 5000  # 最大交互处理次数，在 SSHOperator.process_code_interactive()里使用
 MAX_EXEC_WAIT_COUNT = 10000  # 判断巡检线程超时最大等待次数，此参数乘以CODE_POST_WAIT_TIME_DEFAULT为等待超时时间
 LOGIN_AUTH_TIMEOUT = 30  # 登录等待超时，秒
@@ -1403,13 +1403,13 @@ class LaunchInspectionJob:
         else:
             file_name = host.name + '.log'
         # 一台主机的所有巡检命令输出信息都保存在一个文件里
-        with open(file_name, 'a', encoding='utf8') as file_obj:
+        with open(file_name, 'a', encoding='utf8') as file_obj:  # 追加，不存在则新建
             for ssh_operator_output_obj in ssh_operator_output_obj_list:
                 if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_INVOKE_SHELL:
-                    file_obj.write(ssh_operator_output_obj.invoke_shell_output_bytes.decode("utf8"))
+                    file_obj.write('\n'.join(ssh_operator_output_obj.invoke_shell_output_bytes.decode("utf8").split('\r\n')))
                     if len(ssh_operator_output_obj.interactive_output_bytes_list) != 0:
                         for interactive_output_bytes in ssh_operator_output_obj.interactive_output_bytes_list:
-                            file_obj.write(interactive_output_bytes.decode("utf8"))
+                            file_obj.write('\n'.join(interactive_output_bytes.decode("utf8").split('\r\n')))
                 if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_EXEC_COMMAND:
                     for exec_command_stderr_line in ssh_operator_output_obj.exec_command_stderr_line_list:
                         file_obj.write(exec_command_stderr_line)
@@ -6067,7 +6067,10 @@ class SaveResourceInMainWindow:
             inspection_template_execution_method = self.resource_info_dict["combobox_execution_method"].current()
         # ★execution_at_time
         execution_at_time_str = self.resource_info_dict["sv_execution_at_time"].get()  # "2024-03-14 09:56:48"
-        execution_at_time = time.mktime(time.strptime(execution_at_time_str, "%Y-%m-%d %H:%M:%S"))
+        if execution_at_time_str == "":
+            execution_at_time = 0.0
+        else:
+            execution_at_time = time.mktime(time.strptime(execution_at_time_str, "%Y-%m-%d %H:%M:%S"))
         # ★update_code_on_launch
         if self.resource_info_dict["combobox_update_code_on_launch"].current() == -1:
             inspection_template_update_code_on_launch = 0
@@ -6433,7 +6436,7 @@ class StartInspectionTemplateInFrame:
         else:
             print(file_path)
             # 保存巡检命令及输出结果
-            with open(file_path.name, "a+", encoding="utf8") as fileobj:
+            with open(file_path.name, "a", encoding="utf8") as fileobj:  # 追加，不存在则新建
                 for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
                     # <SSHOperatorOutput>对象列表，一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
                     code_exec_output_obj_list = self.global_info.load_inspection_job_log_for_host(self.current_inspection_job_obj.oid,
@@ -6803,7 +6806,7 @@ class ViewInspectionJobInFrame:
         else:
             print(file_path)
             # 保存巡检命令及输出结果
-            with open(file_path.name, "a+", encoding="utf8") as fileobj:
+            with open(file_path.name, "a", encoding="utf8") as fileobj:  # 追加，不存在则新建
                 for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
                     # <SSHOperatorOutput>对象列表，一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
                     code_exec_output_obj_list = self.global_info.load_inspection_job_log_for_host(self.inspection_job_record_obj.oid,
