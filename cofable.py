@@ -2541,20 +2541,18 @@ class GlobalInfo:
         if len(result) == 0:
             return []
         # 读取数据
-        index = 0
         for output_obj in ssh_operator_output_obj_list:
             output_obj.interactive_output_bytes_list = []
             sql_list = ['select * from tb_inspection_job_invoke_shell_interactive_output where',
                         f'"job_oid"="{inspection_job_record_oid}"',
                         f'and "host_oid"="{host_oid}"',
                         f'and "inspection_code_oid"="{inspection_code_block_oid}"',
-                        f'and "code_index"="{index}"']
+                        f'and "code_index"="{output_obj.code_index}"']
             sqlite_cursor.execute(" ".join(sql_list))
             search_result = sqlite_cursor.fetchall()
             for obj_info_tuple in search_result:
                 interactive_output_bytes = base64.b64decode(obj_info_tuple[6])
                 output_obj.interactive_output_bytes_list.append(interactive_output_bytes)
-            index += 1
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
@@ -6417,14 +6415,37 @@ class StartInspectionTemplateInFrame:
             code_exec_log_text.grid(row=7 + index * 2 + 1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
             index += 1
         # 添加按钮
-        ok_button = tkinter.Button(frame, text="xxx")
-        ok_button.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
+        save_to_file_button = tkinter.Button(frame, text="保存到文件",
+                                             command=lambda: self.save_to_file_inspection_host_item(pop_window, host_job_status_obj))
+        save_to_file_button.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
         cancel_button = tkinter.Button(frame, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
         cancel_button.grid(row=7 + index * 2, column=1, padx=self.padx, pady=self.pady)
         # 更新Frame的尺寸
         frame.update_idletasks()
         canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
         canvas.yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+
+    def save_to_file_inspection_host_item(self, pop_window, host_job_status_obj):
+        file_path = filedialog.asksaveasfile(title="保存到文件", filetypes=[("Text files", "*.log"), ("All files", "*.*")],
+                                             defaultextension=".log")
+        if not file_path:
+            print("未选择文件")
+        else:
+            print(file_path)
+            # 保存巡检命令及输出结果
+            with open(file_path.name, "a+", encoding="utf8") as fileobj:
+                for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
+                    # <SSHOperatorOutput>对象列表，一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
+                    code_exec_output_obj_list = self.global_info.load_inspection_job_log_for_host(self.current_inspection_job_obj.oid,
+                                                                                                  host_job_status_obj.host_oid,
+                                                                                                  inspection_code_block_oid)
+                    inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
+                    fileobj.write(f"\n################{inspection_code_block_obj.name} 巡检命令详情 ################↓\n")
+                    for output_obj in code_exec_output_obj_list:
+                        fileobj.write('\n'.join(output_obj.invoke_shell_output_bytes.decode("utf8").split('\r\n')))
+                        for interactive_output in output_obj.interactive_output_bytes_list:
+                            fileobj.write('\n'.join(interactive_output.decode("utf8").split('\r\n')))
+        pop_window.focus_force()  # 使子窗口获得焦点
 
     @staticmethod
     def proces_mouse_scroll_on_pop_window(event, canvas):
@@ -6763,14 +6784,38 @@ class ViewInspectionJobInFrame:
             code_exec_log_text.grid(row=7 + index * 2 + 1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
             index += 1
         # 添加按钮
-        ok_button = tkinter.Button(frame, text="xxx")
-        ok_button.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
-        cancel_button = tkinter.Button(frame, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
-        cancel_button.grid(row=7 + index * 2, column=1, padx=self.padx, pady=self.pady)
+        # ok_button = tkinter.Button(frame, text="xxx")
+        save_to_file_button = tkinter.Button(frame, text="保存到文件",
+                                             command=lambda: self.save_to_file_inspection_host_item(pop_window, host_job_status_obj))
+        save_to_file_button.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
+        return_button = tkinter.Button(frame, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
+        return_button.grid(row=7 + index * 2, column=1, padx=self.padx, pady=self.pady)
         # 更新Frame的尺寸
         frame.update_idletasks()
         canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
         canvas.yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+
+    def save_to_file_inspection_host_item(self, pop_window, host_job_status_obj):
+        file_path = filedialog.asksaveasfile(title="保存到文件", filetypes=[("Text files", "*.log"), ("All files", "*.*")],
+                                             defaultextension=".log")
+        if not file_path:
+            print("未选择文件")
+        else:
+            print(file_path)
+            # 保存巡检命令及输出结果
+            with open(file_path.name, "a+", encoding="utf8") as fileobj:
+                for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
+                    # <SSHOperatorOutput>对象列表，一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
+                    code_exec_output_obj_list = self.global_info.load_inspection_job_log_for_host(self.inspection_job_record_obj.oid,
+                                                                                                  host_job_status_obj.host_oid,
+                                                                                                  inspection_code_block_oid)
+                    inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
+                    fileobj.write(f"\n################{inspection_code_block_obj.name} 巡检命令详情 ################↓\n")
+                    for output_obj in code_exec_output_obj_list:
+                        fileobj.write('\n'.join(output_obj.invoke_shell_output_bytes.decode("utf8").split('\r\n')))
+                        for interactive_output in output_obj.interactive_output_bytes_list:
+                            fileobj.write('\n'.join(interactive_output.decode("utf8").split('\r\n')))
+        pop_window.focus_force()  # 使子窗口获得焦点
 
     @staticmethod
     def proces_mouse_scroll_on_pop_window(event, canvas):
