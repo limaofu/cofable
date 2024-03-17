@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-15
+# update: 2024-03-17
 
 """
 解决问题：
@@ -35,6 +35,7 @@
 ★. 支持工作流，一个工作流包含多个巡检模板，依次进行，可进行分支判断
 ★. 在host_job_item的text界面看巡检输出信息，不全，有很多缺失，                          2024年3月14日 已解决
     原因是显示是未遍历SSHOperatorOutput.interactive_output_bytes_list
+★. 主机命令在线批量执行，在“主机组”界面，对这一组主机在线下发命令
 
 资源操作逻辑：
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -775,12 +776,14 @@ class InspectionCodeBlock:
         if len(result) == 0:  # 若未查询到有此表，则创建此表
             sql_list = ["create table tb_inspection_code_block_include_code_list  ( inspection_code_block_oid varchar(36),",
                         "code_index int,",
-                        "code_content varchar(512),",
+                        "code_content varchar(2048),",
                         "code_post_wait_time double,",
                         "need_interactive int,",
-                        "interactive_question_keyword varchar(128),",
-                        "interactive_answer varchar(32),",
-                        "interactive_process_method int )"]
+                        "interactive_question_keyword varchar(512),",
+                        "interactive_answer varchar(512),",
+                        "interactive_process_method int,",
+                        "description varchar(2048)",
+                        " )"]
             sqlite_cursor.execute(" ".join(sql_list))
         # 开始插入数据
         # ★每次保存代码前，先删除所有code内容，再去重新插入
@@ -794,7 +797,9 @@ class InspectionCodeBlock:
                         "need_interactive,",
                         "interactive_question_keyword,",
                         "interactive_answer,"
-                        "interactive_process_method ) values",
+                        "interactive_process_method,",
+                        "description",
+                        " ) values",
                         f"( '{self.oid}',",
                         f"{code.code_index},",
                         f"'{code.code_content}',",
@@ -802,7 +807,9 @@ class InspectionCodeBlock:
                         f"{code.need_interactive},",
                         f"'{code.interactive_question_keyword}',",
                         f"'{code.interactive_answer}',",
-                        f"{code.interactive_process_method} )"]
+                        f"{code.interactive_process_method},",
+                        f"'{code.description}'",
+                        " )"]
             sqlite_cursor.execute(" ".join(sql_list))
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -1744,7 +1751,7 @@ class OneLineCode:
 
     def __init__(self, code_index=0, code_content='', code_post_wait_time=CODE_POST_WAIT_TIME_DEFAULT,
                  need_interactive=COF_NO, interactive_question_keyword='', interactive_answer='',
-                 interactive_process_method=INTERACTIVE_PROCESS_METHOD_ONETIME):
+                 interactive_process_method=INTERACTIVE_PROCESS_METHOD_ONETIME, description=''):
         self.code_index = code_index  # <int>
         self.code_content = code_content  # <str>
         self.code_post_wait_time = code_post_wait_time  # <float>
@@ -1752,6 +1759,7 @@ class OneLineCode:
         self.interactive_question_keyword = interactive_question_keyword  # <str>
         self.interactive_answer = interactive_answer  # <str>
         self.interactive_process_method = interactive_process_method  # <int>
+        self.description = description  # <str>
 
 
 class SSHOperatorOutput:
@@ -2294,7 +2302,8 @@ class GlobalInfo:
                                    code_post_wait_time=obj_info_tuple[3], need_interactive=obj_info_tuple[4],
                                    interactive_question_keyword=obj_info_tuple[5],
                                    interactive_answer=obj_info_tuple[6],
-                                   interactive_process_method=obj_info_tuple[7])
+                                   interactive_process_method=obj_info_tuple[7],
+                                   description=obj_info_tuple[8])
                 inspection_code_block_obj.code_list.append(code)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -3014,18 +3023,22 @@ class MainWindow:
         self.maxsize = (1920, 1080)
         self.background = "#3A3A3A"  # 设置背景色，RGB
         self.window_obj = None  # 在 MainWindow.show()里创建
+        self.menu_bar = None  # 在 MainWindow.create_menu_bar_init()里创建
         self.nav_frame_l = None  # 在 MainWindow.create_nav_frame_l_init()里创建
         self.nav_frame_r = None  # 在 MainWindow.create_nav_frame_r_init()里创建
         self.screen_width = 0  # 在 MainWindow.show()里赋值
         self.screen_height = 0  # 在 MainWindow.show()里赋值
         self.nav_frame_l_width = int(self.width * 0.2)
         self.nav_frame_r_width = int(self.width * 0.8)
+        self.nav_frame_r_top_height = 35
+        self.nav_frame_r_bottom_height = self.height - 35
         self.global_info = global_info  # <GlobalInfo>对象
         self.current_project = current_project
         self.about_info = "CofAble，自动化巡检平台，版本: v1.0\n本软件使用GPL-v3.0协议开源，作者: Cof-Lee"
         self.padx = 2
         self.pady = 2
         self.view_width = 20
+        self.menu_bar = None
 
     @staticmethod
     def clear_tkinter_widget(root):
@@ -3047,15 +3060,15 @@ class MainWindow:
         self.create_nav_frame_r_init()
 
     def create_menu_bar_init(self):  # 创建菜单栏-init界面的
-        menu_bar = tkinter.Menu(self.window_obj)  # 创建一个菜单，做菜单栏
-        menu_open_db_file = tkinter.Menu(menu_bar, tearoff=1)  # 创建一个菜单，分窗，表示此菜单可拉出来变成一个可移动的独立弹窗
-        menu_about = tkinter.Menu(menu_bar, tearoff=0, activebackground="green", activeforeground="white",
+        self.menu_bar = tkinter.Menu(self.window_obj)  # 创建一个菜单，做菜单栏
+        menu_open_db_file = tkinter.Menu(self.menu_bar, tearoff=1)  # 创建一个菜单，分窗，表示此菜单可拉出来变成一个可移动的独立弹窗
+        menu_about = tkinter.Menu(self.menu_bar, tearoff=0, activebackground="green", activeforeground="white",
                                   background="white", foreground="black")  # 创建一个菜单，不分窗
         menu_open_db_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file_of_menu_bar_init)
         menu_about.add_command(label="About", command=self.click_menu_about_of_menu_bar_init)
-        menu_bar.add_cascade(label="File", menu=menu_open_db_file)
-        menu_bar.add_cascade(label="Help", menu=menu_about)
-        self.window_obj.config(menu=menu_bar)
+        self.menu_bar.add_cascade(label="File", menu=menu_open_db_file)
+        self.menu_bar.add_cascade(label="Help", menu=menu_about)
+        self.window_obj.config(menu=self.menu_bar)
 
     def create_nav_frame_l_init(self):  # 创建导航框架1-init界面的，主界面左边的导航框 ★★★★★
         self.nav_frame_l = tkinter.Frame(self.window_obj, bg="green", width=self.nav_frame_l_width, height=self.height)
@@ -3179,6 +3192,8 @@ class MainWindow:
                 self.height = self.window_obj.winfo_height()
                 self.nav_frame_l_width = int(self.width * 0.2)
                 self.nav_frame_r_width = int(self.width * 0.8)
+                self.nav_frame_r_top_height = 35
+                self.nav_frame_r_bottom_height = int(self.height - 35)
                 print("size changed")
                 # self.window_obj.__setitem__('width', self.width)
                 # self.window_obj.__setitem__('height', self.height)
@@ -3220,21 +3235,22 @@ class MainWindow:
                                        command=lambda: self.nav_frame_r_resource_top_page_display(resource_type))  # 返回资源选项卡主界面
         button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
 
-    def list_resource_of_nav_frame_r_page(self, resource_type):
+    def list_resource_of_nav_frame_r_bottom_page(self, resource_type):
         """
         ★★★★★ 列出资源-页面 ★★★★★
         :return:
         """
-        # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "green")
+        # 更新bottom_frame
+        bottom_frame = self.nav_frame_r.winfo_children()[1]
+        bottom_frame.__setitem__("bg", "pink")
         nav_frame_r_widget_dict = {}
-        # 在框架2中添加canvas-frame滚动框
-        self.clear_tkinter_widget(nav_frame_r)
-        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
+        # 在框架2的bottom_frame中添加canvas-frame滚动框
+        self.clear_tkinter_widget(bottom_frame)
+        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(bottom_frame)
         nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
-        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(bottom_frame, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
+        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=int(self.nav_frame_r_width - 25),
+                                                height=self.nav_frame_r_bottom_height)
         nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
         nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
         nav_frame_r_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
@@ -3242,14 +3258,11 @@ class MainWindow:
         # 在canvas-frame滚动框内添加资源列表控件
         list_obj = ListResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, resource_type)
         list_obj.show()
-        # ★创建“返回”按钮
-        button_cancel = tkinter.Button(nav_frame_r, text="返回",
-                                       command=lambda: self.nav_frame_r_resource_top_page_display(resource_type))  # 返回资源选项卡主界面
-        button_cancel.place(x=10, y=self.height - 40, width=50, height=25)
 
     def nav_frame_r_resource_top_page_display(self, resource_type):
         """
-        ★★★★★ 资源选项卡-主页面 ★★★★★
+        资源选项卡-主页面，将self.nav_frame_r再分为上下2个界面:
+        frame_top_of_nav_frame_r_page 和 frame_bottom_of_nav_frame_r_page （局部变量，非全局）
         :return:
         """
         # claer_tkinter_window(self.window_obj)
@@ -3262,55 +3275,70 @@ class MainWindow:
                 widget.config(bg="white")
             widget_index += 1
         # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "gray")
+        self.nav_frame_r.__setitem__("bg", "gray")
         # 在框架2中添加功能控件
-        self.clear_tkinter_widget(nav_frame_r)
+        self.clear_tkinter_widget(self.nav_frame_r)
         if resource_type == RESOURCE_TYPE_PROJECT:
             text_create = "创建项目"
-            text_display = "列出项目"
+            text_load = "导入项目"
         elif resource_type == RESOURCE_TYPE_CREDENTIAL:
             text_create = "创建凭据"
-            text_display = "列出凭据"
+            text_load = "导入凭据"
         elif resource_type == RESOURCE_TYPE_HOST:
             text_create = "创建主机"
-            text_display = "列出主机"
+            text_load = "导入主机"
         elif resource_type == RESOURCE_TYPE_HOST_GROUP:
             text_create = "创建主机组"
-            text_display = "列出主机组"
+            text_load = "导入主机组"
         elif resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
             text_create = "创建巡检代码块"
-            text_display = "列出巡检代码块"
+            text_load = "导入巡检代码块"
         elif resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
             text_create = "创建巡检模板"
-            text_display = "列出巡检模板"
+            text_load = "导入巡检模板"
         elif resource_type == RESOURCE_TYPE_INSPECTION_JOB:
             text_create = "创建巡检作业"
-            text_display = "列出巡检作业"
+            text_load = "导入巡检作业"
         else:
             print("unknown resource type")
             text_create = "创建项目"
-            text_display = "列出项目"
+            text_load = "导入项目"
         if resource_type != RESOURCE_TYPE_INSPECTION_JOB:
-            button_create_resource = tkinter.Button(nav_frame_r, text=text_create,
+            for widget in self.nav_frame_r.winfo_children():
+                widget.destroy()
+            frame_top_of_nav_frame_r_page = tkinter.Frame(self.nav_frame_r, bg="green", width=self.nav_frame_r_width, height=35)
+            frame_bottom_of_nav_frame_r_page = tkinter.Frame(self.nav_frame_r, bg="pink", width=self.nav_frame_r_width,
+                                                             height=self.height - 35)
+            frame_top_of_nav_frame_r_page.grid_propagate(False)
+            frame_top_of_nav_frame_r_page.pack_propagate(False)
+            frame_top_of_nav_frame_r_page.grid(row=0, column=0)
+            frame_bottom_of_nav_frame_r_page.grid_propagate(False)
+            frame_bottom_of_nav_frame_r_page.pack_propagate(False)
+            frame_bottom_of_nav_frame_r_page.grid(row=1, column=0)
+            # 在 frame_top_of_nav_frame_r_page 中添加功能按钮
+            button_create_resource = tkinter.Button(frame_top_of_nav_frame_r_page, text=text_create,
                                                     command=lambda: self.create_resource_of_nav_frame_r_page(resource_type))
-            button_create_resource.grid(row=0, column=1)
-            button_display_resource = tkinter.Button(nav_frame_r, text=text_display,
-                                                     command=lambda: self.list_resource_of_nav_frame_r_page(resource_type))
-            button_display_resource.grid(row=1, column=1)
+            button_create_resource.pack(padx=self.padx, side=tkinter.LEFT)
+            button_load_resource = tkinter.Button(frame_top_of_nav_frame_r_page, text=text_load,
+                                                  command=lambda: self.create_resource_of_nav_frame_r_page(resource_type))
+            button_load_resource.pack(padx=self.padx, side=tkinter.LEFT)
+            button_other = tkinter.Button(frame_top_of_nav_frame_r_page, text="其他")
+            button_other.pack(padx=self.padx, side=tkinter.LEFT)
+            # 在 frame_bottom_of_nav_frame_r_page 中列出资源列表
+            self.list_resource_of_nav_frame_r_bottom_page(resource_type)
         else:
             self.list_inspection_job_of_nav_frame_r_page()
 
     def list_inspection_job_of_nav_frame_r_page(self):
         # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "green")
+        self.nav_frame_r.__setitem__("bg", "green")
         nav_frame_r_widget_dict = {}
         # 在框架2中添加canvas-frame滚动框
-        self.clear_tkinter_widget(nav_frame_r)
-        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
+        self.clear_tkinter_widget(self.nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(self.nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(self.nav_frame_r,
+                                                           yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
         nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
         nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
         nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
@@ -3740,6 +3768,7 @@ class CreateResourceInFrame:
         treeview_code_content.heading("code_content", text="code_content", anchor="w")
         treeview_code_content.heading("need_interactive", text="需要交互", anchor="w")
         treeview_code_content.grid(row=5, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+        # 单击每行命令后，可单独设置每行命令的高级属性
         treeview_code_content.bind("<<TreeviewSelect>>", lambda event: self.edit_treeview_code_content_item(event, treeview_code_content))
 
     def click_button_add_code_list(self, treeview_code_content):
@@ -3868,14 +3897,21 @@ class CreateResourceInFrame:
                                                                                       state="readonly")
         one_line_code_info_dict["combobox_interactive_process_method"].current(one_line_code_obj.interactive_process_method)
         one_line_code_info_dict["combobox_interactive_process_method"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-description
+        label_description = tkinter.Label(pop_window, text="描述")
+        label_description.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_description"] = tkinter.StringVar()
+        entry_description = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_description"])
+        entry_description.insert(0, str(one_line_code_obj.description))  # 显示初始值，可编辑
+        entry_description.grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # 添加按钮
         ok_button = tkinter.Button(pop_window, text="确定",
                                    command=lambda: self.edit_treeview_code_content_item_save(one_line_code_info_dict,
                                                                                              one_line_code_obj,
                                                                                              pop_window, treeview_code_content))
-        ok_button.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        ok_button.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         cancel_button = tkinter.Button(pop_window, text="取消", command=lambda: self.edit_treeview_code_content_item_cancel(pop_window))
-        cancel_button.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        cancel_button.grid(row=8, column=1, padx=self.padx, pady=self.pady)
 
     def edit_treeview_code_content_item_cancel(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
@@ -3895,6 +3931,7 @@ class CreateResourceInFrame:
             one_line_code_obj.interactive_process_method = 0
         else:
             one_line_code_obj.interactive_process_method = one_line_code_info_dict["combobox_interactive_process_method"].current()
+        one_line_code_obj.description = one_line_code_info_dict["sv_description"].get()
         pop_window.destroy()  # 关闭子窗口
         self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
@@ -4129,7 +4166,7 @@ class ListResourceInFrame:
             button_delete.grid(row=index + 1, column=4, padx=self.padx, pady=self.pady)
             # ★巡检模板-start
             if self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
-                start_obj = StartInspectionTemplateInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj)
+                start_obj = StartInspectionTemplateInFrame(self.main_window, self.global_info, obj)
                 button_start = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="Start", command=start_obj.start)
                 button_start.bind("<MouseWheel>", self.proces_mouse_scroll)
                 button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
@@ -4222,7 +4259,7 @@ class ViewResourceInFrame:
         obj_info_text.pack()
         # ★★添加返回“项目列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
-                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
+                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_PROJECT))  # 返回“项目列表”
         button_return.pack()
 
@@ -4297,7 +4334,7 @@ class ViewResourceInFrame:
         obj_info_text.pack()
         # ★★添加“返回项目列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
-                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
+                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_CREDENTIAL))  # 返回凭据列表
         button_return.pack()
 
@@ -4366,7 +4403,7 @@ class ViewResourceInFrame:
         obj_info_text.pack()
         # ★★添加“返回主机列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回主机列表",
-                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
+                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_HOST))  # 返回主机列表
         button_return.pack()
 
@@ -4424,7 +4461,7 @@ class ViewResourceInFrame:
         obj_info_text.pack()
         # ★★添加“返回主机组列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回主机组列表",
-                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
+                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_HOST_GROUP))  # 返回主机组列表
         button_return.pack()
 
@@ -4487,10 +4524,11 @@ class ViewResourceInFrame:
                                          values=(index, code_obj.code_content, need_interactive_value[code_obj.need_interactive]))
             index += 1
         treeview_code_content.pack()
+        # 单击指定的命令行，显示其高级属性
         treeview_code_content.bind("<<TreeviewSelect>>", lambda event: self.view_treeview_code_content_item(event, treeview_code_content))
         # ★★添加“返回主机组列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回巡检代码块列表",
-                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
+                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_INSPECTION_CODE_BLOCK))  # 返回巡检代码块列表
         button_return.pack()
 
@@ -4561,9 +4599,16 @@ class ViewResourceInFrame:
                                                                                       state="readonly")
         one_line_code_info_dict["combobox_interactive_process_method"].current(one_line_code_obj.interactive_process_method)
         one_line_code_info_dict["combobox_interactive_process_method"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-description
+        label_description = tkinter.Label(pop_window, text="描述")
+        label_description.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_description"] = tkinter.StringVar()
+        entry_description = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_description"])
+        entry_description.insert(0, str(one_line_code_obj.description))  # 显示初始值，可编辑
+        entry_description.grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # 添加按钮
         exit_button = tkinter.Button(pop_window, text="返回", command=pop_window.destroy)
-        exit_button.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        exit_button.grid(row=8, column=1, padx=self.padx, pady=self.pady)
 
     def view_inspection_template(self):
         # 查看-inspection_template
@@ -4659,7 +4704,7 @@ class ViewResourceInFrame:
         obj_info_text.pack()
         # ★★添加“返回巡检代码块列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回巡检模板列表",
-                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
+                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_INSPECTION_TEMPLATE))  # 返回巡检模板列表
         button_return.pack()
 
@@ -4710,7 +4755,7 @@ class EditResourceInFrame:
         button_save.grid(row=self.current_row_index + 1, column=0, padx=self.padx, pady=self.pady)
         # ★★添加“返回资源列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="取消编辑",
-                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(self.resource_type))
+                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(self.resource_type))
         button_return.bind("<MouseWheel>", self.proces_mouse_scroll)
         button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
 
@@ -5135,7 +5180,7 @@ class EditResourceInFrame:
         label_inspection_code_block_code_content.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_code_block_code_content.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         button_add_code_list = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑",
-                                              command=lambda: self.click_button_add_code_list(treeview_code_content))  # 编辑代码
+                                              command=lambda: self.click_button_add_code_list(treeview_code_content))  # 新建代码
         button_add_code_list.bind("<MouseWheel>", self.proces_mouse_scroll)
         button_add_code_list.grid(row=4, column=1, padx=self.padx, pady=self.pady)
         treeview_code_content = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=7,
@@ -5156,6 +5201,7 @@ class EditResourceInFrame:
                                          values=(index, code_obj.code_content, need_interactive_value[code_obj.need_interactive]))
             index += 1
         treeview_code_content.grid(row=5, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+        # 单击指定的命令行，进行高级属性编辑
         treeview_code_content.bind("<<TreeviewSelect>>", lambda event: self.edit_treeview_code_content_item(event, treeview_code_content))
         # ★★更新row_index
         self.current_row_index = 5
@@ -5286,14 +5332,21 @@ class EditResourceInFrame:
                                                                                       state="readonly")
         one_line_code_info_dict["combobox_interactive_process_method"].current(one_line_code_obj.interactive_process_method)
         one_line_code_info_dict["combobox_interactive_process_method"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # OneLineCode-description
+        label_description = tkinter.Label(pop_window, text="描述")
+        label_description.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        one_line_code_info_dict["sv_description"] = tkinter.StringVar()
+        entry_description = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_description"])
+        entry_description.insert(0, str(one_line_code_obj.description))  # 显示初始值，可编辑
+        entry_description.grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # 添加按钮
         ok_button = tkinter.Button(pop_window, text="保存修改",
                                    command=lambda: self.edit_treeview_code_content_item_save(one_line_code_info_dict,
                                                                                              one_line_code_obj,
                                                                                              pop_window, treeview_code_content))
-        ok_button.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        ok_button.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         cancel_button = tkinter.Button(pop_window, text="取消", command=lambda: self.edit_treeview_code_content_item_cancel(pop_window))
-        cancel_button.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        cancel_button.grid(row=8, column=1, padx=self.padx, pady=self.pady)
 
     def edit_treeview_code_content_item_cancel(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
@@ -5313,6 +5366,7 @@ class EditResourceInFrame:
             one_line_code_obj.interactive_process_method = 0
         else:
             one_line_code_obj.interactive_process_method = one_line_code_info_dict["combobox_interactive_process_method"].current()
+        one_line_code_obj.description = one_line_code_info_dict["sv_description"].get()
         pop_window.destroy()  # 关闭子窗口
         self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
@@ -5543,7 +5597,7 @@ class UpdateResourceInFrame:
             messagebox.showinfo("更新项目-Error", f"项目名称已存在")
         else:
             self.resource_obj.update(name=project_name, description=project_description, global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_PROJECT)  # 更新项目信息后，返回项目展示页面
+            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_PROJECT, )  # 更新项目信息后，返回项目展示页面
 
     def update_credential(self):
         credential_name = self.resource_info_dict["sv_name"].get()
@@ -5594,7 +5648,7 @@ class UpdateResourceInFrame:
                                      auth_url=credential_auth_url,
                                      ssl_verify=credential_ssl_verify,
                                      global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_CREDENTIAL)  # 更新credential信息后，返回“显示credential列表”页面
+            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_CREDENTIAL, )  # 更新credential信息后，返回“显示credential列表”页面
 
     def update_host(self):
         host_name = self.resource_info_dict["sv_name"].get()
@@ -5648,7 +5702,7 @@ class UpdateResourceInFrame:
                                      login_protocol=host_login_protocol,
                                      first_auth_method=host_first_auth_method,
                                      global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_HOST)  # 更新host信息后，返回“显示host列表”页面
+            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST, )  # 更新host信息后，返回“显示host列表”页面
 
     def update_host_group(self):
         host_group_name = self.resource_info_dict["sv_name"].get()
@@ -5679,7 +5733,7 @@ class UpdateResourceInFrame:
         else:
             self.resource_obj.update(name=host_group_name, description=host_group_description, project_oid=project_oid,
                                      global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_HOST_GROUP)  # 更新host_group信息后，返回“显示host_group列表”页面
+            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST_GROUP, )  # 更新host_group信息后，返回“显示host_group列表”页面
 
     def update_inspection_code_block(self):
         inspection_code_block_name = self.resource_info_dict["sv_name"].get()
@@ -5704,7 +5758,8 @@ class UpdateResourceInFrame:
             self.resource_obj.update(name=inspection_code_block_name, description=inspection_code_block_description,
                                      project_oid=project_oid,
                                      global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_INSPECTION_CODE_BLOCK)  # 更新inspection_code_block信息后，返回
+            self.main_window.list_resource_of_nav_frame_r_bottom_page(
+                RESOURCE_TYPE_INSPECTION_CODE_BLOCK, )  # 更新inspection_code_block信息后，返回
 
     def update_inspection_template(self):
         inspection_template_name = self.resource_info_dict["sv_name"].get()
@@ -5774,7 +5829,7 @@ class UpdateResourceInFrame:
                     self.resource_obj.launch_template_trigger_oid)
                 print("xxxxxxxxxxxxxxyyyyyyyyyyyy update update update")
                 launch_template_trigger_obj.update()
-            self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_INSPECTION_TEMPLATE)  # 更新信息后，返回“显示资源列表”页面
+            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_TEMPLATE, )  # 更新信息后，返回“显示资源列表”页面
 
 
 class DeleteResourceInFrame:
@@ -5817,27 +5872,27 @@ class DeleteResourceInFrame:
 
     def delete_project(self):
         self.global_info.delete_project_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_PROJECT)
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_PROJECT, )
 
     def delete_credential(self):
         self.global_info.delete_credential_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_CREDENTIAL)
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_CREDENTIAL, )
 
     def delete_host(self):
         self.global_info.delete_host_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_HOST)
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST, )
 
     def delete_host_group(self):
         self.global_info.delete_host_group_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_HOST_GROUP)
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST_GROUP, )
 
     def delete_inspection_code_block(self):
         self.global_info.delete_inspection_code_block_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_INSPECTION_CODE_BLOCK)
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_CODE_BLOCK, )
 
     def delete_inspection_template(self):
         self.global_info.delete_inspection_template_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_page(RESOURCE_TYPE_INSPECTION_TEMPLATE)
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_TEMPLATE, )
 
     def delete_inspection_job_record(self):
         self.global_info.delete_inspection_job_record_obj(self.resource_obj)
@@ -6133,9 +6188,9 @@ class StartInspectionTemplateInFrame:
     在主窗口的查看资源界面，启动目标巡检模板作业，并添加用于显示巡检模板执行情况的控件
     """
 
-    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, inspection_template_obj=None):
+    def __init__(self, main_window=None, global_info=None, inspection_template_obj=None):
         self.main_window = main_window
-        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.nav_frame_r_widget_dict = {}
         self.global_info = global_info
         self.inspection_template_obj = inspection_template_obj
         self.padx = 2
@@ -6165,13 +6220,28 @@ class StartInspectionTemplateInFrame:
             launch_job_thread = threading.Thread(target=self.current_inspection_job_obj.start_job)
             launch_job_thread.start()  # 线程start后，不要join()，主界面才不会卡住
             # ★进入作业详情页面★
-            for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+            for widget in self.main_window.nav_frame_r.winfo_children():
                 widget.destroy()
+            self.create_frame_with_scrollbar()
             self.show_inspection_job_status()
             self.add_return_button()
             self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
         else:
             print("StartInspectionTemplateInFrame.start: 取消启动巡检作业")
+
+    def create_frame_with_scrollbar(self):
+        self.main_window.nav_frame_r.__setitem__("bg", "pink")
+        # 在框架2中添加canvas-frame滚动框
+        self.nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(self.main_window.nav_frame_r)
+        self.nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        self.nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(self.main_window.nav_frame_r,
+                                                                yscrollcommand=self.nav_frame_r_widget_dict["scrollbar"].set)
+        self.nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=int(self.main_window.nav_frame_r_width - 25),
+                                                     height=self.main_window.height)
+        self.nav_frame_r_widget_dict["scrollbar"].config(command=self.nav_frame_r_widget_dict["canvas"].yview)
+        self.nav_frame_r_widget_dict["frame"] = tkinter.Frame(self.nav_frame_r_widget_dict["canvas"])
+        self.nav_frame_r_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
+        self.nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=self.nav_frame_r_widget_dict["frame"], anchor='nw')
 
     def proces_mouse_scroll(self, event):
         if event.delta > 0:
@@ -6192,13 +6262,13 @@ class StartInspectionTemplateInFrame:
     def add_return_button(self):
         # ★★添加“返回资源列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回资源列表",
-                                       command=lambda: self.main_window.list_resource_of_nav_frame_r_page(
+                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_INSPECTION_TEMPLATE))
         button_return.bind("<MouseWheel>", self.proces_mouse_scroll)
         button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
 
     def show_inspection_job_status(self):
-        # ★巡检作业详情
+        # ★巡检作业详情 这里要把 self.nav_frame_r_widget_dict["frame"] 改为 main_window.nav_frame_r ，并添加滚动条
         label_show_inspection_job_status = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 巡检作业详情 ★★")
         label_show_inspection_job_status.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_show_inspection_job_status.grid(row=0, column=0, padx=self.padx, pady=self.pady)
@@ -6252,18 +6322,20 @@ class StartInspectionTemplateInFrame:
         label_inspection_job_status.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_job_status.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         # ★host-列表
-        inspection_host_treeview = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=6,
-                                                columns=("index", "host", "status", "time"), show="headings")
+        inspection_host_treeview = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=9,
+                                                columns=("index", "host", "status", "rate_or_progress", "time"), show="headings")
         # 设置每一个列的宽度和对齐的方式
         inspection_host_treeview.column("index", width=60, anchor="w")
         inspection_host_treeview.column("host", width=180, anchor="w")
         inspection_host_treeview.column("status", width=100, anchor="w")
+        inspection_host_treeview.column("rate_or_progress", width=60, anchor="w")
         inspection_host_treeview.column("time", width=60, anchor="w")
         # 设置每个列的标题
         inspection_host_treeview.heading("index", text="index", anchor="w")
         inspection_host_treeview.heading("host", text="host", anchor="w")
-        inspection_host_treeview.heading("status", text="status", anchor="w")
-        inspection_host_treeview.heading("time", text="耗时", anchor="w")  # 单位：秒
+        inspection_host_treeview.heading("status", text="状态", anchor="w")
+        inspection_host_treeview.heading("rate_or_progress", text="进度", anchor="w")
+        inspection_host_treeview.heading("time", text="耗时(秒)", anchor="w")  # 单位：秒
         # 插入数据，这里需要定时刷新★★
         index = 0
         status_name_list = ["unknown", "started", "completed", "part_completed", "failed"]
@@ -6275,9 +6347,14 @@ class StartInspectionTemplateInFrame:
                 time_usage_2 = 0
             else:
                 time_usage_2 = time_usage
+            if host_job_status_obj.sum_of_code_lines <= 0:
+                rate_or_progress = 0.0
+            else:
+                rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
             inspection_host_treeview.insert("", index, values=(
                 index, host_obj.name,
                 status_name_list[host_job_status_obj.job_status],
+                "{:.2%}".format(rate_or_progress),
                 time_usage_2))
             index += 1
         inspection_host_treeview.grid(row=6, column=0, columnspan=2, padx=self.padx, pady=self.pady)
@@ -6303,9 +6380,14 @@ class StartInspectionTemplateInFrame:
                 time_usage_2 = 0
             else:
                 time_usage_2 = time_usage
+            if host_job_status_obj.sum_of_code_lines <= 0:
+                rate_or_progress = 0.0
+            else:
+                rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
             inspection_host_treeview.insert("", index, values=(
                 index, host_obj.name,
                 status_name_list[host_job_status_obj.job_status],
+                "{:.2%}".format(rate_or_progress),
                 time_usage_2))
             index += 1
         # 只有巡检作业未完成时才刷新主机巡检作业状态，完成（包含失败）都不再去更新主机状态
@@ -6319,7 +6401,7 @@ class StartInspectionTemplateInFrame:
         print("view_inspection_host_item: item_index=", item_index)
         if item_index == "":
             return
-        host_job_status_obj_index, _, _, _ = inspection_host_treeview.item(item_index, "values")
+        host_job_status_obj_index = inspection_host_treeview.item(item_index, "values")[0]
         # 获取选中的命令对象
         host_job_status_obj = self.current_inspection_job_obj.unduplicated_host_job_status_obj_list[int(host_job_status_obj_index)]
         pop_window = tkinter.Toplevel(self.main_window.window_obj)  # 创建子窗口★
@@ -6623,18 +6705,20 @@ class ViewInspectionJobInFrame:
         label_inspection_job_status.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_inspection_job_status.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         # ★host-列表
-        inspection_host_treeview = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=6,
-                                                columns=("index", "host", "status", "time"), show="headings")
+        inspection_host_treeview = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=9,
+                                                columns=("index", "host", "status", "rate_or_progress", "time"), show="headings")
         # 设置每一个列的宽度和对齐的方式
         inspection_host_treeview.column("index", width=60, anchor="w")
         inspection_host_treeview.column("host", width=180, anchor="w")
         inspection_host_treeview.column("status", width=100, anchor="w")
+        inspection_host_treeview.column("rate_or_progress", width=60, anchor="w")
         inspection_host_treeview.column("time", width=60, anchor="w")
         # 设置每个列的标题
         inspection_host_treeview.heading("index", text="index", anchor="w")
         inspection_host_treeview.heading("host", text="host", anchor="w")
-        inspection_host_treeview.heading("status", text="status", anchor="w")
-        inspection_host_treeview.heading("time", text="耗时", anchor="w")  # 单位：秒
+        inspection_host_treeview.heading("status", text="状态", anchor="w")
+        inspection_host_treeview.heading("rate_or_progress", text="进度", anchor="w")
+        inspection_host_treeview.heading("time", text="耗时(秒)", anchor="w")  # 单位：秒
         # 插入数据，这里需要定时刷新★★
         index = 0
         status_name_list = ["unknown", "started", "completed", "part_completed", "failed"]
@@ -6645,9 +6729,14 @@ class ViewInspectionJobInFrame:
                 time_usage_2 = 0
             else:
                 time_usage_2 = time_usage
+            if host_job_status_obj.sum_of_code_lines <= 0:
+                rate_or_progress = 0.0
+            else:
+                rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
             inspection_host_treeview.insert("", index, values=(
                 index, host_obj.name,
                 status_name_list[host_job_status_obj.job_status],
+                "{:.2%}".format(rate_or_progress),
                 time_usage_2))
             index += 1
         inspection_host_treeview.grid(row=6, column=0, columnspan=2, padx=self.padx, pady=self.pady)
@@ -6672,9 +6761,14 @@ class ViewInspectionJobInFrame:
                 time_usage_2 = 0
             else:
                 time_usage_2 = time_usage
+            if host_job_status_obj.sum_of_code_lines <= 0:
+                rate_or_progress = 0.0
+            else:
+                rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
             inspection_host_treeview.insert("", index, values=(
                 index, host_obj.name,
                 status_name_list[host_job_status_obj.job_status],
+                "{:.2%}".format(rate_or_progress),
                 time_usage_2))
             index += 1
         # 只有巡检作业未完成时才刷新主机巡检作业状态，完成（包含失败）都不再去更新主机状态
@@ -6688,7 +6782,7 @@ class ViewInspectionJobInFrame:
         print("view_inspection_host_item: item_index=", item_index)
         if item_index == "":
             return
-        host_job_status_obj_index, _, _, _ = inspection_host_treeview.item(item_index, "values")
+        host_job_status_obj_index = inspection_host_treeview.item(item_index, "values")[0]
         # 获取选中的命令对象
         host_job_status_obj = self.inspection_job_record_obj.unduplicated_host_job_status_obj_list[int(host_job_status_obj_index)]
         pop_window = tkinter.Toplevel(self.main_window.window_obj)  # 创建子窗口★
