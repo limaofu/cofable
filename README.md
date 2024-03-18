@@ -8,3 +8,5 @@ How to run it? 如何运行此程序？<br>
 ```shell
 python3 cofable.py
 ```
+效果图：<br>
+![demo1](demo1.png)
