@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-17
+# update: 2024-03-18
 
 """
 解决问题：
@@ -68,6 +68,7 @@ import re
 import sqlite3
 import base64
 import sched
+import queue
 import tkinter
 from tkinter import messagebox
 from tkinter import filedialog
@@ -75,7 +76,8 @@ from tkinter import ttk
 from multiprocessing.dummy import Pool as ThreadPool
 
 import paramiko
-import schedule
+
+# import schedule
 
 # Here we go, 全局常量
 COF_TRUE = 1
@@ -1251,6 +1253,10 @@ class LaunchInspectionJob:
         inspection_code_block_index = 0
         for inspection_code_block_obj in inspection_code_block_obj_list:
             host_job_status_obj.current_exec_code_block = inspection_code_block_index
+            # inspection_code_block_exec_estimated_time = 0.0
+            # for code in inspection_code_block_obj.code_list:
+            #     inspection_code_block_exec_estimated_time += code.code_post_wait_time  # 交互处理的次数不好判断
+            # max_exec_wait_count = inspection_code_block_exec_estimated_time // CODE_POST_WAIT_TIME_DEFAULT  # 判断巡检线程超时最大等待次数
             if cred.cred_type == CRED_TYPE_SSH_PASS:
                 auth_method = AUTH_METHOD_SSH_PASS
             else:
@@ -3034,7 +3040,7 @@ class MainWindow:
         self.nav_frame_r_bottom_height = self.height - 35
         self.global_info = global_info  # <GlobalInfo>对象
         self.current_project = current_project
-        self.about_info = "CofAble，自动化巡检平台，版本: v1.0\n本软件使用GPL-v3.0协议开源，作者: Cof-Lee"
+        self.about_info = "CofAble，可视化运维巡检平台，版本: v1.0\n个人运维工作中的瑞士军刀\n本软件使用GPL-v3.0协议开源\n作者: Cof-Lee"
         self.padx = 2
         self.pady = 2
         self.view_width = 20
@@ -4168,6 +4174,13 @@ class ListResourceInFrame:
             if self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
                 start_obj = StartInspectionTemplateInFrame(self.main_window, self.global_info, obj)
                 button_start = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="Start", command=start_obj.start)
+                button_start.bind("<MouseWheel>", self.proces_mouse_scroll)
+                button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
+            # ★Host-open_terminal
+            if self.resource_type == RESOURCE_TYPE_HOST:
+                terminal_obj = TerminalVt100(main_window=self.main_window, global_info=self.global_info, host_obj=obj)
+                button_start = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="打开终端",
+                                              command=terminal_obj.show_single_terminal_on_pop_window)
                 button_start.bind("<MouseWheel>", self.proces_mouse_scroll)
                 button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
             index += 1
@@ -5597,7 +5610,7 @@ class UpdateResourceInFrame:
             messagebox.showinfo("更新项目-Error", f"项目名称已存在")
         else:
             self.resource_obj.update(name=project_name, description=project_description, global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_PROJECT, )  # 更新项目信息后，返回项目展示页面
+            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_PROJECT)  # 更新项目信息后，返回项目展示页面
 
     def update_credential(self):
         credential_name = self.resource_info_dict["sv_name"].get()
@@ -6930,6 +6943,212 @@ class ViewInspectionJobInFrame:
         pop_window.destroy()  # 关闭子窗口
         self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+
+
+class TerminalVt100:
+    def __init__(self, main_window=None, width=140, height=48, global_info=None, host_obj=None):
+        self.main_window = main_window
+        self.width = width
+        self.height = height
+        self.global_info = global_info
+        self.host_obj = host_obj
+        self.pop_window = None  # 在 show_terminal_pop_window() 里赋值
+        self.terminal_text = None  # 在 show_terminal_pop_window() 里赋值
+        self.padx = 2
+        self.pady = 2
+        self.is_closed = False  # 置为True时结束shell
+        self.current_cursor = None
+
+    def find_ssh_credential(self, host_obj):
+        """
+        查找可用的ssh凭据，会登录一次目标主机（因为一台主机可以绑定多个同类型的凭据，依次尝试，直到找到可用的凭据）
+        :param host_obj:
+        :return:
+        """
+        # if host.login_protocol == LOGIN_PROTOCOL_SSH:
+        for cred_oid in host_obj.credential_oid_list:
+            cred = self.global_info.get_credential_by_oid(cred_oid)
+            if cred.cred_type == CRED_TYPE_SSH_PASS:
+                ssh_client = paramiko.client.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
+                try:
+                    ssh_client.connect(hostname=host_obj.address, port=host_obj.ssh_port, username=cred.username,
+                                       password=cred.password,
+                                       timeout=LOGIN_AUTH_TIMEOUT)
+                except paramiko.AuthenticationException as e:
+                    # print(f"Authentication Error: {e}")
+                    raise e
+                ssh_client.close()
+                return cred
+            if cred.cred_type == CRED_TYPE_SSH_KEY:
+                ssh_client = paramiko.client.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
+                prikey_obj = io.StringIO(cred.private_key)
+                try:
+                    pri_key = paramiko.RSAKey.from_private_key(prikey_obj)
+                except paramiko.ssh_exception.SSHException as e:
+                    # print("not a valid RSA private key file")
+                    raise e
+                try:
+                    ssh_client.connect(hostname=host_obj.address, port=host_obj.ssh_port, username=cred.username,
+                                       pkey=pri_key,
+                                       timeout=LOGIN_AUTH_TIMEOUT)
+                except paramiko.AuthenticationException as e:
+                    # print(f"Authentication Error: {e}")
+                    raise e
+                ssh_client.close()
+                return cred
+            else:
+                continue
+        return None
+
+    def show_single_terminal_on_pop_window(self):
+        """
+        正式执行主机巡检任务，一台主机一个线程，本函数只处理一台主机，本函数调用self.create_ssh_operator_invoke_shell去执行命令
+        :return:
+        """
+        self.pop_window = tkinter.Toplevel(self.main_window.window_obj)  # 创建子窗口★★
+        self.pop_window.title("Terminal")
+        screen_width = self.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.main_window.window_obj.winfo_screenheight()
+        width = 640
+        height = 400
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        self.pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
+        # 创建功能按钮Frame
+        frame_func = tkinter.Frame(self.pop_window, bg="pink", width=width, height=35)
+        frame_func.pack()
+        label_host_name = tkinter.Label(frame_func, text=self.host_obj.name + ":", bd=1)
+        label_host_name.pack(side=tkinter.LEFT, padx=self.padx)
+        button_exit = tkinter.Button(frame_func, text="退出", command=self.on_closing_terminal_pop_window)
+        button_exit.pack(side=tkinter.LEFT, padx=self.padx)
+        # 创建Text文本框及滚动条★★
+        scrollbar = tkinter.Scrollbar(self.pop_window)
+        scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        self.terminal_text = tkinter.Text(master=self.pop_window, yscrollcommand=scrollbar.set)
+        self.terminal_text.pack()
+        scrollbar.config(command=self.terminal_text.yview)
+        # 创建前后端线程
+        user_input_queue = queue.Queue(maxsize=2048)  # 先进先出队列
+        # front_end_thread = threading.Thread(target=lambda: self.front_end_thread_func(user_input_queue))
+        # front_end_thread.start()  # 线程start后，不要join()，主界面才不会卡住
+        self.current_cursor = self.terminal_text.index("insert")
+        # self.terminal_text.bind("<KeyPress>", lambda event: self.front_end_thread_func_key_press(event, user_input_queue))
+        self.terminal_text.bind("<KeyPress>", lambda event: "break")
+        self.terminal_text.bind("<KeyRelease>", lambda event: self.front_end_thread_func(event, user_input_queue))
+        back_end_thread = threading.Thread(target=lambda: self.back_end_thread_func(user_input_queue))
+        back_end_thread.start()  # 线程start后，不要join()，主界面才不会卡住
+
+    def on_closing_terminal_pop_window(self):
+        self.is_closed = True
+        self.pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+
+    def front_end_thread_func_key_press(self, event, user_input_queue):
+        line, column = self.terminal_text.index("insert").split(".")
+        self.current_cursor = line + "." + str(int(column) + 1)
+
+    def front_end_thread_func(self, event, user_input_queue):
+        # user_input_queue.put("l")
+        # user_input_queue.put("s")
+        # user_input_queue.put(" ")
+        # user_input_queue.put("-")
+        # user_input_queue.put("l")
+        # user_input_queue.put("h")
+        # user_input_queue.put("\n")
+        # current_input = self.terminal_text.get(self.current_cursor, tkinter.END)
+        user_input_queue.put(event.char)
+
+    def back_end_thread_func(self, user_input_queue):
+        if self.host_obj.login_protocol == LOGIN_PROTOCOL_SSH:
+            try:
+                cred = self.find_ssh_credential(self.host_obj)
+            except Exception as e:
+                print("TerminalVt100.show_single_terminal_on_pop_window: 查找可用的凭据错误，", e)
+                return
+            if cred is None:
+                print("TerminalVt100.show_single_terminal_on_pop_window: Credential is None, Could not find correct credential")
+                return
+            # ★★开始登录并创建ssh_shell
+            self.run_invoke_shell(cred, user_input_queue)
+        elif self.host_obj.login_protocol == LOGIN_PROTOCOL_TELNET:
+            print("TerminalVt100.operator_job_thread: 使用telnet协议远程目标主机")
+        else:
+            pass
+
+    def run_invoke_shell(self, cred, user_input_queue):
+        """
+        使用invoke_shell交互式shell执行命令
+        :return:
+        """
+        # ★★创建ssh连接★★
+        ssh_client = paramiko.client.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
+        try:
+            if cred.cred_type == CRED_TYPE_SSH_PASS:
+                print("TerminalVt100.run_invoke_shell : 使用ssh_password密码登录")
+                ssh_client.connect(hostname=self.host_obj.address, port=self.host_obj.ssh_port, username=cred.username,
+                                   password=cred.password, timeout=LOGIN_AUTH_TIMEOUT)
+            elif cred.cred_type == CRED_TYPE_SSH_KEY:
+                prikey_string_io = io.StringIO(cred.private_key)
+                pri_key = paramiko.RSAKey.from_private_key(prikey_string_io)
+                print("TerminalVt100.run_invoke_shell : 使用ssh_priKey密钥登录")
+                ssh_client.connect(hostname=self.host_obj.address, port=self.host_obj.ssh_port, username=cred.username,
+                                   pkey=pri_key, timeout=LOGIN_AUTH_TIMEOUT)
+            else:
+                pass
+        except paramiko.AuthenticationException as e:
+            print(f"TerminalVt100.run_invoke_shell : Authentication Error: {e}")
+            raise e
+        # ★★连接后，创建invoke_shell交互式shell★★
+        ssh_shell = ssh_client.invoke_shell(width=SHELL_TERMINAL_WIDTH, height=SHELL_TERMINAL_HEIGHT)  # 创建一个交互式shell
+        time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
+        recv_thred = threading.Thread(target=lambda: self.run_invoke_shell_recv(ssh_shell))  # 创建另一线程专门负责接收输出★★★
+        recv_thred.start()  # 线程start后，不要join()，主界面才不会卡住
+        # ★★开始执行正式命令★★
+        cmd_index = 0
+        while True:  # 这里只负责发送用户输入的所有字符
+            if self.is_closed:
+                print("TerminalVt100.run_invoke_shell: 结束了")
+                ssh_shell.close()
+                ssh_client.close()
+                return
+            user_cmd = None
+            try:
+                user_cmd = user_input_queue.get(block=False)  # 从用户输入字符队列中取出最先输入的字符，非阻塞，队列中无内容时弹出 _queue.Empty报错
+            except Exception as e:
+                print("队列中无内容", e)
+            if user_cmd is not None:
+                ssh_shell.send(user_cmd.encode('utf8'))  # 发送巡检命令，一行命令（不过滤命令前后的空白字符）
+            cmd_index += 1
+            time.sleep(0.01)
+
+    def run_invoke_shell_recv(self, ssh_shell):
+        while True:
+            if self.is_closed:
+                print("TerminalVt100.run_invoke_shell_recv: 结束了")
+                return
+            try:
+                cmd_recv = ssh_shell.recv(65535)
+            except Exception as e:
+                print(e)
+                return
+            invoke_shell_output_str_list = cmd_recv.decode('utf8').split('\r\n')
+            invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
+            # output_str_lines = invoke_shell_output_str.split('\n')
+            # output_last_line_index = len(output_str_lines) - 1
+            # output_last_line = output_str_lines[output_last_line_index]  # 命令输出最后一行（shell提示符，不带换行符的）
+            try:
+                self.terminal_text.insert(tkinter.END, invoke_shell_output_str)  # 输出时要先进行颜色修饰，这个有待完善
+                self.terminal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
+            except Exception as e:
+                print("TerminalVt100.run_invoke_shell_recv: self.terminal_text.insert报错", e)
+            time.sleep(0.01)
 
 
 if __name__ == '__main__':
