@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-18
+# update: 2024-03-20
 
 """
 解决问题：
@@ -36,6 +36,7 @@
 ★. 在host_job_item的text界面看巡检输出信息，不全，有很多缺失，                          2024年3月14日 已解决
     原因是显示是未遍历SSHOperatorOutput.interactive_output_bytes_list
 ★. 主机命令在线批量执行，在“主机组”界面，对这一组主机在线下发命令
+★. 首次登录后，对输出进行判断，有的设备首次登录后会要求改密码，或者长时间未登录的设备要求修改密码
 
 资源操作逻辑：
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -69,6 +70,7 @@ import sqlite3
 import base64
 import sched
 import queue
+import struct
 import tkinter
 from tkinter import messagebox
 from tkinter import filedialog
@@ -6946,10 +6948,12 @@ class ViewInspectionJobInFrame:
 
 
 class TerminalVt100:
-    def __init__(self, main_window=None, width=140, height=48, global_info=None, host_obj=None):
+    def __init__(self, main_window=None, shell_terminal_width=64, shell_terminal_height=32, font_size=14, global_info=None, host_obj=None):
         self.main_window = main_window
-        self.width = width
-        self.height = height
+        self.shell_terminal_width = shell_terminal_width
+        self.shell_terminal_height = shell_terminal_height
+        self.font_name = ''  # 'MS Gothic'
+        self.font_size = font_size
         self.global_info = global_info
         self.host_obj = host_obj
         self.pop_window = None  # 在 show_terminal_pop_window() 里赋值
@@ -6958,6 +6962,9 @@ class TerminalVt100:
         self.pady = 2
         self.is_closed = False  # 置为True时结束shell
         self.current_cursor = None
+        self.bg_color = "black"
+        self.fg_color = "white"
+        self.output_block_obj_list = []
 
     def find_ssh_credential(self, host_obj):
         """
@@ -7007,40 +7014,47 @@ class TerminalVt100:
         正式执行主机巡检任务，一台主机一个线程，本函数只处理一台主机，本函数调用self.create_ssh_operator_invoke_shell去执行命令
         :return:
         """
-        self.pop_window = tkinter.Toplevel(self.main_window.window_obj)  # 创建子窗口★★
+        # ★★创建子窗口★★
+        self.pop_window = tkinter.Toplevel(self.main_window.window_obj)
         self.pop_window.title("Terminal")
         screen_width = self.main_window.window_obj.winfo_screenwidth()
         screen_height = self.main_window.window_obj.winfo_screenheight()
-        width = 640
-        height = 400
-        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        pop_win_width = int(self.shell_terminal_width * self.font_size)
+        pop_win_height = int(self.shell_terminal_height * self.font_size) + 35
+        win_pos = f"{pop_win_width}x{pop_win_height}+{screen_width // 2 - pop_win_width // 2}+{screen_height // 2 - pop_win_height // 2}"
         self.pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         self.pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
         self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
         # 创建功能按钮Frame
-        frame_func = tkinter.Frame(self.pop_window, bg="pink", width=width, height=35)
+        frame_func = tkinter.Frame(self.pop_window, bg="pink", width=pop_win_width, height=35)
         frame_func.pack()
         label_host_name = tkinter.Label(frame_func, text=self.host_obj.name + ":", bd=1)
         label_host_name.pack(side=tkinter.LEFT, padx=self.padx)
         button_exit = tkinter.Button(frame_func, text="退出", command=self.on_closing_terminal_pop_window)
         button_exit.pack(side=tkinter.LEFT, padx=self.padx)
-        # 创建Text文本框及滚动条★★
+        # ★★创建Text文本框及滚动条★★
         scrollbar = tkinter.Scrollbar(self.pop_window)
         scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        self.terminal_text = tkinter.Text(master=self.pop_window, yscrollcommand=scrollbar.set)
+        self.terminal_text = tkinter.Text(master=self.pop_window, yscrollcommand=scrollbar.set, width=SHELL_TERMINAL_WIDTH,
+                                          height=SHELL_TERMINAL_HEIGHT, font=(self.font_name, self.font_size), bg=self.bg_color)
         self.terminal_text.pack()
         scrollbar.config(command=self.terminal_text.yview)
-        # 创建前后端线程
-        user_input_queue = queue.Queue(maxsize=2048)  # 先进先出队列
-        # front_end_thread = threading.Thread(target=lambda: self.front_end_thread_func(user_input_queue))
-        # front_end_thread.start()  # 线程start后，不要join()，主界面才不会卡住
+        self.terminal_text.bind("<Button-1>", self.set_selected_text_color_click)  # 鼠标单击事件，先清空
+        self.terminal_text.bind("<B1-Motion>", self.set_selected_text_color)  # 鼠标左击并移动（拖动）事件
+        self.terminal_text.configure(insertbackground='green')  # Text设置光标颜色
+        # ★★★创建先进先出队列-实时存放用户输入字符★★★
+        user_input_byte_queue = queue.Queue(maxsize=2048)  # 存储的是用户输入的按键（含组合键）对应的ASCII码，元素为byte
         self.current_cursor = self.terminal_text.index("insert")
-        # self.terminal_text.bind("<KeyPress>", lambda event: self.front_end_thread_func_key_press(event, user_input_queue))
-        self.terminal_text.bind("<KeyPress>", lambda event: "break")
-        self.terminal_text.bind("<KeyRelease>", lambda event: self.front_end_thread_func(event, user_input_queue))
-        back_end_thread = threading.Thread(target=lambda: self.back_end_thread_func(user_input_queue))
+        # 下面这个匹配组合键，以单个ascii码的方式发送
+        # self.terminal_text.bind("<Control-c>", lambda event: self.front_end_thread_func_ctrl_comb_key(event, user_input_byte_queue))
+        # self.terminal_text.bind("<Control-z>", lambda event: self.front_end_thread_func_ctrl_comb_key(event, user_input_byte_queue))
+        # 下面这个也能发送Ctrl+A之类的组合键，以单个ascii码的方式发送
+        self.terminal_text.bind("<KeyPress>", lambda event: self.front_end_input_func_printable_char(event, user_input_byte_queue))
+        # self.terminal_text.bind("<KeyPress>", lambda event: "break")  # 事件处理脚本返回 "break" 会中断后面的绑定，所以键盘输入不会被插入到文本框
+        # ★★★创建后端线程，用于发送命令及接收输出信息★★★
+        back_end_thread = threading.Thread(target=lambda: self.back_end_thread_func(user_input_byte_queue))
         back_end_thread.start()  # 线程start后，不要join()，主界面才不会卡住
 
     def on_closing_terminal_pop_window(self):
@@ -7048,21 +7062,79 @@ class TerminalVt100:
         self.pop_window.destroy()  # 关闭子窗口
         self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
 
-    def front_end_thread_func_key_press(self, event, user_input_queue):
-        line, column = self.terminal_text.index("insert").split(".")
-        self.current_cursor = line + "." + str(int(column) + 1)
+    def set_selected_text_color_click(self, event):
+        self.terminal_text.tag_delete("selected")
 
-    def front_end_thread_func(self, event, user_input_queue):
-        # user_input_queue.put("l")
-        # user_input_queue.put("s")
-        # user_input_queue.put(" ")
-        # user_input_queue.put("-")
-        # user_input_queue.put("l")
-        # user_input_queue.put("h")
-        # user_input_queue.put("\n")
-        # current_input = self.terminal_text.get(self.current_cursor, tkinter.END)
-        user_input_queue.put(event.char)
+    def set_selected_text_color(self, event):
+        self.terminal_text.tag_delete("selected")
+        try:
+            self.terminal_text.tag_add("selected", tkinter.SEL_FIRST, tkinter.SEL_LAST)
+            self.terminal_text.tag_config("selected", foreground="white", backgroun="gray")
+        except tkinter.TclError as e:
+            print("未选择任何文字", e)
+            return
+
+    def backspace_delete_chars(self, chars_count):
+        current_line, current_column = self.terminal_text.index(tkinter.CURRENT).split(".")
+        start_column_int = int(current_column) - chars_count
+        start_index = current_line + "." + str(start_column_int)
+        self.terminal_text.delete(start_index, self.terminal_text.index(tkinter.CURRENT))
+
+    @staticmethod
+    def front_end_input_func_printable_char(event, user_input_byte_queue):
+        """
+        处理普通可打印字符，控制键及组合按键
+        ★★★ 按键，ascii字符，vt100控制符是3个不同的概念
+        按键可以对应一个字符，也可没有相应字符，
+        按下shift/ctrl等控制键后再按其他键，可能会产生换档字符（如按下shift加数字键2，产生字符@）
+        vt100控制符是由ESC（十六进制为\0x1b，八进制为\033）加其他可打印字符组成，比如:
+        按键↑（方向键Up）对应的vt100控制符为 ESC加字母OA，即b'\033OA'
+        ★★★
+        :param event:
+        :param user_input_byte_queue:
+        :return:
+        """
+        print("普通字符输入如下：")
+        print(event.keysym)
+        print(event.keycode)
+        # 非可打印字符没有event.char，event.char为空，需要发送event.keycode或转为vt100控制序列再发送
+        if event.keysym == "BackSpace":
+            input_byte = struct.pack('b', event.keycode)
+        elif event.keysym == "Delete":
+            input_byte = struct.pack('b', event.keycode)
+        elif event.keysym == "Down":
+            input_byte = b'\033OB'  # ESC O B    对应  方向键(↓)    VK_DOWN (40)
+        elif event.keysym == "Up":
+            input_byte = b'\033OA'  # ESC O A    对应  方向键(↑)    VK_UP (38)
+        elif event.keysym == "Left":
+            input_byte = b'\033OD'  # ESC O D    对应  方向键(←)    VK_LEFT (37)
+        elif event.keysym == "Right":
+            input_byte = b'\033OC'  # ESC O C    对应  方向键(→)    VK_RIGHT (39)
+        else:
+            # 可打印字符只能发送event.char，因为输入!@#$%^&*()这些换档符号时，需要先按下Shift键再按下相应数字键，
+            # Shift键本身不发送（Shift键没有event.char），要发送的是换档后的符号
+            # ctrl+字母 这类组合键也是单一字符\0x01到\0x1A
+            input_byte = event.char.encode("utf8")
+        user_input_byte_queue.put(input_byte)
+        return "break"  # 事件处理脚本返回 "break" 会中断后面的绑定，所以键盘输入不会被插入到文本框
+
+    @staticmethod
+    def front_end_thread_func_ctrl_comb_key(event, user_input_byte_queue):
+        """
+        处理组合键
+        :param event:
+        :param user_input_byte_queue:
+        :return:
+        """
+        print("控制组合键输入如下：")
+        print(event.keysym)
+        print(event.keycode)
+        # print(ord(event.char))  # 非可打印字符没有event.char，为空
+        # input_byte = struct.pack('b', event.keycode)
+        input_byte = event.char.encode("utf8")
+        user_input_byte_queue.put(input_byte)
 
     def back_end_thread_func(self, user_input_queue):
         if self.host_obj.login_protocol == LOGIN_PROTOCOL_SSH:
@@ -7070,9 +7142,18 @@ class TerminalVt100:
                 cred = self.find_ssh_credential(self.host_obj)
             except Exception as e:
                 print("TerminalVt100.show_single_terminal_on_pop_window: 查找可用的凭据错误，", e)
+                self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)
+                self.terminal_text.insert(tkinter.END, "TerminalVt100.show_single_terminal_on_pop_window: 查找可用的凭据错误", "default")
+                self.terminal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
+                self.terminal_text.focus_force()
                 return
             if cred is None:
                 print("TerminalVt100.show_single_terminal_on_pop_window: Credential is None, Could not find correct credential")
+                self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)
+                self.terminal_text.insert(tkinter.END, "TerminalVt100.show_single_terminal_on_pop_window: 查找可用的凭据错误None",
+                                          "default")
+                self.terminal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
+                self.terminal_text.focus_force()
                 return
             # ★★开始登录并创建ssh_shell
             self.run_invoke_shell(cred, user_input_queue)
@@ -7081,7 +7162,7 @@ class TerminalVt100:
         else:
             pass
 
-    def run_invoke_shell(self, cred, user_input_queue):
+    def run_invoke_shell(self, cred, user_input_byte_queue):
         """
         使用invoke_shell交互式shell执行命令
         :return:
@@ -7106,7 +7187,7 @@ class TerminalVt100:
             print(f"TerminalVt100.run_invoke_shell : Authentication Error: {e}")
             raise e
         # ★★连接后，创建invoke_shell交互式shell★★
-        ssh_shell = ssh_client.invoke_shell(width=SHELL_TERMINAL_WIDTH, height=SHELL_TERMINAL_HEIGHT)  # 创建一个交互式shell
+        ssh_shell = ssh_client.invoke_shell(width=self.shell_terminal_width, height=self.shell_terminal_height)  # 创建一个交互式shell
         time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
         recv_thred = threading.Thread(target=lambda: self.run_invoke_shell_recv(ssh_shell))  # 创建另一线程专门负责接收输出★★★
         recv_thred.start()  # 线程start后，不要join()，主界面才不会卡住
@@ -7118,15 +7199,15 @@ class TerminalVt100:
                 ssh_shell.close()
                 ssh_client.close()
                 return
-            user_cmd = None
             try:
-                user_cmd = user_input_queue.get(block=False)  # 从用户输入字符队列中取出最先输入的字符，非阻塞，队列中无内容时弹出 _queue.Empty报错
-            except Exception as e:
-                print("队列中无内容", e)
-            if user_cmd is not None:
-                ssh_shell.send(user_cmd.encode('utf8'))  # 发送巡检命令，一行命令（不过滤命令前后的空白字符）
+                user_cmd = user_input_byte_queue.get(block=False)  # 从用户输入字符队列中取出最先输入的字符，非阻塞，队列中无内容时弹出 _queue.Empty报错
+                print("发送命令:", user_cmd)
+                ssh_shell.send(user_cmd)  # 发送巡检命令，一行命令（不过滤命令前后的空白字符）
+            except queue.Empty:
+                # print("队列中无内容", e)
+                time.sleep(0.01)
+                continue
             cmd_index += 1
-            time.sleep(0.01)
 
     def run_invoke_shell_recv(self, ssh_shell):
         while True:
@@ -7138,17 +7219,106 @@ class TerminalVt100:
             except Exception as e:
                 print(e)
                 return
-            invoke_shell_output_str_list = cmd_recv.decode('utf8').split('\r\n')
-            invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
-            # output_str_lines = invoke_shell_output_str.split('\n')
-            # output_last_line_index = len(output_str_lines) - 1
-            # output_last_line = output_str_lines[output_last_line_index]  # 命令输出最后一行（shell提示符，不带换行符的）
+            print("接收到信息:", cmd_recv)
+            self.parse_vt100_received_bytes(cmd_recv)  # ★★★开始解析接收到的vt100输出★★★
+            for output_block_obj in self.output_block_obj_list:
+                try:
+                    self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)
+                    # self.terminal_text.tag_config("pink", foreground="pink", backgroun="green")
+                    if output_block_obj.output_block_tag_config_name == '':
+                        self.terminal_text.insert(tkinter.END, output_block_obj.output_block_content, "default")
+                    else:
+                        self.terminal_text.insert(tkinter.END, output_block_obj.output_block_content,
+                                                  output_block_obj.output_block_tag_config_name)
+                        # self.terminal_text.tag_delete(output_block_obj.output_block_tag_config_name)
+                except Exception as e:
+                    print("TerminalVt100.run_invoke_shell_recv: self.terminal_text.insert报错", e)
             try:
-                self.terminal_text.insert(tkinter.END, invoke_shell_output_str)  # 输出时要先进行颜色修饰，这个有待完善
                 self.terminal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
+                self.terminal_text.focus_force()
             except Exception as e:
                 print("TerminalVt100.run_invoke_shell_recv: self.terminal_text.insert报错", e)
             time.sleep(0.01)
+
+    def parse_vt100_received_bytes(self, received_bytes=None):
+        """
+        解析接收到的vt100输出，返回self.output_block_obj_list，元素为<Vt100OutputBlock>对象
+        :param received_bytes:
+        :return:
+        """
+        print("TerminalVt100.parse_vt100_received_bytes: 开始解析received_bytes")
+        if len(received_bytes) == 0:
+            print("TerminalVt100.parse_vt100_received_bytes: received_bytes为空")
+            return
+        self.output_block_obj_list = []  # 元素为<Vt100OutputBlock>对象
+        output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')  # 对received_bytes进行拆分，拆分符为 b'\033'
+        for block_bytes in output_block_ctrl_and_normal_content_list:
+            if len(block_bytes) == 0:
+                print("TerminalVt100.parse_vt100_received_bytes: block为空")
+                continue
+            print("TerminalVt100.parse_vt100_received_bytes: block不为空★★")
+            block_str = block_bytes.decode("utf8")
+            # ★匹配 [0m 清除所有属性★
+            match_pattern = r'\[0m'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                if ret.start() != 0:  # 不是在\033后首先匹配到的，则视为普通字符
+                    continue
+                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                invoke_shell_output_str = block_str[ret.end():]
+                print(invoke_shell_output_str)
+                self.output_block_obj_list.append(
+                    Vt100OutputBlock(output_block_content=invoke_shell_output_str, output_block_tag_config_name='default'))
+                continue
+            # ★匹配 [01m 到 [08m 字体风格
+            match_pattern = r'\[[0-9]{1,2}m'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                if ret.start() != 0:  # 不是在\033后首先匹配到的，则视为普通字符
+                    continue
+                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                invoke_shell_output_str = block_str[ret.end():]
+                print(invoke_shell_output_str)
+                self.output_block_obj_list.append(
+                    Vt100OutputBlock(output_block_content=invoke_shell_output_str, output_block_tag_config_name='default'))
+                continue
+            # ★匹配 [01;34m  [08;47m 这种字体风格
+            match_pattern = r'\[[0-9]{1,2};[0-9]{1,2}m'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                if ret.start() != 0:  # 不是在\033后首先匹配到的，则视为普通字符
+                    continue
+                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                invoke_shell_output_str = block_str[ret.end():]
+                print(invoke_shell_output_str)
+                self.output_block_obj_list.append(
+                    Vt100OutputBlock(output_block_content=invoke_shell_output_str, output_block_tag_config_name='default'))
+                continue
+            # ★匹配 [01;34;42m  [08;32;47m 这种字体风格
+            match_pattern = r'\[[0-9]{1,2};[0-9]{1,2};[0-9]{1,2}m'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                if ret.start() != 0:  # 不是在\033后首先匹配到的，则视为普通字符
+                    continue
+                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                invoke_shell_output_str = block_str[ret.end():]
+                print(invoke_shell_output_str)
+                self.output_block_obj_list.append(
+                    Vt100OutputBlock(output_block_content=invoke_shell_output_str, output_block_tag_config_name='default'))
+                continue
+            # 最后，未匹配到任何属性★★★
+            print("TerminalVt100.parse_vt100_received_bytes: 未匹配到任何属性")
+            invoke_shell_output_str_list = block_str.split('\r\n')
+            invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
+            self.output_block_obj_list.append(
+                Vt100OutputBlock(output_block_content=invoke_shell_output_str, output_block_tag_config_name='default'))
+
+
+class Vt100OutputBlock:
+    def __init__(self, output_block_content='', output_block_tag_config_name=''):
+        self.output_block_content = output_block_content
+        self.output_block_tag_config_name = output_block_tag_config_name
+        self.output_block_control_seq = None
 
 
 if __name__ == '__main__':
