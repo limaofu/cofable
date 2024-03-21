@@ -71,6 +71,7 @@ import base64
 import sched
 import queue
 import struct
+import pyperclip
 import tkinter
 from tkinter import messagebox
 from tkinter import filedialog
@@ -7047,12 +7048,17 @@ class TerminalVt100:
                                           height=SHELL_TERMINAL_HEIGHT, font=(self.font_name, self.font_size), bg=self.bg_color)
         self.terminal_text.pack()
         scrollbar.config(command=self.terminal_text.yview)
-        self.terminal_text.bind("<Button-1>", self.set_selected_text_color_click)  # 鼠标单击事件，先清空
-        self.terminal_text.bind("<B1-Motion>", self.set_selected_text_color)  # 鼠标左击并移动（拖动）事件
         self.terminal_text.configure(insertbackground='green')  # Text设置光标颜色
         # ★★★创建先进先出队列-实时存放用户输入字符★★★
-        user_input_byte_queue = queue.Queue(maxsize=2048)  # 存储的是用户输入的按键（含组合键）对应的ASCII码，元素为byte
+        user_input_byte_queue = queue.Queue(maxsize=2048)  # 存储的是用户输入的按键（含组合键）对应的ASCII码，元素为bytes(1到N个字节）
         self.current_cursor = self.terminal_text.index("insert")
+        # 绑定鼠标点击事件
+        self.terminal_text.bind("<Button-1>", self.set_selected_text_color_clear)  # 鼠标左键单击事件，先清空选中的文本属性
+        self.terminal_text.bind("<B1-Motion>", self.set_selected_text_color)  # 鼠标左击并移动（拖动）事件，动态设置选中的文本属性
+        self.terminal_text.bind("<ButtonRelease-1>", self.set_selected_text_color_release)  # 鼠标左击释放事件，移动光标到文本框末尾，不滚动内容
+        # 鼠标右键单击事件，弹出功能菜单
+        self.terminal_text.bind("<Button-3>", lambda event: self.pop_menu_on_terminal_text(event, user_input_byte_queue))
+
         # 下面这个匹配组合键，以单个ascii码的方式发送
         # self.terminal_text.bind("<Control-c>", lambda event: self.front_end_thread_func_ctrl_comb_key(event, user_input_byte_queue))
         # self.terminal_text.bind("<Control-z>", lambda event: self.front_end_thread_func_ctrl_comb_key(event, user_input_byte_queue))
@@ -7070,17 +7076,44 @@ class TerminalVt100:
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
         self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
 
-    def set_selected_text_color_click(self, event):
+    def set_selected_text_color_clear(self, event):
         self.terminal_text.tag_delete("selected")
 
     def set_selected_text_color(self, event):
         self.terminal_text.tag_delete("selected")
         try:
             self.terminal_text.tag_add("selected", tkinter.SEL_FIRST, tkinter.SEL_LAST)
-            self.terminal_text.tag_config("selected", foreground="white", backgroun="gray")
+            self.terminal_text.tag_config("selected", foreground="white", backgroun="gray")  # 将选中的文本设置属性
         except tkinter.TclError as e:
-            print("未选择任何文字", e)
+            print("TerminalVt100.set_selected_text_color: 未选择任何文字", e)
             return
+
+    def pop_menu_on_terminal_text(self, event, user_input_byte_queue):
+        print("点击了右键")
+        pop_menu_bar = tkinter.Menu(self.terminal_text, tearoff=0)
+        pop_menu_bar.add_command(label="复制", command=self.copy_selected_text_on_terminal_text)
+        pop_menu_bar.add_command(label="粘贴", command=lambda: self.paste_text_on_terminal_text(user_input_byte_queue))
+        pop_menu_bar.post(event.x_root, event.y_root)
+
+    def copy_selected_text_on_terminal_text(self):
+        try:
+            selected_text = self.terminal_text.get(tkinter.SEL_FIRST, tkinter.SEL_LAST)
+            pyperclip.copy(selected_text)
+        except tkinter.TclError as e:
+            print("TerminalVt100.set_selected_text_color: 未选择任何文字", e)
+            return
+
+    @staticmethod
+    def paste_text_on_terminal_text(user_input_byte_queue):
+        pasted_text = pyperclip.paste()
+        user_input_bytes = pasted_text.encode("utf8")
+        user_input_byte_queue.put(user_input_bytes)
+
+    def set_selected_text_color_release(self, event):
+        # 选择完文本后，光标会停留在tkinter.SEL_LAST
+        # self.terminal_text.mark_set("tkinter_END", tkinter.END)
+        # self.terminal_text.see("tkinter_END")  # 这个会使文本框滚动内容到末尾，选择的内容如果不在最后一页，则被滚动了，当前页面看不到了
+        self.terminal_text.mark_set(tkinter.INSERT, "end lineend")  # 这个会使闪烁的光标移到最后一行行末，但页面不会滚动，选中的内容仍在当前界面
 
     def backspace_delete_chars(self, chars_count):
         current_line, current_column = self.terminal_text.index(tkinter.CURRENT).split(".")
@@ -7194,20 +7227,24 @@ class TerminalVt100:
             raise e
         # ★★连接后，创建invoke_shell交互式shell★★
         ssh_shell = ssh_client.invoke_shell(width=self.shell_terminal_width, height=self.shell_terminal_height)  # 创建一个交互式shell
-        time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
-        # 创建线程专门负责接收输出并解析，最后在Text显示输出（解析后的内容）
+        # time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
+        # ★★创建线程专门负责接收输出并解析，最后在Text显示输出（解析后的内容）★★
         recv_thred = threading.Thread(target=lambda: self.run_invoke_shell_recv(ssh_shell))
         recv_thred.start()  # 线程start后，不要join()，主界面才不会卡住
         # ★★开始执行正式命令★★
         cmd_index = 0
         while True:  # 这里只负责发送用户输入的所有字符
             if self.is_closed:
-                print("TerminalVt100.run_invoke_shell: 结束了")
+                print("TerminalVt100.run_invoke_shell: 本函数结束了")
                 ssh_shell.close()
                 ssh_client.close()
                 return
+            # user_cmd = user_input_byte_queue.get(block=True)  # 从用户输入字符队列中取出最先输入的字符，★★ 阻塞式 ★★
+            # print("发送命令:", user_cmd)
+            # ssh_shell.send(user_cmd)  # 发送巡检命令，一行命令（不过滤命令前后的空白字符）
             try:
-                user_cmd = user_input_byte_queue.get(block=False)  # 从用户输入字符队列中取出最先输入的字符，非阻塞，队列中无内容时弹出 _queue.Empty报错
+                # 从用户输入字符队列中取出最先输入的字符 ★非阻塞★ 队列中无内容时弹出 _queue.Empty报错，这里之所以用非阻塞，是因为要判断self.is_closed
+                user_cmd = user_input_byte_queue.get(block=False)
                 print("发送命令:", user_cmd)
                 ssh_shell.send(user_cmd)  # 发送巡检命令，一行命令（不过滤命令前后的空白字符）
             except queue.Empty:
@@ -7218,7 +7255,7 @@ class TerminalVt100:
 
     def run_invoke_shell_recv(self, ssh_shell):
         """
-        解析接收到的vt100输出，并put <Vt100OutputBlock>对象到recv_output_block_queue里
+        解析接收到的vt100输出，并解析vt100属性，最后输出到self.terminal_text
         :param ssh_shell:
         :return:
         """
@@ -7237,15 +7274,20 @@ class TerminalVt100:
             if len(received_bytes) == 0:
                 print("TerminalVt100.parse_vt100_received_bytes: received_bytes为空")
                 continue
-            output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')  # 对received_bytes进行拆分，拆分符为 b'\033'
-            self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)
+            # 对received_bytes进行拆分，拆分符为 b'\033' ，拆分后，每一个元素为一个单独的属性块
+            output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
+            self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)  # 先创建一个默认的显示属性tag
+            # 对一次recv接收后的信息拆分后的每个属性块进行解析
             for block_bytes in output_block_ctrl_and_normal_content_list:
+                if self.is_closed:
+                    print("TerminalVt100.run_invoke_shell_recv: 本函数结束了")
+                    return
                 if len(block_bytes) == 0:
-                    print("TerminalVt100.parse_vt100_received_bytes: block为空")
+                    print("TerminalVt100.parse_vt100_received_bytes: block_bytes为空")
                     continue
-                print("TerminalVt100.parse_vt100_received_bytes: block不为空★★")
+                print("TerminalVt100.parse_vt100_received_bytes: block_bytes不为空★★")
                 block_str = block_bytes.decode("utf8")
-                # ★匹配 [0m 清除所有属性★
+                # ★匹配 [0m  -->清除所有属性
                 match_pattern = r'\[0m'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
@@ -7257,7 +7299,7 @@ class TerminalVt100:
                         # 在self.terminal_text里输出解析后的内容
                         self.terminal_text.insert(tkinter.END, block_str[ret.end():], 'default')
                         continue
-                # ★匹配 [01m 到 [08m 字体风格
+                # ★匹配 [01m 到 [08m  -->字体风格
                 match_pattern = r'\[[0-9]{1,2}m'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
@@ -7275,7 +7317,7 @@ class TerminalVt100:
                         self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
                                                   vt100_output_block_obj.output_block_tag_config_name)
                         continue
-                # ★匹配 [01;34m  [08;47m 这种字体风格
+                # ★匹配 [01;34m  [08;47m  -->这种字体风格
                 match_pattern = r'\[[0-9]{1,2};[0-9]{1,2}m'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
@@ -7293,7 +7335,7 @@ class TerminalVt100:
                         self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
                                                   vt100_output_block_obj.output_block_tag_config_name)
                         continue
-                # ★匹配 [01;34;42m  [08;32;47m 这种字体风格
+                # ★匹配 [01;34;42m  [08;32;47m  -->这种字体风格
                 match_pattern = r'\[[0-9]{1,2};[0-9]{1,2};[0-9]{1,2}m'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
@@ -7311,7 +7353,7 @@ class TerminalVt100:
                         self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
                                                   vt100_output_block_obj.output_block_tag_config_name)
                         continue
-                # 最后，未匹配到任何属性★★★
+                # ★最后，未匹配到任何属性
                 print("TerminalVt100.parse_vt100_received_bytes: 未匹配到任何属性")
                 invoke_shell_output_str_list = block_str.split('\r\n')
                 invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
@@ -7320,7 +7362,7 @@ class TerminalVt100:
                 # 在self.terminal_text里输出解析后的内容
                 self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
                                           vt100_output_block_obj.output_block_tag_config_name)
-            # 一次接收输出完成后，光标定位到Text末尾
+            # 对一次recv接收后的信息解析输出完成后，光标定位到Text末尾
             self.terminal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
             self.terminal_text.focus_force()
 
