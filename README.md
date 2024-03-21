@@ -9,4 +9,7 @@ How to run it? 如何运行此程序？<br>
 python3 cofable.py
 ```
 效果图：<br>
-![demo1](demo1.png)
+![demo1](not_resource_img/demo1.png)
+<br>
+支持在线批量shell交互，shell终端支持彩色及自定义单词/字符高亮<br>
+![demo2](not_resource_img/demo2.png)
