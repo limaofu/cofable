@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-20
+# update: 2024-03-21
 
 """
 解决问题：
@@ -143,6 +143,11 @@ LOGIN_PROTOCOL_TELNET = 1
 # vt100 shell终端的默认宽度和高度
 SHELL_TERMINAL_WIDTH = 140
 SHELL_TERMINAL_HEIGHT = 48
+# vt100终端tag_config类型
+TAG_CONFIG_TYPE_FONT = 0
+TAG_CONFIG_TYPE_COLOR = 1
+TAG_CONFIG_TYPE_SCREEN = 2
+TAG_CONFIG_TYPE_CURSOR = 3
 
 
 class Project:
@@ -7279,8 +7284,11 @@ class TerminalVt100:
                 print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                 invoke_shell_output_str = block_str[ret.end():]
                 print(invoke_shell_output_str)
-                self.output_block_obj_list.append(
-                    Vt100OutputBlock(output_block_content=invoke_shell_output_str, output_block_tag_config_name='default'))
+                vt100_output_block_obj = Vt100OutputBlock(output_block_content=invoke_shell_output_str,
+                                                          output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
+                                                          terminal_text_obj=self.terminal_text)
+                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {vt100_output_block_obj.output_block_control_seq}")
+                self.output_block_obj_list.append(vt100_output_block_obj)
                 continue
             # ★匹配 [01;34m  [08;47m 这种字体风格
             match_pattern = r'\[[0-9]{1,2};[0-9]{1,2}m'
@@ -7291,8 +7299,12 @@ class TerminalVt100:
                 print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                 invoke_shell_output_str = block_str[ret.end():]
                 print(invoke_shell_output_str)
-                self.output_block_obj_list.append(
-                    Vt100OutputBlock(output_block_content=invoke_shell_output_str, output_block_tag_config_name='default'))
+                vt100_output_block_obj = Vt100OutputBlock(output_block_content=invoke_shell_output_str,
+                                                          output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
+                                                          terminal_text_obj=self.terminal_text)
+                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {vt100_output_block_obj.output_block_control_seq}")
+                vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
+                self.output_block_obj_list.append(vt100_output_block_obj)
                 continue
             # ★匹配 [01;34;42m  [08;32;47m 这种字体风格
             match_pattern = r'\[[0-9]{1,2};[0-9]{1,2};[0-9]{1,2}m'
@@ -7303,22 +7315,72 @@ class TerminalVt100:
                 print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                 invoke_shell_output_str = block_str[ret.end():]
                 print(invoke_shell_output_str)
-                self.output_block_obj_list.append(
-                    Vt100OutputBlock(output_block_content=invoke_shell_output_str, output_block_tag_config_name='default'))
+                vt100_output_block_obj = Vt100OutputBlock(output_block_content=invoke_shell_output_str,
+                                                          output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
+                                                          terminal_text_obj=self.terminal_text)
+                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {vt100_output_block_obj.output_block_control_seq}")
+                self.output_block_obj_list.append(vt100_output_block_obj)
                 continue
             # 最后，未匹配到任何属性★★★
             print("TerminalVt100.parse_vt100_received_bytes: 未匹配到任何属性")
             invoke_shell_output_str_list = block_str.split('\r\n')
             invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
-            self.output_block_obj_list.append(
-                Vt100OutputBlock(output_block_content=invoke_shell_output_str, output_block_tag_config_name='default'))
+            vt100_output_block_obj = Vt100OutputBlock(output_block_content=invoke_shell_output_str,
+                                                      output_block_tag_config_name='default')
+            self.output_block_obj_list.append(vt100_output_block_obj)
 
 
 class Vt100OutputBlock:
-    def __init__(self, output_block_content='', output_block_tag_config_name=''):
-        self.output_block_content = output_block_content
-        self.output_block_tag_config_name = output_block_tag_config_name
-        self.output_block_control_seq = None
+    def __init__(self, output_block_content='', output_block_tag_config_name='', output_block_control_seq='', terminal_text_obj=None):
+        self.output_block_content = output_block_content  # <str> 匹配上的普通字符（不含最前面的控制序列字符）
+        self.output_block_tag_config_name = output_block_tag_config_name  # <str> 根据匹配上的控制序列，而设置的字体颜色风格名称
+        self.output_block_control_seq = output_block_control_seq  # <str> 匹配上的控制序列字符，如 [0m
+        # [01;34m 这种在output_block_control_seq里不带最前面的[及最后面的m，只剩下 02  01;34  01;34;42 这种
+        self.terminal_text_obj = terminal_text_obj
+
+    def set_tag_config(self, tag_config_type):
+        if tag_config_type == TAG_CONFIG_TYPE_COLOR:
+            print(f"{self.output_block_control_seq}匹配到了 颜色")
+            self.set_tag_config_color()
+
+    def set_tag_config_color(self):
+        self.output_block_tag_config_name = uuid.uuid4().__str__()  # <str>
+        color_ctrl_seq_seg_list = self.output_block_control_seq.split(";")
+        for color_ctrl_seq_seg in color_ctrl_seq_seg_list:
+            if int(color_ctrl_seq_seg) == 30:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="black")
+            elif int(color_ctrl_seq_seg) == 31:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="red")
+            elif int(color_ctrl_seq_seg) == 32:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="green")
+            elif int(color_ctrl_seq_seg) == 33:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="yellow")
+            elif int(color_ctrl_seq_seg) == 34:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="blue")
+            elif int(color_ctrl_seq_seg) == 35:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="purple")
+            elif int(color_ctrl_seq_seg) == 36:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="cyan")
+            elif int(color_ctrl_seq_seg) == 37:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="white")
+            elif int(color_ctrl_seq_seg) == 40:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="black")
+            elif int(color_ctrl_seq_seg) == 41:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="red")
+            elif int(color_ctrl_seq_seg) == 42:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="green")
+            elif int(color_ctrl_seq_seg) == 43:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="yellow")
+            elif int(color_ctrl_seq_seg) == 44:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="blue")
+            elif int(color_ctrl_seq_seg) == 45:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="purple")
+            elif int(color_ctrl_seq_seg) == 46:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="cyan")
+            elif int(color_ctrl_seq_seg) == 47:
+                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="white")
+            else:
+                pass
 
 
 if __name__ == '__main__':
