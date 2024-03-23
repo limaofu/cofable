@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-21
+# update: 2024-03-23
 
 """
 解决问题：
@@ -37,6 +37,8 @@
     原因是显示是未遍历SSHOperatorOutput.interactive_output_bytes_list
 ★. 主机命令在线批量执行，在“主机组”界面，对这一组主机在线下发命令
 ★. 首次登录后，对输出进行判断，有的设备首次登录后会要求改密码，或者长时间未登录的设备要求修改密码
+★. 不同巡检线程都去读写sqlite3数据库文件时，报错了，得加个锁
+★. 在vt100终端里实现了 光标的左右移动及插入/删除字符                                    2024年3月23日 完成
 
 资源操作逻辑：
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -7239,9 +7241,6 @@ class TerminalVt100:
                 ssh_shell.close()
                 ssh_client.close()
                 return
-            # user_cmd = user_input_byte_queue.get(block=True)  # 从用户输入字符队列中取出最先输入的字符，★★ 阻塞式 ★★
-            # print("发送命令:", user_cmd)
-            # ssh_shell.send(user_cmd)  # 发送巡检命令，一行命令（不过滤命令前后的空白字符）
             try:
                 # 从用户输入字符队列中取出最先输入的字符 ★非阻塞★ 队列中无内容时弹出 _queue.Empty报错，这里之所以用非阻塞，是因为要判断self.is_closed
                 user_cmd = user_input_byte_queue.get(block=False)
@@ -7249,7 +7248,7 @@ class TerminalVt100:
                 ssh_shell.send(user_cmd)  # 发送巡检命令，一行命令（不过滤命令前后的空白字符）
             except queue.Empty:
                 # print("队列中无内容", e)
-                time.sleep(0.01)
+                time.sleep(0.05)
                 continue
             cmd_index += 1
 
@@ -7270,6 +7269,9 @@ class TerminalVt100:
                 return
             print("接收到信息:", received_bytes)
             # ★★★开始解析接收到的vt100输出★★★
+            # 客户端按下 ← 左方向键        发送的是 b'\033OD'     服务端回复的是  b'\x08'
+            # 客户端按下 Backspace 回退键  发送的是 b'\x08'       服务端回复的是  b'\x08\x1b[K\x00\x00\x00\x00\x00\x00'
+            # vt100认为 b'\x08' 只是回退一格，不删除任何字符，b'\x08\x1b[K' 才是回退1格并删除光标到行尾
             print("TerminalVt100.parse_vt100_received_bytes: 开始解析received_bytes")
             if len(received_bytes) == 0:
                 print("TerminalVt100.parse_vt100_received_bytes: received_bytes为空")
@@ -7277,7 +7279,7 @@ class TerminalVt100:
             # 对received_bytes进行拆分，拆分符为 b'\033' ，拆分后，每一个元素为一个单独的属性块
             output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
             self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)  # 先创建一个默认的显示属性tag
-            # 对一次recv接收后的信息拆分后的每个属性块进行解析
+            # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析 ★★★★★★
             for block_bytes in output_block_ctrl_and_normal_content_list:
                 if self.is_closed:
                     print("TerminalVt100.run_invoke_shell_recv: 本函数结束了")
@@ -7288,73 +7290,107 @@ class TerminalVt100:
                 print("TerminalVt100.parse_vt100_received_bytes: block_bytes不为空★★")
                 block_str = block_bytes.decode("utf8")
                 # ★匹配 [0m  -->清除所有属性
-                match_pattern = r'\[0m'
+                match_pattern = r'^\[0m'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
-                    if ret.start() != 0:  # 不是在\033后首先匹配到的，则视为普通字符
-                        self.terminal_text.insert(tkinter.END, block_str, "default")
-                        continue
-                    else:
-                        print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
-                        # 在self.terminal_text里输出解析后的内容
-                        self.terminal_text.insert(tkinter.END, block_str[ret.end():], 'default')
-                        continue
+                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                    # 在self.terminal_text里输出解析后的内容
+                    self.terminal_text.insert(tkinter.END, block_str[ret.end():], 'default')
+                    continue
                 # ★匹配 [01m 到 [08m  -->字体风格
-                match_pattern = r'\[[0-9]{1,2}m'
+                match_pattern = r'^\[[0-9]{1,2}m'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
-                    if ret.start() != 0:  # 不是在\033后首先匹配到的，则视为普通字符
-                        self.terminal_text.insert(tkinter.END, block_str, "default")
-                        continue
-                    else:
-                        print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
-                        vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
-                                                                  output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
-                                                                  terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                                                                  bg_color=self.bg_color)
-                        vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
-                        # 在self.terminal_text里输出解析后的内容
-                        self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
-                                                  vt100_output_block_obj.output_block_tag_config_name)
-                        continue
+                    # if ret.start() != 0:  # 不是在\033后首先匹配到的，则视为普通字符
+                    #    self.terminal_text.insert(tkinter.END, block_str, "default")
+                    #    continue
+                    # else:
+                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                    vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
+                                                              output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
+                                                              terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
+                                                              bg_color=self.bg_color)
+                    vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
+                    # 在self.terminal_text里输出解析后的内容
+                    self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
+                                              vt100_output_block_obj.output_block_tag_config_name)
+                    continue
                 # ★匹配 [01;34m  [08;47m  -->这种字体风格
-                match_pattern = r'\[[0-9]{1,2};[0-9]{1,2}m'
+                match_pattern = r'^\[[0-9]{1,2};[0-9]{1,2}m'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
-                    if ret.start() != 0:  # 不是在\033后首先匹配到的，则视为普通字符
-                        self.terminal_text.insert(tkinter.END, block_str, "default")
-                        continue
-                    else:
-                        print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
-                        vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
-                                                                  output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
-                                                                  terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                                                                  bg_color=self.bg_color)
-                        vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
-                        # 在self.terminal_text里输出解析后的内容
-                        self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
-                                                  vt100_output_block_obj.output_block_tag_config_name)
-                        continue
+                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                    vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
+                                                              output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
+                                                              terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
+                                                              bg_color=self.bg_color)
+                    vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
+                    # 在self.terminal_text里输出解析后的内容
+                    self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
+                                              vt100_output_block_obj.output_block_tag_config_name)
+                    continue
                 # ★匹配 [01;34;42m  [08;32;47m  -->这种字体风格
-                match_pattern = r'\[[0-9]{1,2};[0-9]{1,2};[0-9]{1,2}m'
+                match_pattern = r'^\[[0-9]{1,2};[0-9]{1,2};[0-9]{1,2}m'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
-                    if ret.start() != 0:  # 不是在\033后首先匹配到的，则视为普通字符
-                        self.terminal_text.insert(tkinter.END, block_str, "default")
-                        continue
-                    else:
-                        print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
-                        vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
-                                                                  output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
-                                                                  terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                                                                  bg_color=self.bg_color)
-                        vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
-                        # 在self.terminal_text里输出解析后的内容
-                        self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
-                                                  vt100_output_block_obj.output_block_tag_config_name)
-                        continue
-                # ★最后，未匹配到任何属性
-                print("TerminalVt100.parse_vt100_received_bytes: 未匹配到任何属性")
+                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                    vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
+                                                              output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
+                                                              terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
+                                                              bg_color=self.bg_color)
+                    vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
+                    # 在self.terminal_text里输出解析后的内容
+                    self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
+                                              vt100_output_block_obj.output_block_tag_config_name)
+                    continue
+                # ★匹配 [C  [8C  -->[数字C  向右移动光标（其实这里是向右移动索引，光标在本轮for循环结束后（一次recv处理完成后）再显示光标
+                match_pattern = r'^\[[0-9]*C'
+                ret = re.search(match_pattern, block_str)
+                if ret is not None:
+                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                    output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1].replace("\0", "")
+                    vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
+                                                              output_block_control_seq=output_block_control_seq,
+                                                              terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
+                                                              bg_color=self.bg_color)
+                    vt100_output_block_obj.move_text_index_right()  # 向右移动索引
+                    # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
+                    new_block_bytes = block_bytes[ret.end():].replace(b'\x00', b'')
+                    self.match_backspace_x08(new_block_bytes)  # ★★匹配回退符并向左移动索引★★
+                    continue
+                # ★匹配 [K  -->从当前光标位置向右清除到本行行尾所有内容
+                match_pattern = r'^\[K'
+                ret = re.search(match_pattern, block_str)
+                if ret is not None:
+                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                    current_index_column = self.terminal_text.index(tkinter.CURRENT).split(".")[1]
+                    line_end_column = self.terminal_text.index(tkinter.CURRENT+" lineend").split(".")[1]
+                    self.terminal_text.delete(tkinter.CURRENT, tkinter.CURRENT+" lineend")
+                    tkinter.CURRENT += "+" + str(int(line_end_column) - int(current_index_column)) + "c"
+                    # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
+                    self.match_backspace_x08(block_bytes[ret.end():])  # ★★匹配回退符并向左移动索引★★
+                    continue
+                # ★匹配  b'\x07'  -->响铃，可有多个
+                match_pattern = b'\x07'
+                ret = re.findall(match_pattern, block_bytes)
+                bell_count = len(ret)
+                if bell_count > 0:
+                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern} ,数量为{bell_count}")
+                    block_str = block_bytes.replace(b'\x07', b'').decode("utf8")
+                    vt100_output_block_obj = Vt100OutputBlock(
+                        output_block_content=block_str,
+                        output_block_control_seq=b'\x07'.decode("utf8"),
+                        terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
+                        bg_color=self.bg_color)
+                    # vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
+                    # 在self.terminal_text里输出解析后的内容
+                    self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content, 'default')
+                    continue
+                # ★block_bytes开头未匹配到控制序列时，接下来匹配回退符b'\x08'
+                if self.match_backspace_x08(block_bytes):  # 匹配回退符并向左移动光标
+                    continue
+                # ★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
+                print("TerminalVt100.parse_vt100_received_bytes: 未匹配到任何属性，视为普通文本，使用默认颜色方案")
                 invoke_shell_output_str_list = block_str.split('\r\n')
                 invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
                 vt100_output_block_obj = Vt100OutputBlock(output_block_content=invoke_shell_output_str,
@@ -7362,9 +7398,46 @@ class TerminalVt100:
                 # 在self.terminal_text里输出解析后的内容
                 self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
                                           vt100_output_block_obj.output_block_tag_config_name)
-            # 对一次recv接收后的信息解析输出完成后，光标定位到Text末尾
+            # ★★★★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★★★★
+            current_line = int(self.terminal_text.index(tkinter.CURRENT).split(".")[0])
+            end_line = int(self.terminal_text.index(tkinter.END + "-1c").split(".")[0])
+            if current_line != end_line:  # 如果输出的内容有换行，则将光标移动到最后一行的行尾
+                print("行数不同", current_line, end_line)
+                self.terminal_text.mark_set("insert", tkinter.END)
+                tkinter.CURRENT = tkinter.END + "-1c"
+            else:
+                self.terminal_text.mark_set("insert", tkinter.CURRENT)
             self.terminal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
             self.terminal_text.focus_force()
+
+    def match_backspace_x08(self, block_bytes):
+        # ★匹配  b'\x08'  -->回退符，向左移动光标，可有多个，匹配上后，返回True，不匹配则返回False
+        if len(block_bytes) == 0:
+            print("TerminalVt100.match_backspace_x08: block_bytes为空")
+            return False
+        else:
+            print("TerminalVt100.match_backspace_x08: block_bytes不为空", block_bytes)
+        match_pattern = b'\x08'
+        ret = re.findall(match_pattern, block_bytes)
+        backspace_count = len(ret)
+        if backspace_count > 0:
+            print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern} ,backspace_count为{backspace_count}")
+            # 插入文本前一律先删除当前索引到行尾所有内容
+            block_bytes_no_nul = block_bytes.replace(b'\x00', b'')
+            block_bytes_no_nul_no_backspace = block_bytes_no_nul.replace(b'\x08', b'')
+            if len(block_bytes_no_nul_no_backspace) > 0:
+                current_index_column = self.terminal_text.index(tkinter.CURRENT).split(".")[1]
+                line_end_column = self.terminal_text.index(tkinter.CURRENT+" lineend").split(".")[1]
+                self.terminal_text.delete(tkinter.CURRENT, tkinter.CURRENT+" lineend")
+                tkinter.CURRENT += "+" + str(int(line_end_column) - int(current_index_column)) + "c"
+            for char in block_bytes_no_nul.decode("utf8"):  # 不含b'\x00'的内容
+                if char == chr(0x08):  # 回退索引
+                    tkinter.CURRENT += "-1c"  # 当前索引左移1格
+                else:
+                    self.terminal_text.insert(tkinter.CURRENT, char, 'default')
+            return True
+        else:
+            return False
 
 
 class Vt100OutputBlock:
@@ -7377,6 +7450,19 @@ class Vt100OutputBlock:
         self.terminal_text_obj = terminal_text_obj
         self.fg_color = fg_color
         self.bg_color = bg_color
+
+    def move_cursor_left(self, count):
+        count_str = "-" + str(count) + "c"
+        tkinter.CURRENT += count_str
+        # self.terminal_text_obj.mark_set("insert", tkinter.CURRENT)
+
+    def move_text_index_right(self):
+        if self.output_block_control_seq == "":
+            count_str = "+1c"
+        else:
+            count_str = "+" + str(self.output_block_control_seq) + "c"
+        tkinter.CURRENT += count_str
+        # self.terminal_text_obj.mark_set("insert", tkinter.CURRENT)  # 这行注释了，因为只移动索引，暂时不显示光标
 
     def set_tag_config(self, tag_config_type):
         if tag_config_type == TAG_CONFIG_TYPE_FONT_AND_COLOR:
