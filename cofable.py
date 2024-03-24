@@ -7050,7 +7050,8 @@ class TerminalVt100:
         scrollbar = tkinter.Scrollbar(self.pop_window)
         scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
         self.terminal_text = tkinter.Text(master=self.pop_window, yscrollcommand=scrollbar.set, width=SHELL_TERMINAL_WIDTH,
-                                          height=SHELL_TERMINAL_HEIGHT, font=(self.font_name, self.font_size), bg=self.bg_color)
+                                          height=SHELL_TERMINAL_HEIGHT, font=(self.font_name, self.font_size), bg=self.bg_color,
+                                          wrap=tkinter.CHAR)
         self.terminal_text.pack()
         scrollbar.config(command=self.terminal_text.yview)
         self.terminal_text.configure(insertbackground='green')  # Text设置光标颜色
@@ -7119,12 +7120,6 @@ class TerminalVt100:
         # self.terminal_text.mark_set("tkinter_END", tkinter.END)
         # self.terminal_text.see("tkinter_END")  # 这个会使文本框滚动内容到末尾，选择的内容如果不在最后一页，则被滚动了，当前页面看不到了
         self.terminal_text.mark_set(tkinter.INSERT, "end lineend")  # 这个会使闪烁的光标移到最后一行行末，但页面不会滚动，选中的内容仍在当前界面
-
-    def backspace_delete_chars(self, chars_count):
-        current_line, current_column = self.terminal_text.index(tkinter.CURRENT).split(".")
-        start_column_int = int(current_column) - chars_count
-        start_index = current_line + "." + str(start_column_int)
-        self.terminal_text.delete(start_index, self.terminal_text.index(tkinter.CURRENT))
 
     @staticmethod
     def front_end_input_func_printable_char(event, user_input_byte_queue):
@@ -7279,9 +7274,19 @@ class TerminalVt100:
             if len(received_bytes) == 0:
                 print("TerminalVt100.parse_vt100_received_bytes: received_bytes为空")
                 continue
-            # 对received_bytes进行拆分，拆分符为 b'\033' ，拆分后，每一个元素为一个单独的属性块
-            output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
-            self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)  # 先创建一个默认的显示属性tag
+            # ★首先对开头的 b'\x1b[H\x1b[J' 单独匹配，剩下部分再去拆分b'\033'匹配★
+            match_pattern = b'\x1b\[H\x1b\[J'
+            ret = re.search(match_pattern, received_bytes)
+            if ret is not None:
+                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了★清屏★ {match_pattern}")
+                # to do
+                # 对received_bytes剩下部分进行拆分，拆分符为 b'\033' ，拆分后，每一个元素为一个单独的属性块
+                output_block_ctrl_and_normal_content_list = received_bytes[ret.end():].split(b'\033')
+            else:
+                # 对received_bytes进行拆分，拆分符为 b'\033' ，拆分后，每一个元素为一个单独的属性块
+                output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
+            # 先创建一个默认的显示属性tag
+            self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)
             # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析 ★★★★★★
             for block_bytes in output_block_ctrl_and_normal_content_list:
                 if self.is_closed:
@@ -7312,10 +7317,6 @@ class TerminalVt100:
                 match_pattern = r'^\[[0-9]{1,2}m'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
-                    # if ret.start() != 0:  # 不是在\033后首先匹配到的，则视为普通字符
-                    #    self.terminal_text.insert(tkinter.END, block_str, "default")
-                    #    continue
-                    # else:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                     vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
                                                               output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
@@ -7382,7 +7383,7 @@ class TerminalVt100:
                     # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
                     if not self.match_backspace_x08(block_bytes[ret.end():]):  # ★★匹配回退符并向左移动索引★★ 如果不是匹配回退符，则:
                         block_str_list = block_bytes[ret.end():].replace(b'\x00', b'').decode("utf8").split("\r\n")
-                        self.terminal_text.insert(tkinter.CURRENT, "\n".join(block_str_list))  # 则 可能有普通字符
+                        self.terminal_text.insert(tkinter.CURRENT, "\n".join(block_str_list), 'default')  # 则 可能有普通字符
                     continue
                 # ★匹配 [H  -->光标回到屏幕开头
                 match_pattern = r'^\[H'
@@ -7390,7 +7391,7 @@ class TerminalVt100:
                 if ret is not None:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                     # to do
-                    self.terminal_text.insert(tkinter.CURRENT, "\n")  # 暂时先插入一个空行
+                    # self.copy_current_page_move_cursor_to_head()
                     continue
                 # ★匹配 [J  -->清空屏幕
                 match_pattern = r'^\[J'
@@ -7398,7 +7399,7 @@ class TerminalVt100:
                 if ret is not None:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                     # to do
-                    self.terminal_text.insert(tkinter.CURRENT, "\n")  # 暂时先插入一个空行
+                    self.terminal_text.insert(tkinter.CURRENT, "\n", 'default')  # 暂时先插入一个空行
                     continue
                 # ★匹配  b'\x07'  -->响铃，可有多个
                 match_pattern = b'\x07'
@@ -7421,7 +7422,7 @@ class TerminalVt100:
                     continue
                 # ★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
                 print("TerminalVt100.parse_vt100_received_bytes: 未匹配到任何属性，视为普通文本，使用默认颜色方案")
-                invoke_shell_output_str_list = block_str.split('\r\n')
+                invoke_shell_output_str_list = block_bytes.replace(b'\x00', b'').decode("utf8").split('\r\n')
                 invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
                 vt100_output_block_obj = Vt100OutputBlock(output_block_content=invoke_shell_output_str,
                                                           output_block_tag_config_name='default')
