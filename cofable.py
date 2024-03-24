@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-23
+# update: 2024-03-24
 
 """
 解决问题：
@@ -37,7 +37,7 @@
     原因是显示是未遍历SSHOperatorOutput.interactive_output_bytes_list
 ★. 主机命令在线批量执行，在“主机组”界面，对这一组主机在线下发命令
 ★. 首次登录后，对输出进行判断，有的设备首次登录后会要求改密码，或者长时间未登录的设备要求修改密码
-★. 不同巡检线程都去读写sqlite3数据库文件时，报错了，得加个锁
+★. 不同巡检线程都去读写sqlite3数据库文件时，报错了，得加个锁                              2024年3月23日 完成
 ★. 在vt100终端里实现了 光标的左右移动及插入/删除字符                                    2024年3月23日 完成
 
 资源操作逻辑：
@@ -1461,6 +1461,7 @@ class LaunchInspectionJob:
         :param inspection_code_obj:
         :return:
         """
+        self.global_info.lock_sqlite3_db.acquire()  # 获取操作数据库的全局锁
         sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
         sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
         # ★★★查询是否有名为'tb_inspection_job_invoke_shell_output'的表★★★
@@ -1527,6 +1528,7 @@ class LaunchInspectionJob:
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
+        self.global_info.lock_sqlite3_db.release()  # 释放操作数据库的全局锁
 
     def save_interactive_output_bytes_list(self, sqlite_cursor, host_obj, inspection_code_obj, code_output):
         # 开始插入数据，一条记录为SSHOperatorOutput.interactive_output_bytes_list的一个元素
@@ -2023,6 +2025,7 @@ class GlobalInfo:
         self.inspection_job_record_obj_list = []
         self.launch_template_trigger_obj_list = []
         self.current_project_obj = None  # 需要在项目界面将某个项目设置为当前项目，才会赋值
+        self.lock_sqlite3_db = threading.Lock()  # 操作本地sqlite3数据库文件的锁，同一时间段内只能有一个线程操作此数据库
 
     def set_sqlite3_dbfile_name(self, file_name):
         self.sqlite3_dbfile_name = file_name
@@ -7289,13 +7292,21 @@ class TerminalVt100:
                     continue
                 print("TerminalVt100.parse_vt100_received_bytes: block_bytes不为空★★")
                 block_str = block_bytes.decode("utf8")
+                # ★匹配 [m  -->清除所有属性
+                match_pattern = r'^\[m'
+                ret = re.search(match_pattern, block_str)
+                if ret is not None:
+                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                    # 在self.terminal_text里输出解析后的内容
+                    self.terminal_text.insert(tkinter.END, block_bytes[ret.end():].replace(b'\x0f', b'').decode("utf8"), 'default')
+                    continue
                 # ★匹配 [0m  -->清除所有属性
                 match_pattern = r'^\[0m'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                     # 在self.terminal_text里输出解析后的内容
-                    self.terminal_text.insert(tkinter.END, block_str[ret.end():], 'default')
+                    self.terminal_text.insert(tkinter.END, block_bytes[ret.end():].replace(b'\x0f', b'').decode("utf8"), 'default')
                     continue
                 # ★匹配 [01m 到 [08m  -->字体风格
                 match_pattern = r'^\[[0-9]{1,2}m'
@@ -7364,11 +7375,30 @@ class TerminalVt100:
                 if ret is not None:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                     current_index_column = self.terminal_text.index(tkinter.CURRENT).split(".")[1]
-                    line_end_column = self.terminal_text.index(tkinter.CURRENT+" lineend").split(".")[1]
-                    self.terminal_text.delete(tkinter.CURRENT, tkinter.CURRENT+" lineend")
-                    tkinter.CURRENT += "+" + str(int(line_end_column) - int(current_index_column)) + "c"
+                    line_end_column = self.terminal_text.index(tkinter.CURRENT + " lineend").split(".")[1]
+                    if current_index_column < line_end_column:
+                        self.terminal_text.delete(tkinter.CURRENT, tkinter.CURRENT + " lineend")
+                        tkinter.CURRENT += "+" + str(int(line_end_column) - int(current_index_column)) + "c"
                     # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
-                    self.match_backspace_x08(block_bytes[ret.end():])  # ★★匹配回退符并向左移动索引★★
+                    if not self.match_backspace_x08(block_bytes[ret.end():]):  # ★★匹配回退符并向左移动索引★★ 如果不是匹配回退符，则:
+                        block_str_list = block_bytes[ret.end():].replace(b'\x00', b'').decode("utf8").split("\r\n")
+                        self.terminal_text.insert(tkinter.CURRENT, "\n".join(block_str_list))  # 则 可能有普通字符
+                    continue
+                # ★匹配 [H  -->光标回到屏幕开头
+                match_pattern = r'^\[H'
+                ret = re.search(match_pattern, block_str)
+                if ret is not None:
+                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                    # to do
+                    self.terminal_text.insert(tkinter.CURRENT, "\n")  # 暂时先插入一个空行
+                    continue
+                # ★匹配 [J  -->清空屏幕
+                match_pattern = r'^\[J'
+                ret = re.search(match_pattern, block_str)
+                if ret is not None:
+                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                    # to do
+                    self.terminal_text.insert(tkinter.CURRENT, "\n")  # 暂时先插入一个空行
                     continue
                 # ★匹配  b'\x07'  -->响铃，可有多个
                 match_pattern = b'\x07'
@@ -7418,17 +7448,16 @@ class TerminalVt100:
         else:
             print("TerminalVt100.match_backspace_x08: block_bytes不为空", block_bytes)
         match_pattern = b'\x08'
-        ret = re.findall(match_pattern, block_bytes)
-        backspace_count = len(ret)
-        if backspace_count > 0:
-            print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern} ,backspace_count为{backspace_count}")
+        ret = re.search(match_pattern, block_bytes)
+        if ret is not None:
+            print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
             # 插入文本前一律先删除当前索引到行尾所有内容
             block_bytes_no_nul = block_bytes.replace(b'\x00', b'')
             block_bytes_no_nul_no_backspace = block_bytes_no_nul.replace(b'\x08', b'')
-            if len(block_bytes_no_nul_no_backspace) > 0:
+            if len(block_bytes_no_nul_no_backspace) > 0 and ret.start() != 0:
                 current_index_column = self.terminal_text.index(tkinter.CURRENT).split(".")[1]
-                line_end_column = self.terminal_text.index(tkinter.CURRENT+" lineend").split(".")[1]
-                self.terminal_text.delete(tkinter.CURRENT, tkinter.CURRENT+" lineend")
+                line_end_column = self.terminal_text.index(tkinter.CURRENT + " lineend").split(".")[1]
+                self.terminal_text.delete(tkinter.CURRENT, tkinter.CURRENT + " lineend")
                 tkinter.CURRENT += "+" + str(int(line_end_column) - int(current_index_column)) + "c"
             for char in block_bytes_no_nul.decode("utf8"):  # 不含b'\x00'的内容
                 if char == chr(0x08):  # 回退索引
