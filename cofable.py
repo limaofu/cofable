@@ -6961,22 +6961,23 @@ class ViewInspectionJobInFrame:
 
 
 class TerminalVt100:
-    def __init__(self, main_window=None, shell_terminal_width=64, shell_terminal_height=32, font_size=14, global_info=None, host_obj=None):
-        self.main_window = main_window
-        self.shell_terminal_width = shell_terminal_width
-        self.shell_terminal_height = shell_terminal_height
-        self.font_name = ''  # 'MS Gothic'
-        self.font_size = font_size
+    def __init__(self, main_window=None, shell_terminal_width=72, shell_terminal_height=40, global_info=None, host_obj=None,
+                 font_size=14, font_name='', bg_color="black", fg_color="white"):
+        self.main_window = main_window  # <MainWindow>
+        self.shell_terminal_width = shell_terminal_width  # <int> vt100-width
+        self.shell_terminal_height = shell_terminal_height  # <int> vt100-height
+        self.font_name = font_name  # <str>
+        self.font_size = font_size  # <int>
+        self.bg_color = bg_color  # <str> color
+        self.fg_color = fg_color  # <str> color
         self.global_info = global_info
-        self.host_obj = host_obj
-        self.pop_window = None  # 在 show_terminal_pop_window() 里赋值
-        self.terminal_text = None  # 在 show_terminal_pop_window() 里赋值
-        self.padx = 2
-        self.pady = 2
-        self.is_closed = False  # 置为True时结束shell
+        self.host_obj = host_obj  # <Host>
+        self.pop_window = None  # 在 show_terminal_pop_window() 里赋值，tkinter.Toplevel()
+        self.terminal_text = None  # 在 show_terminal_pop_window() 里赋值，tkinter.Text()
+        self.padx = 2  # <int>
+        self.pady = 2  # <int>
+        self.is_closed = False  # 置为True时结束shell会话
         self.current_cursor = None
-        self.bg_color = "black"
-        self.fg_color = "white"
 
     def find_ssh_credential(self, host_obj):
         """
@@ -7338,7 +7339,7 @@ class TerminalVt100:
                     vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
                                                               output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
                                                               terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                                                              bg_color=self.bg_color)
+                                                              bg_color=self.bg_color, terminal_text_font_size=self.font_size)
                     vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
                     # 在self.terminal_text里输出解析后的内容
                     self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
@@ -7352,7 +7353,7 @@ class TerminalVt100:
                     vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
                                                               output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
                                                               terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                                                              bg_color=self.bg_color)
+                                                              bg_color=self.bg_color, terminal_text_font_size=self.font_size)
                     vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
                     # 在self.terminal_text里输出解析后的内容
                     self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
@@ -7366,7 +7367,7 @@ class TerminalVt100:
                     vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
                                                               output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
                                                               terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                                                              bg_color=self.bg_color)
+                                                              bg_color=self.bg_color, terminal_text_font_size=self.font_size)
                     vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
                     # 在self.terminal_text里输出解析后的内容
                     self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
@@ -7381,7 +7382,7 @@ class TerminalVt100:
                     vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
                                                               output_block_control_seq=output_block_control_seq,
                                                               terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                                                              bg_color=self.bg_color)
+                                                              bg_color=self.bg_color, terminal_text_font_size=self.font_size)
                     vt100_output_block_obj.move_text_index_right()  # 向右移动索引
                     # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
                     new_block_bytes = block_bytes[ret.end():].replace(b'\x00', b'')
@@ -7430,7 +7431,7 @@ class TerminalVt100:
                         output_block_content=block_str,
                         output_block_control_seq=b'\x07'.decode("utf8"),
                         terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                        bg_color=self.bg_color)
+                        bg_color=self.bg_color, terminal_text_font_size=self.font_size)
                     # vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
                     # 在self.terminal_text里输出解析后的内容
                     self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content, 'default')
@@ -7443,7 +7444,7 @@ class TerminalVt100:
                 invoke_shell_output_str_list = block_bytes.replace(b'\x00', b'').decode("utf8").split('\r\n')
                 invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
                 vt100_output_block_obj = Vt100OutputBlock(output_block_content=invoke_shell_output_str,
-                                                          output_block_tag_config_name='default')
+                                                          output_block_tag_config_name='default', terminal_text_font_size=self.font_size)
                 # 在self.terminal_text里输出解析后的内容
                 self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
                                           vt100_output_block_obj.output_block_tag_config_name)
@@ -7492,7 +7493,7 @@ class TerminalVt100:
 
 class Vt100OutputBlock:
     def __init__(self, output_block_content='', output_block_tag_config_name='', output_block_control_seq='',
-                 terminal_text_obj=None, fg_color="white", bg_color="black"):
+                 terminal_text_obj=None, fg_color="white", bg_color="black", terminal_text_font_size=12):
         self.output_block_content = output_block_content  # <str> 匹配上的普通字符（不含最前面的控制序列字符）
         self.output_block_tag_config_name = output_block_tag_config_name  # <str> 根据匹配上的控制序列，而设置的文字颜色风格名称
         self.output_block_control_seq = output_block_control_seq  # <str> 匹配上的控制序列字符，如 [0m
@@ -7500,6 +7501,7 @@ class Vt100OutputBlock:
         self.terminal_text_obj = terminal_text_obj
         self.fg_color = fg_color
         self.bg_color = bg_color
+        self.terminal_text_font_size = terminal_text_font_size
 
     @staticmethod
     def move_cursor_left(count):
@@ -7561,7 +7563,7 @@ class Vt100OutputBlock:
                 self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="white")
             # 字体设置
             elif int(ctrl_seq_seg) == 1:  # 粗体
-                output_block_font = font.Font(weight='bold')
+                output_block_font = font.Font(weight='bold', size=self.terminal_text_font_size)
                 self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", font=output_block_font)
             elif int(ctrl_seq_seg) == 4:  # 下划线
                 self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", underline=1)
