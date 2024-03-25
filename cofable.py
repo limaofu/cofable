@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-24
+# update: 2024-03-25
 
 """
 解决问题：
@@ -7226,7 +7226,7 @@ class TerminalVt100:
             print(f"TerminalVt100.run_invoke_shell : Authentication Error: {e}")
             raise e
         # ★★连接后，创建invoke_shell交互式shell★★
-        ssh_shell = ssh_client.invoke_shell(width=self.shell_terminal_width, height=self.shell_terminal_height)  # 创建一个交互式shell
+        ssh_shell = ssh_client.invoke_shell(width=self.shell_terminal_width, height=self.shell_terminal_height)
         # time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
         # ★★创建线程专门负责接收输出并解析，最后在Text显示输出（解析后的内容）★★
         recv_thred = threading.Thread(target=lambda: self.run_invoke_shell_recv(ssh_shell))
@@ -7253,6 +7253,12 @@ class TerminalVt100:
     def run_invoke_shell_recv(self, ssh_shell):
         """
         解析接收到的vt100输出，并解析vt100属性，最后输出到self.terminal_text
+        这里区分为2个概念：
+            vt100光标，vt100发回的对于光标操作的指令（控制序列）
+            tkinter.Text组件的光标（是在Text组件里的闪烁的那个光标-->mark）
+            tkinter.Text组件的索引（是在Text组件里的-->index）
+        对于vt100的光标移动操作，首先在Text里移动index到相应位置，一次recv解析完成后，再让Text的光标移动到index位置并闪烁。
+        而不是立即响应vt100光标的操作，假如立即响应，会让程序显示时变卡，速度变慢
         :param ssh_shell:
         :return:
         """
@@ -7272,21 +7278,32 @@ class TerminalVt100:
             # vt100认为 b'\x08' 只是回退一格，不删除任何字符，b'\x08\x1b[K' 才是回退1格并删除光标到行尾
             print("TerminalVt100.parse_vt100_received_bytes: 开始解析received_bytes")
             if len(received_bytes) == 0:
-                print("TerminalVt100.parse_vt100_received_bytes: received_bytes为空")
-                continue
-            # ★首先对开头的 b'\x1b[H\x1b[J' 单独匹配，剩下部分再去拆分b'\033'匹配★
-            match_pattern = b'\x1b\[H\x1b\[J'
+                print("TerminalVt100.parse_vt100_received_bytes: received_bytes为空，将关闭 ssh_client")
+                self.is_closed = True
+                print("TerminalVt100.run_invoke_shell_recv: 结束了")
+                return
+                # continue
+            is_alternate_keypad_mode = False
+            exit_alternate_keypad_mode = False
+            # enter alternate_keypad_mode
+            match_pattern = b'\x1b\[\?1h\x1b='
             ret = re.search(match_pattern, received_bytes)
             if ret is not None:
-                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了★清屏★ {match_pattern}")
+                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了★Enter Alternate Keypad Mode★ {match_pattern}")
                 # to do
-                # 对received_bytes剩下部分进行拆分，拆分符为 b'\033' ，拆分后，每一个元素为一个单独的属性块
-                output_block_ctrl_and_normal_content_list = received_bytes[ret.end():].split(b'\033')
-            else:
-                # 对received_bytes进行拆分，拆分符为 b'\033' ，拆分后，每一个元素为一个单独的属性块
-                output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
+                is_alternate_keypad_mode = True
+            # exit alternate_keypad_mode
+            match_pattern = b'\x1b\[\?1l\x1b>'
+            ret = re.search(match_pattern, received_bytes)
+            if ret is not None:
+                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了★Exit Alternate Keypad Mode★ {match_pattern}")
+                # to do
+                is_alternate_keypad_mode = True
+                exit_alternate_keypad_mode = True
+            output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
             # 先创建一个默认的显示属性tag
             self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)
+            copied_current_page = False  # 置False表示当前一次recv不需要移动vt100光标回到首行
             # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析 ★★★★★★
             for block_bytes in output_block_ctrl_and_normal_content_list:
                 if self.is_closed:
@@ -7385,19 +7402,20 @@ class TerminalVt100:
                         block_str_list = block_bytes[ret.end():].replace(b'\x00', b'').decode("utf8").split("\r\n")
                         self.terminal_text.insert(tkinter.CURRENT, "\n".join(block_str_list), 'default')  # 则 可能有普通字符
                     continue
-                # ★匹配 [H  -->光标回到屏幕开头
+                # ★匹配 [H  -->光标回到屏幕开头，复杂清屏，一般vt100光标回到开头后，插入的内容会覆盖原界面的内容，未覆盖到的内容还得继续展示
                 match_pattern = r'^\[H'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
-                    # to do
-                    # self.copy_current_page_move_cursor_to_head()
+                    # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
+                    # need to copy_current_page_move_cursor_to_head_and_cover_content
+                    print("★匹配 [H -->光标回到屏幕开头，复杂清屏: copied_current_page set True")
                     continue
-                # ★匹配 [J  -->清空屏幕
+                # ★匹配 [J  -->清空屏幕，一般和[H一起出现
                 match_pattern = r'^\[J'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
-                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
+                    print(f"TerminalVt100.parse_vt100_received_bytes: ★单独匹配到了 {match_pattern}")
                     # to do
                     self.terminal_text.insert(tkinter.CURRENT, "\n", 'default')  # 暂时先插入一个空行
                     continue
@@ -7430,6 +7448,8 @@ class TerminalVt100:
                 self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
                                           vt100_output_block_obj.output_block_tag_config_name)
             # ★★★★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★★★★
+            if copied_current_page:
+                print("TerminalVt100.run_invoke_shell_recv: 一次recv结束了，关闭当前页面复制模式，copied_current_page set False")
             current_line = int(self.terminal_text.index(tkinter.CURRENT).split(".")[0])
             end_line = int(self.terminal_text.index(tkinter.END + "-1c").split(".")[0])
             if current_line != end_line:  # 如果输出的内容有换行，则将光标移动到最后一行的行尾
@@ -7481,7 +7501,8 @@ class Vt100OutputBlock:
         self.fg_color = fg_color
         self.bg_color = bg_color
 
-    def move_cursor_left(self, count):
+    @staticmethod
+    def move_cursor_left(count):
         count_str = "-" + str(count) + "c"
         tkinter.CURRENT += count_str
         # self.terminal_text_obj.mark_set("insert", tkinter.CURRENT)
