@@ -7054,6 +7054,7 @@ class TerminalVt100:
         self.ssh_shell = None
         self.ctrl_pressed = False  # 仅当Ctrl键按下时，此参数置为True，否则置False
         self.need_reset_ssh_shell_size = False
+        self.font_scaling_factor = 1.4  # 字体随系统的缩放倍数
 
     def find_ssh_credential(self, host_obj):
         """
@@ -7108,10 +7109,13 @@ class TerminalVt100:
         scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
         self.terminal_text = tkinter.Text(master=self.terminal_frame, yscrollcommand=scrollbar.set,
                                           width=int(self.shell_terminal_width_pixel // self.font_size),
-                                          height=int(self.shell_terminal_height_pixel // self.font_size),
+                                          height=int(self.shell_terminal_height_pixel // self.font_size // self.font_scaling_factor),
                                           font=(self.font_name, self.font_size), bg=self.bg_color, fg=self.fg_color,
-                                          wrap=tkinter.CHAR)
-        self.terminal_text.pack()
+                                          wrap=tkinter.CHAR, spacing1=0, spacing2=0, spacing3=0)
+        self.terminal_text.pack()  # 要设置Text行间距及列间距
+        # spacing1为当前行与上一行之间距离，像素
+        # spacing2为当前行内如果有折行，则折行之间的距离，像素
+        # spacing3为当前行与下一行之间距离，像素
         scrollbar.config(command=self.terminal_text.yview)
         self.terminal_text.configure(insertbackground='green')  # Text设置光标颜色
         # ★★★创建先进先出队列-实时存放用户输入字符★★★
@@ -7123,7 +7127,6 @@ class TerminalVt100:
         self.terminal_text.bind("<ButtonRelease-1>", self.set_selected_text_color_release)  # 鼠标左击释放事件，移动光标到文本框末尾，不滚动内容
         # 鼠标右键单击事件，弹出功能菜单
         self.terminal_text.bind("<Button-3>", lambda event: self.pop_menu_on_terminal_text(event, user_input_byte_queue))
-
         # 下面这个匹配组合键，以单个ascii码的方式发送
         # self.terminal_text.bind("<Control-c>", lambda event: self.front_end_thread_func_ctrl_comb_key(event, user_input_byte_queue))
         # self.terminal_text.bind("<Control-z>", lambda event: self.front_end_thread_func_ctrl_comb_key(event, user_input_byte_queue))
@@ -7262,7 +7265,7 @@ class TerminalVt100:
 
     def reset_ssh_shell_size(self):
         self.ssh_shell.resize_pty(width=int(self.shell_terminal_width_pixel // self.font_size),
-                                  height=int(self.shell_terminal_height_pixel // self.font_size))
+                                  height=int(self.shell_terminal_height_pixel // self.font_size // self.font_scaling_factor))
 
     @staticmethod
     def front_end_thread_func_ctrl_comb_key(event, user_input_byte_queue):
@@ -7286,14 +7289,18 @@ class TerminalVt100:
                 cred = self.find_ssh_credential(self.host_obj)
             except Exception as e:
                 print("TerminalVt100.show_single_terminal_on_pop_window: 查找可用的凭据错误，", e)
-                self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)
+                output_block_font_normal = font.Font(size=self.font_size, name=self.font_name)
+                self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color, spacing1=0, spacing2=0,
+                                              spacing3=0, font=output_block_font_normal)
                 self.terminal_text.insert(tkinter.END, "TerminalVt100.show_single_terminal_on_pop_window: 查找可用的凭据错误", "default")
                 self.terminal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
                 self.terminal_text.focus_force()
                 return
             if cred is None:
                 print("TerminalVt100.show_single_terminal_on_pop_window: Credential is None, Could not find correct credential")
-                self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)
+                output_block_font_normal = font.Font(size=self.font_size, name=self.font_name)
+                self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color, spacing1=0, spacing2=0,
+                                              spacing3=0)
                 self.terminal_text.insert(tkinter.END, "TerminalVt100.show_single_terminal_on_pop_window: 查找可用的凭据错误None",
                                           "default")
                 self.terminal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
@@ -7332,7 +7339,7 @@ class TerminalVt100:
             raise e
         # ★★连接后，创建invoke_shell交互式shell★★
         self.ssh_shell = ssh_client.invoke_shell(width=int(self.shell_terminal_width_pixel // self.font_size),
-                                                 height=int(self.shell_terminal_height_pixel // self.font_size))
+                                                 height=int(self.shell_terminal_height_pixel // self.font_size // self.font_scaling_factor))
         # time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
         # ★★创建线程专门负责接收输出并解析，最后在Text显示输出（解析后的内容）★★
         recv_thred = threading.Thread(target=lambda: self.run_invoke_shell_recv(self.ssh_shell))
@@ -7393,7 +7400,8 @@ class TerminalVt100:
             exit_alternate_keypad_mode = False
             # 先创建一个默认的显示属性tag
             output_block_font_normal = font.Font(size=self.font_size, name=self.font_name)
-            self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color, font=output_block_font_normal)
+            self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color, font=output_block_font_normal,
+                                          spacing1=0, spacing2=0, spacing3=0)
             self.tag_config_record_list.append(TagConfigRecord("default", FONT_TYPE_NORMAL))
             # enter alternate_keypad_mode
             match_pattern = b'\x1b\[\?1h\x1b='
@@ -7628,7 +7636,8 @@ class Vt100OutputBlock:
         self.output_block_tag_config_name = uuid.uuid4().__str__()  # <str>
         self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}",
                                                          foreground=self.terminal_vt100_obj.fg_color,
-                                                         backgroun=self.terminal_vt100_obj.bg_color)
+                                                         backgroun=self.terminal_vt100_obj.bg_color,
+                                                         spacing1=0, spacing2=0, spacing3=0)
         ctrl_seq_seg_list = self.output_block_control_seq.split(";")
         already_set_font = False
         for ctrl_seq_seg in ctrl_seq_seg_list:
