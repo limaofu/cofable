@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-03-25
+# update: 2024-03-26
 
 """
 解决问题：
@@ -153,6 +153,9 @@ TAG_CONFIG_TYPE_COLOR = 1
 TAG_CONFIG_TYPE_FONT_AND_COLOR = 2
 TAG_CONFIG_TYPE_SCREEN = 3
 TAG_CONFIG_TYPE_CURSOR = 4
+# vt100终端tag_config_record里的字体类型
+FONT_TYPE_NORMAL = 0
+FONT_TYPE_BOLD = 1
 
 
 class Project:
@@ -4193,9 +4196,9 @@ class ListResourceInFrame:
                 button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
             # ★Host-open_terminal
             if self.resource_type == RESOURCE_TYPE_HOST:
-                terminal_obj = TerminalVt100(main_window=self.main_window, global_info=self.global_info, host_obj=obj)
+                open_single_terminal_obj = OpenSingleTerminalVt100(main_window=self.main_window, global_info=self.global_info, host_obj=obj)
                 button_start = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="打开终端",
-                                              command=terminal_obj.show_single_terminal_on_pop_window)
+                                              command=open_single_terminal_obj.show)
                 button_start.bind("<MouseWheel>", self.proces_mouse_scroll)
                 button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
             index += 1
@@ -6960,24 +6963,94 @@ class ViewInspectionJobInFrame:
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
 
+class OpenSingleTerminalVt100:
+    """
+    打开单台主机的 在线终端，会创建一个PopWindow，在popwindow里创建一个用于显示终端输入及输出信息的Frame
+    """
+
+    def __init__(self, main_window=None, global_info=None, host_obj=None):
+        self.main_window = main_window
+        self.global_info = global_info
+        self.host_obj = host_obj
+        self.pop_window = None
+        self.shell_terminal_width = 84  # <int> vt100-width
+        self.shell_terminal_height = 42  # <int> vt100-height
+        self.font_name = ''  # <str>
+        self.font_size = 14  # <int>
+        self.bg_color = "black"  # <str> color
+        self.fg_color = "white"  # <str> color
+        self.padx = 2  # <int>
+        self.pady = 2  # <int>
+        self.is_closed = False  # 置为True时结束shell会话
+        self.terminal_vt100_obj = None
+
+    def show(self):
+        # ★★创建子窗口★★
+        self.pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        self.pop_window.title("Terminal")
+        screen_width = self.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.main_window.window_obj.winfo_screenheight()
+        pop_win_width = int(self.shell_terminal_width * self.font_size) + 25
+        pop_win_height = int(self.shell_terminal_height * self.font_size) + 35
+        win_pos = f"{pop_win_width}x{pop_win_height}+{screen_width // 2 - pop_win_width // 2}+{screen_height // 2 - pop_win_height // 2}"
+        self.pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
+        # 创建功能按钮Frame
+        func_frame = tkinter.Frame(self.pop_window, bg="pink", width=pop_win_width, height=35)
+        func_frame.pack()
+        label_host_name = tkinter.Label(func_frame, text=self.host_obj.name + ":", bd=1)
+        label_host_name.pack(side=tkinter.LEFT, padx=self.padx)
+        button_exit = tkinter.Button(func_frame, text="退出", command=self.on_closing_terminal_pop_window)
+        button_exit.pack(side=tkinter.LEFT, padx=self.padx)
+        terminal_frame = tkinter.Frame(self.pop_window, bg="green", width=pop_win_width, height=pop_win_height - 35)
+        terminal_frame.pack()
+        # 创建TerminalVt100终端实例，1台主机一个实例，放在Frame里
+        self.terminal_vt100_obj = TerminalVt100(terminal_frame=terminal_frame, global_info=self.global_info, host_obj=self.host_obj,
+                                                shell_terminal_width_pixel=int(self.shell_terminal_width * self.font_size),
+                                                shell_terminal_height_pixel=int(self.shell_terminal_height * self.font_size),
+                                                font_size=self.font_size, font_name=self.font_name)
+        self.terminal_vt100_obj.show_terminal_on_terminal_frame()
+
+    def on_closing_terminal_pop_window(self):
+        self.is_closed = True
+        self.terminal_vt100_obj.is_closed = True
+        self.pop_window.destroy()  # 关闭子窗口
+        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
+
+
+class TagConfigRecord:
+    def __init__(self, tag_config_name='default', font_type=FONT_TYPE_NORMAL):
+        self.tag_config_name = tag_config_name  # <str>
+        self.font_type = font_type  # <int>
+
+
 class TerminalVt100:
-    def __init__(self, main_window=None, shell_terminal_width=72, shell_terminal_height=40, global_info=None, host_obj=None,
-                 font_size=14, font_name='', bg_color="black", fg_color="white"):
-        self.main_window = main_window  # <MainWindow>
-        self.shell_terminal_width = shell_terminal_width  # <int> vt100-width
-        self.shell_terminal_height = shell_terminal_height  # <int> vt100-height
+    def __init__(self, terminal_frame=None, shell_terminal_width_pixel=1008, shell_terminal_height_pixel=560, global_info=None,
+                 host_obj=None, font_size=14, font_name='', bg_color="black", fg_color="white"):
+        # self.shell_terminal_width = shell_terminal_width  # <int> vt100-width
+        # self.shell_terminal_height = shell_terminal_height  # <int> vt100-height
+        self.shell_terminal_width_pixel = shell_terminal_width_pixel  # <int> vt100-width
+        self.shell_terminal_height_pixel = shell_terminal_height_pixel  # <int> vt100-height
         self.font_name = font_name  # <str>
         self.font_size = font_size  # <int>
         self.bg_color = bg_color  # <str> color
         self.fg_color = fg_color  # <str> color
         self.global_info = global_info
         self.host_obj = host_obj  # <Host>
-        self.pop_window = None  # 在 show_terminal_pop_window() 里赋值，tkinter.Toplevel()
-        self.terminal_text = None  # 在 show_terminal_pop_window() 里赋值，tkinter.Text()
+        self.terminal_frame = terminal_frame  # 在Frame里展示一台主机的终端，在Frame里创建相应的Text及Scrollbar
+        self.terminal_text = None  # 在 show_terminal_on_terminal_frame() 里赋值，tkinter.Text()
         self.padx = 2  # <int>
         self.pady = 2  # <int>
         self.is_closed = False  # 置为True时结束shell会话
         self.current_cursor = None
+        self.ctrl_pressed = False  # 仅当Ctrl键按下时，此参数置为True，否则置False
+        self.tag_config_record_list = []  # 一次ssh会话的所有输出的tag_config属性记录列表，元素为<TagConfigRecord>对象
+        self.ssh_shell = None
 
     def find_ssh_credential(self, host_obj):
         """
@@ -7022,36 +7095,18 @@ class TerminalVt100:
                 continue
         return None
 
-    def show_single_terminal_on_pop_window(self):
+    def show_terminal_on_terminal_frame(self):
         """
         正式执行主机巡检任务，一台主机一个线程，本函数只处理一台主机，本函数调用self.create_ssh_operator_invoke_shell去执行命令
         :return:
         """
-        # ★★创建子窗口★★
-        self.pop_window = tkinter.Toplevel(self.main_window.window_obj)
-        self.pop_window.title("Terminal")
-        screen_width = self.main_window.window_obj.winfo_screenwidth()
-        screen_height = self.main_window.window_obj.winfo_screenheight()
-        pop_win_width = int(self.shell_terminal_width * self.font_size)
-        pop_win_height = int(self.shell_terminal_height * self.font_size) + 35
-        win_pos = f"{pop_win_width}x{pop_win_height}+{screen_width // 2 - pop_win_width // 2}+{screen_height // 2 - pop_win_height // 2}"
-        self.pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
-        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
-        self.pop_window.focus_force()  # 使子窗口获得焦点
-        # 子窗口点击右上角的关闭按钮后，触发此函数
-        self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
-        # 创建功能按钮Frame
-        frame_func = tkinter.Frame(self.pop_window, bg="pink", width=pop_win_width, height=35)
-        frame_func.pack()
-        label_host_name = tkinter.Label(frame_func, text=self.host_obj.name + ":", bd=1)
-        label_host_name.pack(side=tkinter.LEFT, padx=self.padx)
-        button_exit = tkinter.Button(frame_func, text="退出", command=self.on_closing_terminal_pop_window)
-        button_exit.pack(side=tkinter.LEFT, padx=self.padx)
         # ★★创建Text文本框及滚动条★★
-        scrollbar = tkinter.Scrollbar(self.pop_window)
+        scrollbar = tkinter.Scrollbar(self.terminal_frame)
         scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        self.terminal_text = tkinter.Text(master=self.pop_window, yscrollcommand=scrollbar.set, width=SHELL_TERMINAL_WIDTH,
-                                          height=SHELL_TERMINAL_HEIGHT, font=(self.font_name, self.font_size), bg=self.bg_color,
+        self.terminal_text = tkinter.Text(master=self.terminal_frame, yscrollcommand=scrollbar.set,
+                                          width=int(self.shell_terminal_width_pixel // self.font_size),
+                                          height=int(self.shell_terminal_height_pixel // self.font_size),
+                                          font=(self.font_name, self.font_size), bg=self.bg_color, fg=self.fg_color,
                                           wrap=tkinter.CHAR)
         self.terminal_text.pack()
         scrollbar.config(command=self.terminal_text.yview)
@@ -7071,17 +7126,11 @@ class TerminalVt100:
         # self.terminal_text.bind("<Control-z>", lambda event: self.front_end_thread_func_ctrl_comb_key(event, user_input_byte_queue))
         # 下面这个也能发送Ctrl+A之类的组合键，以单个ascii码的方式发送
         self.terminal_text.bind("<KeyPress>", lambda event: self.front_end_input_func_printable_char(event, user_input_byte_queue))
-        # self.terminal_text.bind("<KeyPress>", lambda event: "break")  # 事件处理脚本返回 "break" 会中断后面的绑定，所以键盘输入不会被插入到文本框
+        self.terminal_text.bind("<KeyRelease>", self.front_end_ctrl_key_release)  # 监听Ctrl键释放事件
+        self.terminal_text.bind("<MouseWheel>", self.scroll_mouse_wheel_and_press_ctl)
         # ★★★创建后端线程，用于发送命令及接收输出信息★★★
         back_end_thread = threading.Thread(target=lambda: self.back_end_thread_func(user_input_byte_queue))
         back_end_thread.start()  # 线程start后，不要join()，主界面才不会卡住
-
-    def on_closing_terminal_pop_window(self):
-        self.is_closed = True
-        self.pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
 
     def set_selected_text_color_clear(self, event):
         self.terminal_text.tag_delete("selected")
@@ -7122,8 +7171,7 @@ class TerminalVt100:
         # self.terminal_text.see("tkinter_END")  # 这个会使文本框滚动内容到末尾，选择的内容如果不在最后一页，则被滚动了，当前页面看不到了
         self.terminal_text.mark_set(tkinter.INSERT, "end lineend")  # 这个会使闪烁的光标移到最后一行行末，但页面不会滚动，选中的内容仍在当前界面
 
-    @staticmethod
-    def front_end_input_func_printable_char(event, user_input_byte_queue):
+    def front_end_input_func_printable_char(self, event, user_input_byte_queue):
         """
         处理普通可打印字符，控制键及组合按键
         ★★★ 按键，ascii字符，vt100控制符是3个不同的概念
@@ -7152,13 +7200,62 @@ class TerminalVt100:
             input_byte = b'\033OD'  # ESC O D    对应  方向键(←)    VK_LEFT (37)
         elif event.keysym == "Right":
             input_byte = b'\033OC'  # ESC O C    对应  方向键(→)    VK_RIGHT (39)
+        elif event.keysym == "Control_L":
+            self.ctrl_pressed = True
+            input_byte = event.char.encode("utf8")
+        elif event.keysym == "Control_R":
+            self.ctrl_pressed = True
+            input_byte = event.char.encode("utf8")
         else:
             # 可打印字符只能发送event.char，因为输入!@#$%^&*()这些换档符号时，需要先按下Shift键再按下相应数字键，
             # Shift键本身不发送（Shift键没有event.char），要发送的是换档后的符号
             # ctrl+字母 这类组合键也是单一字符\0x01到\0x1A
             input_byte = event.char.encode("utf8")
-        user_input_byte_queue.put(input_byte)
+        if len(input_byte) != 0:
+            user_input_byte_queue.put(input_byte)
         return "break"  # 事件处理脚本返回 "break" 会中断后面的绑定，所以键盘输入不会被插入到文本框
+
+    def front_end_ctrl_key_release(self, event):
+        if event.keysym == "Control_L":
+            self.ctrl_pressed = False  # Ctrl键释放了，就置False
+        elif event.keysym == "Control_R":
+            self.ctrl_pressed = False
+        else:
+            pass
+
+    def scroll_mouse_wheel_and_press_ctl(self, event):
+        direction = event.delta
+        if self.ctrl_pressed and direction > 0:
+            print("按下了Ctrl且滚轮向上滚动", direction)
+            if self.font_size < 36:
+                self.font_size += 1
+                self.reset_text_tag_config_font_size()  # 实时设置Text字体大小
+                if self.ssh_shell is not None:
+                    self.reset_ssh_shell_size()
+            return "break"
+        elif self.ctrl_pressed and direction < 0:
+            print("按下了Ctrl且滚轮向下滚动", direction)
+            if self.font_size > 10:
+                self.font_size -= 1
+                self.reset_text_tag_config_font_size()  # 实时设置Text字体大小
+                if self.ssh_shell is not None:
+                    self.reset_ssh_shell_size()
+            return "break"
+        else:
+            pass
+
+    def reset_text_tag_config_font_size(self):
+        for tag_config_record in self.tag_config_record_list:
+            if tag_config_record.font_type == FONT_TYPE_NORMAL:
+                output_block_font_normal = font.Font(size=self.font_size, name=self.font_name)
+                self.terminal_text.tag_config(f"{tag_config_record.tag_config_name}", font=output_block_font_normal)
+            elif tag_config_record.font_type == FONT_TYPE_BOLD:
+                output_block_font_bold = font.Font(weight='bold', size=self.font_size, name=self.font_name)
+                self.terminal_text.tag_config(f"{tag_config_record.tag_config_name}", font=output_block_font_bold)
+
+    def reset_ssh_shell_size(self):
+        self.ssh_shell.resize_pty(width=int(self.shell_terminal_width_pixel // self.font_size),
+                                  height=int(self.shell_terminal_height_pixel // self.font_size))
 
     @staticmethod
     def front_end_thread_func_ctrl_comb_key(event, user_input_byte_queue):
@@ -7227,24 +7324,25 @@ class TerminalVt100:
             print(f"TerminalVt100.run_invoke_shell : Authentication Error: {e}")
             raise e
         # ★★连接后，创建invoke_shell交互式shell★★
-        ssh_shell = ssh_client.invoke_shell(width=self.shell_terminal_width, height=self.shell_terminal_height)
+        self.ssh_shell = ssh_client.invoke_shell(width=int(self.shell_terminal_width_pixel // self.font_size),
+                                                 height=int(self.shell_terminal_height_pixel // self.font_size))
         # time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
         # ★★创建线程专门负责接收输出并解析，最后在Text显示输出（解析后的内容）★★
-        recv_thred = threading.Thread(target=lambda: self.run_invoke_shell_recv(ssh_shell))
+        recv_thred = threading.Thread(target=lambda: self.run_invoke_shell_recv(self.ssh_shell))
         recv_thred.start()  # 线程start后，不要join()，主界面才不会卡住
         # ★★开始执行正式命令★★
         cmd_index = 0
         while True:  # 这里只负责发送用户输入的所有字符
             if self.is_closed:
                 print("TerminalVt100.run_invoke_shell: 本函数结束了")
-                ssh_shell.close()
+                self.ssh_shell.close()
                 ssh_client.close()
                 return
             try:
                 # 从用户输入字符队列中取出最先输入的字符 ★非阻塞★ 队列中无内容时弹出 _queue.Empty报错，这里之所以用非阻塞，是因为要判断self.is_closed
                 user_cmd = user_input_byte_queue.get(block=False)
                 print("发送命令:", user_cmd)
-                ssh_shell.send(user_cmd)  # 发送巡检命令，一行命令（不过滤命令前后的空白字符）
+                self.ssh_shell.send(user_cmd)  # 发送巡检命令，一行命令（不过滤命令前后的空白字符）
             except queue.Empty:
                 # print("队列中无内容", e)
                 time.sleep(0.05)
@@ -7286,6 +7384,10 @@ class TerminalVt100:
                 # continue
             is_alternate_keypad_mode = False
             exit_alternate_keypad_mode = False
+            # 先创建一个默认的显示属性tag
+            output_block_font_normal = font.Font(size=self.font_size, name=self.font_name)
+            self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color, font=output_block_font_normal)
+            self.tag_config_record_list.append(TagConfigRecord("default", FONT_TYPE_NORMAL))
             # enter alternate_keypad_mode
             match_pattern = b'\x1b\[\?1h\x1b='
             ret = re.search(match_pattern, received_bytes)
@@ -7302,8 +7404,6 @@ class TerminalVt100:
                 is_alternate_keypad_mode = True
                 exit_alternate_keypad_mode = True
             output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
-            # 先创建一个默认的显示属性tag
-            self.terminal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color)
             copied_current_page = False  # 置False表示当前一次recv不需要移动vt100光标回到首行
             # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析 ★★★★★★
             for block_bytes in output_block_ctrl_and_normal_content_list:
@@ -7321,7 +7421,7 @@ class TerminalVt100:
                 if ret is not None:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                     # 在self.terminal_text里输出解析后的内容
-                    self.terminal_text.insert(tkinter.END, block_bytes[ret.end():].replace(b'\x0f', b'').decode("utf8"), 'default')
+                    self.terminal_text.insert(tkinter.END, block_bytes[ret.end():].replace(b'\x00', b'').decode("utf8"), 'default')
                     continue
                 # ★匹配 [0m  -->清除所有属性
                 match_pattern = r'^\[0m'
@@ -7329,18 +7429,16 @@ class TerminalVt100:
                 if ret is not None:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                     # 在self.terminal_text里输出解析后的内容
-                    self.terminal_text.insert(tkinter.END, block_bytes[ret.end():].replace(b'\x0f', b'').decode("utf8"), 'default')
+                    self.terminal_text.insert(tkinter.END, block_bytes[ret.end():].replace(b'\x00', b'').decode("utf8"), 'default')
                     continue
                 # ★匹配 [01m 到 [08m  -->字体风格
                 match_pattern = r'^\[[0-9]{1,2}m'
                 ret = re.search(match_pattern, block_str)
                 if ret is not None:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
-                    vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
+                    vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():].replace('\0', ''),
                                                               output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
-                                                              terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                                                              bg_color=self.bg_color, terminal_text_font_size=self.font_size,
-                                                              terminal_text_font_name=self.font_name)
+                                                              terminal_vt100_obj=self)
                     vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
                     # 在self.terminal_text里输出解析后的内容
                     self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
@@ -7353,9 +7451,7 @@ class TerminalVt100:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                     vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
                                                               output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
-                                                              terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                                                              bg_color=self.bg_color, terminal_text_font_size=self.font_size,
-                                                              terminal_text_font_name=self.font_name)
+                                                              terminal_vt100_obj=self)
                     vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
                     # 在self.terminal_text里输出解析后的内容
                     self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
@@ -7368,9 +7464,7 @@ class TerminalVt100:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                     vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
                                                               output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
-                                                              terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                                                              bg_color=self.bg_color, terminal_text_font_size=self.font_size,
-                                                              terminal_text_font_name=self.font_name)
+                                                              terminal_vt100_obj=self)
                     vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
                     # 在self.terminal_text里输出解析后的内容
                     self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
@@ -7384,9 +7478,7 @@ class TerminalVt100:
                     output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1].replace("\0", "")
                     vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
                                                               output_block_control_seq=output_block_control_seq,
-                                                              terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                                                              bg_color=self.bg_color, terminal_text_font_size=self.font_size,
-                                                              terminal_text_font_name=self.font_name)
+                                                              terminal_vt100_obj=self)
                     vt100_output_block_obj.move_text_index_right()  # 向右移动索引
                     # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
                     new_block_bytes = block_bytes[ret.end():].replace(b'\x00', b'')
@@ -7434,9 +7526,7 @@ class TerminalVt100:
                     vt100_output_block_obj = Vt100OutputBlock(
                         output_block_content=block_str,
                         output_block_control_seq=b'\x07'.decode("utf8"),
-                        terminal_text_obj=self.terminal_text, fg_color=self.fg_color,
-                        bg_color=self.bg_color, terminal_text_font_size=self.font_size,
-                        terminal_text_font_name=self.font_name)
+                        terminal_vt100_obj=self)
                     # vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
                     # 在self.terminal_text里输出解析后的内容
                     self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content, 'default')
@@ -7449,8 +7539,7 @@ class TerminalVt100:
                 invoke_shell_output_str_list = block_bytes.replace(b'\x00', b'').decode("utf8").split('\r\n')
                 invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
                 vt100_output_block_obj = Vt100OutputBlock(output_block_content=invoke_shell_output_str,
-                                                          output_block_tag_config_name='default', terminal_text_font_size=self.font_size,
-                                                          terminal_text_font_name=self.font_name)
+                                                          output_block_tag_config_name='default', terminal_vt100_obj=self)
                 # 在self.terminal_text里输出解析后的内容
                 self.terminal_text.insert(tkinter.END, vt100_output_block_obj.output_block_content,
                                           vt100_output_block_obj.output_block_tag_config_name)
@@ -7498,17 +7587,12 @@ class TerminalVt100:
 
 
 class Vt100OutputBlock:
-    def __init__(self, output_block_content='', output_block_tag_config_name='', output_block_control_seq='',
-                 terminal_text_obj=None, fg_color="white", bg_color="black", terminal_text_font_size=12, terminal_text_font_name=''):
+    def __init__(self, output_block_content='', output_block_tag_config_name='', output_block_control_seq='', terminal_vt100_obj=None):
         self.output_block_content = output_block_content  # <str> 匹配上的普通字符（不含最前面的控制序列字符）
         self.output_block_tag_config_name = output_block_tag_config_name  # <str> 根据匹配上的控制序列，而设置的文字颜色风格名称
         self.output_block_control_seq = output_block_control_seq  # <str> 匹配上的控制序列字符，如 [0m
         # [01;34m 这种在output_block_control_seq里不带最前面的[及最后面的m，只剩下 02  01;34  01;34;42 这种
-        self.terminal_text_obj = terminal_text_obj
-        self.fg_color = fg_color
-        self.bg_color = bg_color
-        self.terminal_text_font_size = terminal_text_font_size
-        self.terminal_text_font_name = terminal_text_font_name
+        self.terminal_vt100_obj = terminal_vt100_obj
 
     @staticmethod
     def move_cursor_left(count):
@@ -7531,51 +7615,66 @@ class Vt100OutputBlock:
 
     def set_tag_config_font_and_color(self):
         self.output_block_tag_config_name = uuid.uuid4().__str__()  # <str>
-        self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground=self.fg_color, backgroun=self.bg_color)
+        self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}",
+                                                         foreground=self.terminal_vt100_obj.fg_color,
+                                                         backgroun=self.terminal_vt100_obj.bg_color)
         ctrl_seq_seg_list = self.output_block_control_seq.split(";")
+        already_set_font = False
         for ctrl_seq_seg in ctrl_seq_seg_list:
             # 前景色设置
             if int(ctrl_seq_seg) == 30:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="black")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="black")
             elif int(ctrl_seq_seg) == 31:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="red")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="red")
             elif int(ctrl_seq_seg) == 32:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="green")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="green")
             elif int(ctrl_seq_seg) == 33:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="yellow")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="yellow")
             elif int(ctrl_seq_seg) == 34:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="blue")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="blue")
             elif int(ctrl_seq_seg) == 35:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="purple")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="purple")
             elif int(ctrl_seq_seg) == 36:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="cyan")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="cyan")
             elif int(ctrl_seq_seg) == 37:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", foreground="white")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="white")
             # 背景色设置
             elif int(ctrl_seq_seg) == 40:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="black")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="black")
             elif int(ctrl_seq_seg) == 41:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="red")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="red")
             elif int(ctrl_seq_seg) == 42:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="green")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="green")
             elif int(ctrl_seq_seg) == 43:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="yellow")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="yellow")
             elif int(ctrl_seq_seg) == 44:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="blue")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="blue")
             elif int(ctrl_seq_seg) == 45:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="purple")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="purple")
             elif int(ctrl_seq_seg) == 46:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="cyan")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="cyan")
             elif int(ctrl_seq_seg) == 47:
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", backgroun="white")
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="white")
             # 字体设置
             elif int(ctrl_seq_seg) == 1:  # 粗体
-                output_block_font = font.Font(weight='bold', size=self.terminal_text_font_size, name=self.terminal_text_font_name)
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", font=output_block_font)
+                output_block_font_bold = font.Font(weight='bold', size=self.terminal_vt100_obj.font_size,
+                                                   name=self.terminal_vt100_obj.font_name)
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", font=output_block_font_bold)
+                already_set_font = True
             elif int(ctrl_seq_seg) == 4:  # 下划线
-                self.terminal_text_obj.tag_config(f"{self.output_block_tag_config_name}", underline=1)
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", underline=1)
+            elif int(ctrl_seq_seg) == 7:  # 反显，一般就单独出现不会有其他颜色设置了
+                self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}",
+                                                                 foreground=self.terminal_vt100_obj.bg_color,
+                                                                 backgroun=self.terminal_vt100_obj.fg_color)
             else:
                 pass
+        if not already_set_font:
+            output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, name=self.terminal_vt100_obj.font_name)
+            self.terminal_vt100_obj.terminal_text.tag_config(f"{self.output_block_tag_config_name}", font=output_block_font_normal)
+            self.terminal_vt100_obj.tag_config_record_list.append(TagConfigRecord(self.output_block_tag_config_name, FONT_TYPE_NORMAL))
+        else:
+            self.terminal_vt100_obj.tag_config_record_list.append(TagConfigRecord(self.output_block_tag_config_name, FONT_TYPE_BOLD))
 
 
 if __name__ == '__main__':
