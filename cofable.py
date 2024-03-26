@@ -7000,13 +7000,15 @@ class OpenSingleTerminalVt100:
         self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
         # 创建功能按钮Frame
         func_frame = tkinter.Frame(self.pop_window, bg="pink", width=pop_win_width, height=35)
-        func_frame.pack()
         label_host_name = tkinter.Label(func_frame, text=self.host_obj.name + ":", bd=1)
         label_host_name.pack(side=tkinter.LEFT, padx=self.padx)
         button_exit = tkinter.Button(func_frame, text="退出", command=self.on_closing_terminal_pop_window)
         button_exit.pack(side=tkinter.LEFT, padx=self.padx)
         terminal_frame = tkinter.Frame(self.pop_window, bg="green", width=pop_win_width, height=pop_win_height - 35)
-        terminal_frame.pack()
+        func_frame.grid_propagate(False)
+        terminal_frame.pack_propagate(False)
+        func_frame.grid(row=0, column=0)
+        terminal_frame.grid(row=1, column=0)
         # 创建TerminalVt100终端实例，1台主机一个实例，放在Frame里
         self.terminal_vt100_obj = TerminalVt100(terminal_frame=terminal_frame, global_info=self.global_info, host_obj=self.host_obj,
                                                 shell_terminal_width_pixel=int(self.shell_terminal_width * self.font_size),
@@ -7034,8 +7036,8 @@ class TerminalVt100:
                  host_obj=None, font_size=14, font_name='', bg_color="black", fg_color="white"):
         # self.shell_terminal_width = shell_terminal_width  # <int> vt100-width
         # self.shell_terminal_height = shell_terminal_height  # <int> vt100-height
-        self.shell_terminal_width_pixel = shell_terminal_width_pixel  # <int> vt100-width
-        self.shell_terminal_height_pixel = shell_terminal_height_pixel  # <int> vt100-height
+        self.shell_terminal_width_pixel = shell_terminal_width_pixel  # <int> self.terminal_text-width
+        self.shell_terminal_height_pixel = shell_terminal_height_pixel  # <int> self.terminal_text-height
         self.font_name = font_name  # <str>
         self.font_size = font_size  # <int>
         self.bg_color = bg_color  # <str> color
@@ -7048,9 +7050,10 @@ class TerminalVt100:
         self.pady = 2  # <int>
         self.is_closed = False  # 置为True时结束shell会话
         self.current_cursor = None
-        self.ctrl_pressed = False  # 仅当Ctrl键按下时，此参数置为True，否则置False
         self.tag_config_record_list = []  # 一次ssh会话的所有输出的tag_config属性记录列表，元素为<TagConfigRecord>对象
         self.ssh_shell = None
+        self.ctrl_pressed = False  # 仅当Ctrl键按下时，此参数置为True，否则置False
+        self.need_reset_ssh_shell_size = False
 
     def find_ssh_credential(self, host_obj):
         """
@@ -7218,8 +7221,12 @@ class TerminalVt100:
     def front_end_ctrl_key_release(self, event):
         if event.keysym == "Control_L":
             self.ctrl_pressed = False  # Ctrl键释放了，就置False
+            if self.need_reset_ssh_shell_size:
+                self.reset_ssh_shell_size()
         elif event.keysym == "Control_R":
-            self.ctrl_pressed = False
+            self.ctrl_pressed = False  # Ctrl键释放了，就置False
+            if self.need_reset_ssh_shell_size:
+                self.reset_ssh_shell_size()
         else:
             pass
 
@@ -7231,7 +7238,7 @@ class TerminalVt100:
                 self.font_size += 1
                 self.reset_text_tag_config_font_size()  # 实时设置Text字体大小
                 if self.ssh_shell is not None:
-                    self.reset_ssh_shell_size()
+                    self.need_reset_ssh_shell_size = True
             return "break"
         elif self.ctrl_pressed and direction < 0:
             print("按下了Ctrl且滚轮向下滚动", direction)
@@ -7239,7 +7246,7 @@ class TerminalVt100:
                 self.font_size -= 1
                 self.reset_text_tag_config_font_size()  # 实时设置Text字体大小
                 if self.ssh_shell is not None:
-                    self.reset_ssh_shell_size()
+                    self.need_reset_ssh_shell_size = True
             return "break"
         else:
             pass
@@ -7421,7 +7428,9 @@ class TerminalVt100:
                 if ret is not None:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                     # 在self.terminal_text里输出解析后的内容
-                    self.terminal_text.insert(tkinter.END, block_bytes[ret.end():].replace(b'\x00', b'').decode("utf8"), 'default')
+                    block_bytes1 = block_bytes[ret.end():].replace(b'\x00', b'')
+                    block_bytes2 = block_bytes1.replace(b'\x0f', b'')
+                    self.terminal_text.insert(tkinter.END, block_bytes2.decode("utf8"), 'default')
                     continue
                 # ★匹配 [0m  -->清除所有属性
                 match_pattern = r'^\[0m'
@@ -7429,7 +7438,9 @@ class TerminalVt100:
                 if ret is not None:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了 {match_pattern}")
                     # 在self.terminal_text里输出解析后的内容
-                    self.terminal_text.insert(tkinter.END, block_bytes[ret.end():].replace(b'\x00', b'').decode("utf8"), 'default')
+                    block_bytes1 = block_bytes[ret.end():].replace(b'\x00', b'')
+                    block_bytes2 = block_bytes1.replace(b'\x0f', b'')
+                    self.terminal_text.insert(tkinter.END, block_bytes2.decode("utf8"), 'default')
                     continue
                 # ★匹配 [01m 到 [08m  -->字体风格
                 match_pattern = r'^\[[0-9]{1,2}m'
