@@ -6975,7 +6975,8 @@ class OpenSingleTerminalVt100:
         self.host_obj = host_obj
         self.pop_window = None
         self.shell_terminal_width = 84  # <int> vt100-width
-        self.shell_terminal_height = 42  # <int> vt100-height
+        self.shell_terminal_height = 30  # <int> vt100-height
+        self.font_scaling_factor = 1.4  # 字体随系统的缩放倍数
         self.font_name = ''  # <str>
         self.font_size = 14  # <int>
         self.bg_color = "black"  # <str> color
@@ -6983,7 +6984,7 @@ class OpenSingleTerminalVt100:
         self.padx = 2  # <int>
         self.pady = 2  # <int>
         self.is_closed = False  # 置为True时结束shell会话
-        self.terminal_vt100_obj = None
+        self.terminal_vt100_obj = None  # <TerminalVt100>对象
 
     def show(self):
         # ★★创建子窗口★★
@@ -6992,7 +6993,7 @@ class OpenSingleTerminalVt100:
         screen_width = self.main_window.window_obj.winfo_screenwidth()
         screen_height = self.main_window.window_obj.winfo_screenheight()
         pop_win_width = int(self.shell_terminal_width * self.font_size) + 25
-        pop_win_height = int(self.shell_terminal_height * self.font_size) + 35
+        pop_win_height = int(self.shell_terminal_height * self.font_size * self.font_scaling_factor) + 35
         win_pos = f"{pop_win_width}x{pop_win_height}+{screen_width // 2 - pop_win_width // 2}+{screen_height // 2 - pop_win_height // 2}"
         self.pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
@@ -7001,7 +7002,7 @@ class OpenSingleTerminalVt100:
         self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
         # 创建功能按钮Frame
         func_frame = tkinter.Frame(self.pop_window, bg="pink", width=pop_win_width, height=35)
-        label_host_name = tkinter.Label(func_frame, text=self.host_obj.name + ":", bd=1)
+        label_host_name = tkinter.Label(func_frame, text=self.host_obj.name, bd=1)
         label_host_name.pack(side=tkinter.LEFT, padx=self.padx)
         button_exit = tkinter.Button(func_frame, text="退出", command=self.on_closing_terminal_pop_window)
         button_exit.pack(side=tkinter.LEFT, padx=self.padx)
@@ -7012,17 +7013,21 @@ class OpenSingleTerminalVt100:
         terminal_frame.grid(row=1, column=0)
         # 创建TerminalVt100终端实例，1台主机一个实例，放在Frame里
         self.terminal_vt100_obj = TerminalVt100(terminal_frame=terminal_frame, global_info=self.global_info, host_obj=self.host_obj,
-                                                shell_terminal_width_pixel=int(self.shell_terminal_width * self.font_size),
-                                                shell_terminal_height_pixel=int(self.shell_terminal_height * self.font_size),
-                                                font_size=self.font_size, font_name=self.font_name)
-        show_vt100_thread = threading.Thread(target=self.terminal_vt100_obj.show_terminal_on_terminal_frame)
-        show_vt100_thread.start()  # 线程start后，不要join()，主界面才不会卡住
+                                                shell_terminal_width_pixel=int(pop_win_width - 25),
+                                                shell_terminal_height_pixel=int(pop_win_height - 35),
+                                                font_size=self.font_size, font_name=self.font_name,
+                                                font_scaling_factor=self.font_scaling_factor)
+        self.terminal_vt100_obj.show_terminal_on_terminal_frame()
 
     def on_closing_terminal_pop_window(self):
         self.is_closed = True
+        print(
+            "OpenSingleTerminalVt100.on_closing_terminal_pop_window: 本函数结束了，子窗口未未未关闭 self.terminal_vt100_obj.is_closed设置：")
         self.terminal_vt100_obj.is_closed = True
         time.sleep(0.1)  # 等待terminal_vt100_obj结束它的子线程
+        print("OpenSingleTerminalVt100.on_closing_terminal_pop_window: 本函数结束了，子窗口未未未关闭")
         self.pop_window.destroy()  # 关闭子窗口
+        print("OpenSingleTerminalVt100.on_closing_terminal_pop_window: 本函数结束了，子窗口已关闭")
         self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
         self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
@@ -7032,12 +7037,12 @@ class TagConfigRecord:
     def __init__(self, tag_config_name='default', font_type=FONT_TYPE_NORMAL, terminal_text=None):
         self.tag_config_name = tag_config_name  # <str>
         self.font_type = font_type  # <int>
-        self.terminal_text = terminal_text  # <tkinter.Text> tag_config所设置的目标Text
+        self.terminal_text = terminal_text  # <tkinter.Text> tag_config所设置的目标Text控件
 
 
 class TerminalVt100:
     def __init__(self, terminal_frame=None, shell_terminal_width_pixel=1008, shell_terminal_height_pixel=560, global_info=None,
-                 host_obj=None, font_size=14, font_name='', bg_color="black", fg_color="white"):
+                 host_obj=None, font_size=14, font_name='', bg_color="black", fg_color="white", font_scaling_factor=1.4):
         # self.shell_terminal_width = shell_terminal_width  # <int> vt100-width
         # self.shell_terminal_height = shell_terminal_height  # <int> vt100-height
         self.shell_terminal_width_pixel = shell_terminal_width_pixel  # <int> self.terminal_text-width
@@ -7058,7 +7063,7 @@ class TerminalVt100:
         self.ssh_shell = None
         self.ctrl_pressed = False  # 仅当Ctrl键按下时，此参数置为True，否则置False
         self.need_reset_ssh_shell_size = False
-        self.font_scaling_factor = 1.4  # 字体随系统的缩放倍数
+        self.font_scaling_factor = font_scaling_factor  # 字体随系统的缩放倍数
         self.is_alternate_keypad_mode = False
         self.exit_alternate_keypad_mode = False
         self.user_input_byte_queue = None  # 存储的是用户输入的按键（含组合键）对应的ASCII码，元素为bytes(1到N个字节）
@@ -7184,7 +7189,10 @@ class TerminalVt100:
         print("点击了右键")
         pop_menu_bar = tkinter.Menu(terminal_text, tearoff=0)
         pop_menu_bar.add_command(label="复制", command=lambda: self.copy_selected_text_on_terminal_text(terminal_text))
+        # pop_menu_bar.add_command(label="复制为RTF", command=lambda: self.copy_selected_text_on_terminal_text_rtf(terminal_text))
         pop_menu_bar.add_command(label="粘贴", command=self.paste_text_on_terminal_text)
+        pop_menu_bar.add_command(label="查找", command=lambda: self.search_text_on_terminal_text(terminal_text))
+        pop_menu_bar.add_command(label="保存会话内容", command=lambda: self.save_all_text_on_terminal_text(terminal_text))
         pop_menu_bar.post(event.x_root, event.y_root)
 
     @staticmethod
@@ -7196,10 +7204,121 @@ class TerminalVt100:
             print("TerminalVt100.copy_selected_text_on_terminal_text: 未选择任何文字", e)
             return
 
+    @staticmethod
+    def copy_selected_text_on_terminal_text_rtf(terminal_text):
+        try:
+            selected_text_dump = terminal_text.dump(tkinter.SEL_FIRST, tkinter.SEL_LAST, tag=True, text=True)
+            html_text = []
+            for key, value, index in selected_text_dump:
+                html_text.append('{')
+                html_text.append(key)
+                html_text.append(value)
+                html_text.append(index)
+                html_text.append('}')
+            pyperclip.copy(' '.join(html_text))
+        except tkinter.TclError as e:
+            print("TerminalVt100.copy_selected_text_on_terminal_text: 未选择任何文字", e)
+            return
+
     def paste_text_on_terminal_text(self):
         pasted_text = pyperclip.paste()  # 这里需要判断一下复制的是否为纯文本文字
         user_input_bytes = pasted_text.encode("utf8")
         self.user_input_byte_queue.put(user_input_bytes)
+
+    def search_text_on_terminal_text(self, terminal_text):
+        try:
+            all_text = terminal_text.get("1.0", tkinter.END)
+        except tkinter.TclError as e:
+            print("TerminalVt100.search_text_on_terminal_text: 获取Text内容失败", e)
+            return
+        print(all_text)
+        pop_search_window = tkinter.Toplevel(self.terminal_frame)
+        pop_search_window.title("在当前会话内容中查找")
+        screen_width = self.terminal_frame.winfo_screenwidth()
+        screen_height = self.terminal_frame.winfo_screenheight()
+        pop_win_width = 340
+        pop_win_height = 30
+        win_pos = f"{pop_win_width}x{pop_win_height}+{screen_width // 2 - pop_win_width // 2}+{screen_height // 2 - pop_win_height // 2}"
+        pop_search_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        pop_search_window.configure(bg="pink")
+        # 子窗口点击右上角的关闭按钮后，触发此函数:
+        pop_search_window.protocol("WM_DELETE_WINDOW", lambda: self.pop_search_window_on_closing(pop_search_window, terminal_text))
+        # 查找窗口中添加控件
+        sv_searh_text = tkinter.StringVar()
+        entry_search = tkinter.Entry(pop_search_window, textvariable=sv_searh_text, width=30)
+        entry_search.pack(side=tkinter.LEFT, padx=5)
+        exit_button = tkinter.Button(pop_search_window, text="查找",
+                                     command=lambda: self.pop_search_window_click_search_button(pop_search_window, terminal_text,
+                                                                                                sv_searh_text, all_text))
+        exit_button.pack(side=tkinter.LEFT, padx=5)
+        entry_search.focus_force()
+
+    def pop_search_window_on_closing(self, pop_search_window, terminal_text):
+        pop_search_window.destroy()
+        try:
+            terminal_text.tag_delete("matched")
+            terminal_text.focus_force()
+        except tkinter.TclError as e:
+            print("TerminalVt100.highlight_search_text_on_terminal_text: 未选匹配何文字", e)
+            terminal_text.focus_force()
+            return
+
+    def pop_search_window_click_search_button(self, pop_search_window, terminal_text, sv_searh_text, all_text):
+        search_text = sv_searh_text.get()
+        if len(search_text) != 0:
+            print(f"TerminalVt100.pop_search_window_click_search_button: 开始查找{search_text}")
+            match_pattern = search_text
+            ret = re.finditer(match_pattern, all_text, re.I)
+            ret_list = []
+            for ret_item in ret:
+                ret_list.append(ret_item)
+            if len(ret_list) > 0:
+                print(f"TerminalVt100.pop_search_window_click_search_button: 匹配到了{search_text}")
+                ret_index = 0
+                self.highlight_search_text_on_terminal_text(ret_list, ret_index, terminal_text)
+            else:
+                try:
+                    terminal_text.tag_delete("matched")
+                    terminal_text.see(tkinter.END)
+                except tkinter.TclError as e:
+                    print("TerminalVt100.pop_search_window_click_search_button: 未选匹配何文字", e)
+                    return
+
+    def highlight_search_text_on_terminal_text(self, ret_list, ret_index, terminal_text):
+        start_index, end_index = ret_list[ret_index].span()
+        print(start_index, end_index)
+        start_index_count = "+" + str(start_index) + "c"
+        end_index_count = "+" + str(end_index) + "c"
+        print(terminal_text.get("1.0" + start_index_count, "1.0" + end_index_count))
+        try:
+            terminal_text.tag_delete("matched")
+            terminal_text.tag_add("matched", "1.0" + start_index_count, "1.0" + end_index_count)
+            terminal_text.tag_config("matched", foreground="red", backgroun="white")  # 将选中的文本设置属性
+            terminal_text.see("1.0" + end_index_count)
+        except tkinter.TclError as e:
+            print("TerminalVt100.highlight_search_text_on_terminal_text: 未选匹配何文字", e)
+            return
+
+    @staticmethod
+    def save_all_text_on_terminal_text(terminal_text):
+        try:
+            all_text = terminal_text.get("1.0", tkinter.END)
+        except tkinter.TclError as e:
+            print("TerminalVt100.save_all_text_on_terminal_text: 获取Text内容失败", e)
+            terminal_text.focus_force()
+            return
+        file_path = filedialog.asksaveasfile(title="保存到文件", filetypes=[("Text files", "*.log"), ("All files", "*.*")],
+                                             defaultextension=".log")
+        if not file_path:
+            print("未选择文件")
+            terminal_text.focus_force()
+        else:
+            print(file_path)
+            # 保存巡检命令及输出结果
+            all_text_n = all_text.replace("\r\n", "\n")
+            with open(file_path.name, "a", encoding="utf8") as fileobj:  # 追加，不存在则新建
+                fileobj.write(all_text_n)
+            terminal_text.focus_force()
 
     @staticmethod
     def set_selected_text_color_release(event, terminal_text):
@@ -7648,7 +7767,6 @@ class TerminalVt100:
     def process_received_bytes_on_alternate_keypad_mode(self, received_bytes):
         # self.terminal_application_text.insert(tkinter.END,received_bytes.decode("utf8"))
         output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
-        copied_current_page = False  # 置False表示当前一次recv不需要移动vt100光标回到首行
         # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析 ★★★★★★
         for block_bytes in output_block_ctrl_and_normal_content_list:
             if self.is_closed:
