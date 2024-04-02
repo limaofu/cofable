@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-01
+# update: 2024-04-02
 
 """
 开发日志：
@@ -139,6 +139,7 @@ RESOURCE_TYPE_HOST_GROUP = 3
 RESOURCE_TYPE_INSPECTION_CODE_BLOCK = 4
 RESOURCE_TYPE_INSPECTION_TEMPLATE = 5
 RESOURCE_TYPE_INSPECTION_JOB = 6
+RESOURCE_TYPE_CUSTOM_SCHEME = 7
 OUTPUT_FILE_NAME_STYLE_HOSTNAME = 0
 OUTPUT_FILE_NAME_STYLE_HOSTNAME_DATE = 1
 OUTPUT_FILE_NAME_STYLE_HOSTNAME_DATE_TIME = 2
@@ -430,7 +431,8 @@ class Host:
 
     def __init__(self, name='default', description='default', project_oid='default', address='default',
                  ssh_port=22, telnet_port=23, last_modify_timestamp=0, oid=None, create_timestamp=None,
-                 login_protocol=LOGIN_PROTOCOL_SSH, first_auth_method=FIRST_AUTH_METHOD_PRIKEY, global_info=None):
+                 login_protocol=LOGIN_PROTOCOL_SSH, first_auth_method=FIRST_AUTH_METHOD_PRIKEY,
+                 custome_tag_config_scheme_oid='', global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
@@ -449,6 +451,7 @@ class Host:
         self.login_protocol = login_protocol
         self.first_auth_method = first_auth_method
         self.credential_oid_list = []  # 元素为 Credential对象的cred_oid
+        self.custome_tag_config_scheme_oid = custome_tag_config_scheme_oid  # <str> 为<CustomeTagConfigScheme>对象的oid
         self.global_info = global_info
 
     def add_credential(self, credential_object):  # 每台主机都会绑定一个或多个不同类型的登录/访问认证凭据
@@ -474,7 +477,8 @@ class Host:
                         "telnet_port int,",
                         "last_modify_timestamp double,",
                         "login_protocol int,"
-                        "first_auth_method int )"]
+                        "first_auth_method int,",
+                        "custome_tag_config_scheme_oid varchar(36) )"]
             sqlite_cursor.execute(" ".join(sql_list))
         # 开始插入数据
         sql = f"select * from tb_host where oid='{self.oid}'"
@@ -490,7 +494,8 @@ class Host:
                         "telnet_port,",
                         "last_modify_timestamp,",
                         "login_protocol,",
-                        "first_auth_method ) values",
+                        "first_auth_method,",
+                        "custome_tag_config_scheme_oid ) values",
                         f"('{self.oid}',",
                         f"'{self.name}',",
                         f"'{self.description}',",
@@ -501,7 +506,8 @@ class Host:
                         f"{self.telnet_port},",
                         f"{self.last_modify_timestamp},"
                         f"{self.login_protocol},"
-                        f"{self.first_auth_method} )"]
+                        f"{self.first_auth_method},",
+                        f"'{self.custome_tag_config_scheme_oid}' )"]
             sqlite_cursor.execute(" ".join(sql_list))
         else:  # ★★ 若查询到有此项记录，则更新此项记录 ★★
             sql_list = [f"update tb_host set ",
@@ -514,7 +520,8 @@ class Host:
                         f"telnet_port={self.telnet_port},",
                         f"last_modify_timestamp={self.last_modify_timestamp},"
                         f"login_protocol={self.login_protocol},"
-                        f"first_auth_method={self.first_auth_method}",
+                        f"first_auth_method={self.first_auth_method},",
+                        f"custome_tag_config_scheme_oid='{self.custome_tag_config_scheme_oid}'",
                         "where",
                         f"oid='{self.oid}'"]
             sqlite_cursor.execute(" ".join(sql_list))
@@ -545,7 +552,7 @@ class Host:
 
     def update(self, name=None, description=None, project_oid=None, address=None,
                ssh_port=None, telnet_port=None, last_modify_timestamp=None, create_timestamp=None,
-               login_protocol=None, first_auth_method=None, global_info=None):
+               login_protocol=None, first_auth_method=None, custome_tag_config_scheme_oid=None, global_info=None):
         if name is not None:
             self.name = name
         if description is not None:
@@ -570,6 +577,8 @@ class Host:
             self.login_protocol = login_protocol
         if first_auth_method is not None:
             self.first_auth_method = first_auth_method
+        if custome_tag_config_scheme_oid is not None:
+            self.custome_tag_config_scheme_oid = custome_tag_config_scheme_oid
         # 最后更新数据库
         self.save()
 
@@ -2032,6 +2041,7 @@ class GlobalInfo:
         self.inspection_template_obj_list = []
         self.inspection_job_record_obj_list = []
         self.launch_template_trigger_obj_list = []
+        self.custome_tag_config_scheme_obj_list = []
         self.current_project_obj = None  # 需要在项目界面将某个项目设置为当前项目，才会赋值
         self.lock_sqlite3_db = threading.Lock()  # 操作本地sqlite3数据库文件的锁，同一时间段内只能有一个线程操作此数据库
 
@@ -2046,7 +2056,7 @@ class GlobalInfo:
             print("sqlite3_dbfile_name is null")
             return
         else:
-            self.project_obj_list = self.load_project_from_dbfile()
+            # self.project_obj_list = self.load_project_from_dbfile()
             self.credential_obj_list = self.load_credential_from_dbfile()
             self.host_obj_list = self.load_host_from_dbfile()
             self.host_group_obj_list = self.load_host_group_from_dbfile()
@@ -2054,6 +2064,8 @@ class GlobalInfo:
             self.inspection_template_obj_list = self.load_inspection_template_from_dbfile()
             self.inspection_job_record_obj_list = self.load_inspection_job_record_from_dbfile()
             self.inspection_job_record_obj_list.reverse()  # 逆序，按时间从新到旧
+            self.create_builtin_custome_tag_config_scheme()  # 创建内置的shell着色方案
+            self.custome_tag_config_scheme_obj_list = self.load_custome_tag_config_scheme()  # 加载所有着色方案，含刚刚创建的内置方案
             # 加载完成所有资源后，创建定时作业监听器
             self.launch_template_trigger()
 
@@ -2066,6 +2078,42 @@ class GlobalInfo:
                 self.launch_template_trigger_obj_list.append(cron_trigger1)
                 # 开始执行监视任务，达到触发条件就执行相应巡检模板（由LaunchTemplateTrigger.start_crontab_job()方法触发）
                 cron_trigger1.start_crond_job()
+
+    def create_builtin_custome_tag_config_scheme(self):
+        project_obj = self.get_project_by_name("default")
+        if project_obj is not None:
+            project_oid=project_obj.oid
+        else:
+            project_oid="None"
+        scheme_linux = CustomTagConfigScheme(name="linux", description="system builtin scheme for linux device",
+                                             oid="7d285a2c-cf94-4012-9846-19ac7ac070e1",
+                                             project_oid=project_oid,
+                                             global_info=self)
+        scheme_linux.custom_match_object_list = [
+            CustomMatchObject(match_pattern=r'(\d{1,3}\.){3}\d{1,3}', foreground="#ff4dff",
+                              backgroun="black"),
+            CustomMatchObject(match_pattern=r'([0-9a-f]{1,2}:){5}[0-9a-f]{1,3}', foreground="#ff4dff",
+                              backgroun="black"),
+            CustomMatchObject(match_pattern=r'(\d{1,3}/){2,}\d{1,3}', foreground="green",
+                              backgroun="black"),
+            CustomMatchObject(match_pattern=r'\bdown\b', foreground="red",
+                              backgroun="black", bold=True),
+            CustomMatchObject(match_pattern=r'\bup\b', foreground="green",
+                              backgroun="black", italic=True),
+            CustomMatchObject(match_pattern=r'\bundo\b', foreground="red",
+                              backgroun="black", underline=True, underlinefg="yellow"),
+            CustomMatchObject(match_pattern=r'\bshutdown\b', foreground="red",
+                              backgroun="black", overstrike=True, overstrikefg='yellow'),
+            CustomMatchObject(match_pattern=r'\binterface\b', foreground="cyan",
+                              backgroun="black"),
+            CustomMatchObject(match_pattern=r'\benable\b', foreground="green", bold=True,
+                              backgroun="black"),
+            CustomMatchObject(match_pattern=r'\bvlan[if]*', foreground="#b26904",
+                              backgroun="black"),
+            CustomMatchObject(match_pattern=r'\bdefault\b', foreground="#ba7131",
+                              backgroun="black")]
+        scheme_linux.save()
+        self.custome_tag_config_scheme_obj_list.append(scheme_linux)
 
     def load_project_from_dbfile(self):
         """
@@ -2165,7 +2213,9 @@ class GlobalInfo:
                        telnet_port=obj_info_tuple[7],
                        last_modify_timestamp=obj_info_tuple[8],
                        login_protocol=obj_info_tuple[9],
-                       first_auth_method=obj_info_tuple[10], global_info=self)
+                       first_auth_method=obj_info_tuple[10],
+                       custome_tag_config_scheme_oid=obj_info_tuple[11],
+                       global_info=self)
             obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
@@ -2595,6 +2645,70 @@ class GlobalInfo:
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
 
+    def load_custome_tag_config_scheme(self):
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_job_record'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_custome_tag_config_scheme"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        sql = f"select * from tb_custome_tag_config_scheme"
+        sqlite_cursor.execute(sql)
+        search_result = sqlite_cursor.fetchall()
+        obj_list = []
+        for obj_info_tuple in search_result:
+            # print('tuple: ', obj_info_tuple)
+            obj = CustomTagConfigScheme(oid=obj_info_tuple[0],
+                                        name=obj_info_tuple[1],
+                                        description=obj_info_tuple[2],
+                                        project_oid=obj_info_tuple[3],
+                                        create_timestamp=obj_info_tuple[4],
+                                        last_modify_timestamp=obj_info_tuple[5],
+                                        global_info=self)
+            obj_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+        self.load_custome_tag_config_scheme_include_match_object(obj_list)
+        return obj_list
+
+    def load_custome_tag_config_scheme_include_match_object(self, obj_list):
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_inspection_job_record_host_job_status_obj_list'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_custome_tag_config_scheme_include_match_object"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则返回None
+        if len(result) == 0:
+            return []
+        # 读取数据
+        for scheme_obj in obj_list:
+            sql = f'select * from tb_custome_tag_config_scheme_include_match_object where "scheme_oid"="{scheme_obj.oid}"'
+            sqlite_cursor.execute(sql)
+            search_result = sqlite_cursor.fetchall()
+            for obj_info_tuple in search_result:
+                # print('tuple: ', obj_info_tuple)
+                obj = CustomMatchObject(match_pattern=obj_info_tuple[1],
+                                        foreground=obj_info_tuple[2],
+                                        backgroun=obj_info_tuple[2],
+                                        underline=obj_info_tuple[4],
+                                        underlinefg=obj_info_tuple[5],
+                                        overstrike=obj_info_tuple[6],
+                                        overstrikefg=obj_info_tuple[7],
+                                        bold=obj_info_tuple[8],
+                                        italic=obj_info_tuple[9])
+                scheme_obj.custom_match_object_list.append(obj)
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+
     def is_project_name_existed(self, project_name):  # 判断项目名称是否已存在项目obj_list里
         for project in self.project_obj_list:
             if project_name == project.name:
@@ -2679,6 +2793,20 @@ class GlobalInfo:
                 return True
         return False
 
+    def is_custome_tag_config_scheme_name_existed(self, scheme_name):  # 判断custome_tag_config_scheme名称是否已存在
+        for scheme in self.custome_tag_config_scheme_obj_list:
+            if scheme_name == scheme.name:
+                return True
+        return False
+
+    def is_custome_tag_config_scheme_name_existed_except_self(self, scheme_name, except_obj):  # 判断custome_tag_config_scheme名称是否已存在
+        for scheme in self.custome_tag_config_scheme_obj_list:
+            if scheme == except_obj:
+                continue
+            if scheme_name == scheme.name:
+                return True
+        return False
+
     def get_project_by_oid(self, oid):
         """
         根据项目oid/uuid<str>查找项目对象，找到时返回<Project>对象
@@ -2687,6 +2815,17 @@ class GlobalInfo:
         """
         for project in self.project_obj_list:
             if project.oid == oid:
+                return project
+        return None
+
+    def get_project_by_name(self, name):
+        """
+        根据项目oid/uuid<str>查找项目对象，找到时返回<Project>对象
+        :param name:
+        :return:
+        """
+        for project in self.project_obj_list:
+            if project.name == name:
                 return project
         return None
 
@@ -2785,6 +2924,12 @@ class GlobalInfo:
             index += 1
         return None
 
+    def get_custome_tag_config_scheme_by_oid(self, oid):
+        for scheme in self.custome_tag_config_scheme_obj_list:
+            if scheme.oid == oid:
+                return scheme
+        return None
+
     def delete_project_obj_by_oid(self, oid):
         """
         根据项目oid/uuid<str>删除项目对象
@@ -2870,7 +3015,7 @@ class GlobalInfo:
         if len(result) != 0:  # 若查询到有此表，才删除相应数据
             sql = f"delete from tb_host where oid='{obj.oid}'"
             sqlite_cursor.execute(sql)
-        # ★查询是否有名为'tb_host_credential_oid_list'的表★
+        # ★查询是否有名为'tb_host_include_credential_oid_list'的表★
         sql = 'SELECT * FROM sqlite_master WHERE \
                     "type"="table" and "tbl_name"="tb_host_include_credential_oid_list"'
         sqlite_cursor.execute(sql)
@@ -3037,6 +3182,36 @@ class GlobalInfo:
         # ★最后再从内存obj_list删除
         self.inspection_job_record_obj_list.remove(obj)
 
+    def delete_custome_tag_config_scheme_obj(self, obj):
+        """
+        直接删除 CustomTagConfigScheme 对象
+        :param obj:
+        :return:
+        """
+        # ★先从数据库删除
+        sqlite_conn = sqlite3.connect(self.sqlite3_dbfile_name)  # 连接数据库文件，若文件不存在则新建
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_custome_tag_config_scheme'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE type="table" and tbl_name="tb_custome_tag_config_scheme"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_custome_tag_config_scheme where oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_custome_tag_config_scheme_include_match_object'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE \
+                    "type"="table" and "tbl_name"="tb_custome_tag_config_scheme_include_match_object"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()
+        if len(result) != 0:  # 若查询到有此表，才删除相应数据
+            sql = f"delete from tb_custome_tag_config_scheme_include_match_object where scheme_oid='{obj.oid}'"
+            sqlite_cursor.execute(sql)
+        sqlite_cursor.close()
+        sqlite_conn.commit()
+        sqlite_conn.close()
+        # ★最后再从内存obj_list删除
+        self.custome_tag_config_scheme_obj_list.remove(obj)
+
 
 class MainWindow:
     """
@@ -3063,7 +3238,11 @@ class MainWindow:
         self.nav_frame_r_bottom_height = self.height - 35
         self.global_info = global_info  # <GlobalInfo>对象
         self.current_project = current_project
-        self.about_info = "CofAble，可视化运维巡检平台，版本: v1.0\n个人运维工作中的瑞士军刀\n本软件使用GPL-v3.0协议开源\n作者: Cof-Lee"
+        self.about_info_list = ["CofAble，可视化运维巡检工具，版本: v1.0",
+                                "个人运维工作中的瑞士军刀",
+                                "本软件使用GPL-v3.0协议开源",
+                                "作者: Cof-Lee（李茂福）",
+                                "更新时间: 2024-04-02"]
         self.padx = 2
         self.pady = 2
         self.view_width = 20
@@ -3090,12 +3269,16 @@ class MainWindow:
 
     def create_menu_bar_init(self):  # 创建菜单栏-init界面的
         self.menu_bar = tkinter.Menu(self.window_obj)  # 创建一个菜单，做菜单栏
-        menu_open_db_file = tkinter.Menu(self.menu_bar, tearoff=1)  # 创建一个菜单，分窗，表示此菜单可拉出来变成一个可移动的独立弹窗
+        menu_open_db_file = tkinter.Menu(self.menu_bar, tearoff=0)  # 创建一个菜单，不分窗，表示此菜单不可拉出来变成一个可移动的独立弹窗
+        menu_open_db_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file_of_menu_bar_init)
+        menu_settings = tkinter.Menu(self.menu_bar, tearoff=0, activebackground="green", activeforeground="white",
+                                     background="white", foreground="black")  # 创建一个菜单，不分窗
+        menu_settings.add_command(label="配色方案设置", command=self.click_menu_settings_of_menu_bar_init)
         menu_about = tkinter.Menu(self.menu_bar, tearoff=0, activebackground="green", activeforeground="white",
                                   background="white", foreground="black")  # 创建一个菜单，不分窗
-        menu_open_db_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file_of_menu_bar_init)
         menu_about.add_command(label="About", command=self.click_menu_about_of_menu_bar_init)
         self.menu_bar.add_cascade(label="File", menu=menu_open_db_file)
+        self.menu_bar.add_cascade(label="Settings", menu=menu_settings)
         self.menu_bar.add_cascade(label="Help", menu=menu_about)
         self.window_obj.config(menu=self.menu_bar)
 
@@ -3201,7 +3384,47 @@ class MainWindow:
         self.window_obj.after(1000, self.refresh_label_current_time, label)
 
     def click_menu_about_of_menu_bar_init(self):
-        messagebox.showinfo("About", self.about_info)
+        messagebox.showinfo("About", "\n".join(self.about_info_list))
+
+    def click_menu_settings_of_menu_bar_init(self):
+        pop_window = tkinter.Toplevel(self.window_obj)
+        pop_window.title("配色方案设置")
+        screen_width = self.window_obj.winfo_screenwidth()
+        screen_height = self.window_obj.winfo_screenheight()
+        width = int(self.width * 0.8)
+        height = int(self.height * 0.8)
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.on_closing_settings_pop_window(pop_window))
+        # 创建2个容器Frame
+        top_frame = tkinter.Frame(pop_window, width=width, height=35, bg="pink")
+        bottom_frame = tkinter.Frame(pop_window, width=width, height=height - 35, bg="green")
+        top_frame.grid_propagate(False)
+        bottom_frame.pack_propagate(False)
+        top_frame.grid(row=0, column=0)
+        bottom_frame.grid(row=1, column=0)
+        # 在bottom_frame创建滚动Frame，用于显示配色方案列表
+        nav_frame_r_widget_dict = {"pop_window": pop_window}
+        self.clear_tkinter_widget(bottom_frame)
+        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(bottom_frame)
+        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(bottom_frame, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
+        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=width - 20, height=height - 35)
+        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
+        nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
+        nav_frame_r_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
+        nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
+        # 在canvas-frame滚动框内添加资源列表控件
+        list_obj = ListResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
+        list_obj.show()
+
+    def on_closing_settings_pop_window(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
+        self.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.window_obj.focus_force()  # 使主窗口获得焦点
 
     def click_menu_open_db_file_of_menu_bar_init(self):
         file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.db"), ("All files", "*.*")])
@@ -4158,6 +4381,9 @@ class ListResourceInFrame:
         elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
             resource_display_frame_title = "★★ 巡检模板列表 ★★"
             resource_obj_list = self.global_info.inspection_template_obj_list
+        elif self.resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
+            resource_display_frame_title = "★★ 配色方案列表 ★★"
+            resource_obj_list = self.global_info.custome_tag_config_scheme_obj_list
         else:
             print("unknown resource type")
             resource_display_frame_title = "★★ 项目列表 ★★"
@@ -4245,6 +4471,8 @@ class ViewResourceInFrame:
             self.view_inspection_code_block()
         elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
             self.view_inspection_template()
+        elif self.resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
+            self.view_custome_tag_config_scheme()
         else:
             print("<class ViewResourceInFrame> resource_type is Unknown")
         self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
@@ -4744,6 +4972,53 @@ class ViewResourceInFrame:
                                            RESOURCE_TYPE_INSPECTION_TEMPLATE))  # 返回巡检模板列表
         button_return.pack()
 
+    def view_custome_tag_config_scheme(self):
+        # ★查看-scheme
+        print("查看配色方案")
+        print(self.resource_obj)
+        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
+        obj_info_text.insert(tkinter.END, "★★ 查看配色方案 ★★\n")
+        # ★配色方案-名称
+        scheme_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
+        print(scheme_name)
+        obj_info_text.insert(tkinter.END, scheme_name)
+        # ★配色方案-描述
+        scheme_description = "描述".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.description + "\n"
+        obj_info_text.insert(tkinter.END, scheme_description)
+        # ★配色方案-所属项目+项目id
+        if self.global_info.get_project_by_oid(self.resource_obj.project_oid) is None:  # ★凡是有根据oid查找资源对象的，都要处理None的情况
+            project_name = "Unknown!"
+        else:
+            project_name = self.global_info.get_project_by_oid(self.resource_obj.project_oid).name
+        scheme_project_name = "所属项目".ljust(self.view_width - 4, " ") + ": " + project_name + "\n"
+        obj_info_text.insert(tkinter.END, scheme_project_name)
+        scheme_project_oid = "项目id".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.project_oid + "\n"
+        obj_info_text.insert(tkinter.END, scheme_project_oid)
+        # ★配色方案-create_timestamp
+        credential_create_timestamp = "create_time".ljust(self.view_width, " ") + ": " \
+                                      + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.create_timestamp)) + "\n"
+        obj_info_text.insert(tkinter.END, credential_create_timestamp)
+        # ★配色方案-last_modify_timestamp
+        if abs(self.resource_obj.last_modify_timestamp) < 1:
+            last_modify_timestamp = self.resource_obj.create_timestamp
+        else:
+            last_modify_timestamp = self.resource_obj.last_modify_timestamp
+        credential_last_modify_timestamp = "last_modify_time".ljust(self.view_width, " ") + ": " \
+                                           + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_modify_timestamp)) + "\n"
+        print(last_modify_timestamp)
+        obj_info_text.insert(tkinter.END, credential_last_modify_timestamp)
+        # 显示info Text文本框
+        obj_info_text.pack()
+        # ★★添加返回“配色方案列表”按钮★★
+        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回配色方案列表",
+                                       command=self.back_to_custom_tag_config_pop_window)  # 返回“配色方案列表”
+        button_return.pack()
+
+    def back_to_custom_tag_config_pop_window(self):
+        self.nav_frame_r_widget_dict["pop_window"].destroy()
+        self.main_window.window_obj.focus_force()
+        self.main_window.click_menu_settings_of_menu_bar_init()
+
 
 class EditResourceInFrame:
     """
@@ -4777,6 +5052,8 @@ class EditResourceInFrame:
             self.edit_inspection_code_block()
         elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
             self.edit_inspection_template()
+        elif self.resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
+            self.edit_custome_tag_config_scheme()
         else:
             print("<class EditResourceInFrame> resource_type is Unknown")
         self.add_save_and_return_button()
@@ -4790,10 +5067,19 @@ class EditResourceInFrame:
         button_save.bind("<MouseWheel>", self.proces_mouse_scroll)
         button_save.grid(row=self.current_row_index + 1, column=0, padx=self.padx, pady=self.pady)
         # ★★添加“返回资源列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="取消编辑",
-                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(self.resource_type))
+        if self.resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
+            button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="取消编辑",
+                                           command=self.back_to_custom_tag_config_pop_window)
+        else:
+            button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="取消编辑",
+                                           command=lambda: self.main_window.nav_frame_r_resource_top_page_display(self.resource_type))
         button_return.bind("<MouseWheel>", self.proces_mouse_scroll)
         button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
+
+    def back_to_custom_tag_config_pop_window(self):
+        self.nav_frame_r_widget_dict["pop_window"].destroy()
+        self.main_window.window_obj.focus_force()
+        self.main_window.click_menu_settings_of_menu_bar_init()
 
     def proces_mouse_scroll(self, event):
         if event.delta > 0:
@@ -5588,6 +5874,51 @@ class EditResourceInFrame:
         # ★★更新row_index
         self.current_row_index = 12
 
+    def edit_custome_tag_config_scheme(self):
+        self.resource_info_dict["pop_window"] = self.nav_frame_r_widget_dict["pop_window"]
+        # ★创建-scheme
+        label_edit_inspection_template = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑配色方案 ★★")
+        label_edit_inspection_template.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_edit_inspection_template.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        # ★scheme-名称
+        label_inspection_template_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="配色方案名称")
+        label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_inspection_template_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                       textvariable=self.resource_info_dict["sv_name"])
+        entry_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
+        entry_inspection_template_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # ★scheme-描述
+        label_inspection_template_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
+        label_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_inspection_template_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+                                                              textvariable=self.resource_info_dict["sv_description"])
+        entry_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
+        entry_inspection_template_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # ★scheme-所属项目
+        label_inspection_template_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
+        label_inspection_template_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_project_oid.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        project_obj_name_list = []
+        project_obj_index = 0
+        index = 0
+        for project_obj in self.global_info.project_obj_list:
+            project_obj_name_list.append(project_obj.name)
+            if self.resource_obj.project_oid == project_obj.oid:
+                project_obj_index = index
+            index += 1
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+                                                                   state="readonly")
+        self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # ★★更新row_index
+        self.current_row_index = 12
+
 
 class UpdateResourceInFrame:
     """
@@ -5615,6 +5946,8 @@ class UpdateResourceInFrame:
             self.update_inspection_code_block()
         elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
             self.update_inspection_template()
+        elif self.resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
+            self.update_custome_tag_config_scheme()
         else:
             print("<class UpdateResourceInFrame> resource_type is Unknown")
 
@@ -5867,6 +6200,33 @@ class UpdateResourceInFrame:
                 launch_template_trigger_obj.update()
             self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_TEMPLATE, )  # 更新信息后，返回“显示资源列表”页面
 
+    def update_custome_tag_config_scheme(self):
+        scheme_name = self.resource_info_dict["sv_name"].get()
+        scheme_description = self.resource_info_dict["sv_description"].get()
+        # ★项目  凡是combobox未选择的（值为-1）都要设置为默认值0
+        combobox_project_current = self.resource_info_dict["combobox_project"].current()
+        if combobox_project_current == -1:
+            project_oid = self.global_info.project_obj_list[0].oid
+        else:
+            project_oid = self.global_info.project_obj_list[combobox_project_current].oid
+        # 更新-scheme-对象本身
+        if scheme_name == '':
+            messagebox.showinfo("更新scheme-Error", f"scheme名称不能为空")
+        elif len(scheme_name) > 128:
+            messagebox.showinfo("更新scheme-Error", f"scheme名称>128字符")
+        elif len(scheme_description) > 256:
+            messagebox.showinfo("更新scheme-Error", f"scheme描述>256字符")
+        elif self.global_info.is_custome_tag_config_scheme_name_existed_except_self(scheme_name, self.resource_obj):
+            messagebox.showinfo("更新scheme-Error", f"scheme名称已存在")
+        else:
+            self.resource_obj.update(name=scheme_name, description=scheme_description,
+                                     project_oid=project_oid,
+                                     global_info=self.global_info)
+            # 更新信息后，返回“显示资源列表”页面
+            self.resource_info_dict["pop_window"].destroy()
+            self.main_window.window_obj.focus_force()
+            self.main_window.click_menu_settings_of_menu_bar_init()
+
 
 class DeleteResourceInFrame:
     """
@@ -5901,10 +6261,13 @@ class DeleteResourceInFrame:
                 self.delete_inspection_template()
             elif self.resource_type == RESOURCE_TYPE_INSPECTION_JOB:
                 self.delete_inspection_job_record()
+            elif self.resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
+                self.delete_custome_tag_config_scheme()
             else:
                 print("<class DeleteResourceInFrame> resource_type is Unknown")
         else:
             print("用户取消了删除操作")
+            self.nav_frame_r_widget_dict["frame"].focus_force()
 
     def delete_project(self):
         self.global_info.delete_project_obj(self.resource_obj)
@@ -5933,6 +6296,10 @@ class DeleteResourceInFrame:
     def delete_inspection_job_record(self):
         self.global_info.delete_inspection_job_record_obj(self.resource_obj)
         self.main_window.list_inspection_job_of_nav_frame_r_page()
+
+    def delete_custome_tag_config_scheme(self):
+        self.global_info.delete_custome_tag_config_scheme_obj(self.resource_obj)
+        self.main_window.click_menu_settings_of_menu_bar_init()
 
 
 class SaveResourceInMainWindow:
@@ -7158,6 +7525,7 @@ class TerminalVt100:
         self.text_pad = text_pad
         self.vt100_cursor_normal = tkinter.CURRENT  # <str>默认值为 current , self.terminal_normal_text的vt100光标索引
         self.vt100_cursor_app = tkinter.CURRENT  # <str>默认值为 current , self.terminal_application_text的vt100光标索引
+        self.before_recv_text_index = tkinter.CURRENT  # <str>默认值为 current
 
     def get_font_mapped_width(self):
         font_size_map_list_songti = [(8, 6, 11),
@@ -7779,32 +8147,33 @@ class TerminalVt100:
                 return
             try:
                 received_bytes = self.ssh_shell.recv(65535)
+                print("TerminalVt100.run_invoke_shell_recv: 接收到信息:", received_bytes)
+                # ★★★开始解析接收到的vt100输出★★★
+                print("TerminalVt100.run_invoke_shell_recv: 开始解析received_bytes")
+                if len(received_bytes) == 0:
+                    print("TerminalVt100.run_invoke_shell_recv: received_bytes为空，关闭 ssh_client, 退出了本函数")
+                    self.is_closed = True
+                    return
+                # ★★ enter alternate_keypad_mode 进入应用模式 ★★
+                match_pattern = b'\x1b\[\?1h\x1b='
+                ret = re.search(match_pattern, received_bytes)
+                if ret is not None:
+                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了★Enter Alternate Keypad Mode★ {match_pattern}")
+                    # 首次匹配，首次进入alternate_keypad_mode需要清空此模式下Text控件内容
+                    self.enter_alternate_keypad_mode_text(received_bytes)
+                    continue
+                if self.is_alternate_keypad_mode:
+                    # 如果已经处于应用模式，则本次接收到的信息交给 self.enter_alternate_keypad_mode_text() 处理
+                    self.enter_alternate_keypad_mode_text(received_bytes)
+                    continue
+                # ★★ 不是应用模式，则由以下函数处理（普通模式） ★★
+                self.process_received_bytes_on_normal_mode(received_bytes)
             except Exception as e:
                 print(e)
                 return
-            print("TerminalVt100.run_invoke_shell_recv: 接收到信息:", received_bytes)
-            # ★★★开始解析接收到的vt100输出★★★
-            print("TerminalVt100.run_invoke_shell_recv: 开始解析received_bytes")
-            if len(received_bytes) == 0:
-                print("TerminalVt100.run_invoke_shell_recv: received_bytes为空，关闭 ssh_client, 退出了本函数")
-                self.is_closed = True
-                return
-            # ★★ enter alternate_keypad_mode 进入应用模式 ★★
-            match_pattern = b'\x1b\[\?1h\x1b='
-            ret = re.search(match_pattern, received_bytes)
-            if ret is not None:
-                print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了★Enter Alternate Keypad Mode★ {match_pattern}")
-                # 首次匹配，首次进入alternate_keypad_mode需要清空此模式下Text控件内容
-                self.enter_alternate_keypad_mode_text(received_bytes)
-                continue
-            if self.is_alternate_keypad_mode:
-                # 如果已经处于应用模式，则本次接收到的信息交给 self.enter_alternate_keypad_mode_text() 处理
-                self.enter_alternate_keypad_mode_text(received_bytes)
-                continue
-            # ★★ 不是应用模式，则由以下函数处理（普通模式） ★★
-            self.process_received_bytes_on_normal_mode(received_bytes)
 
     def process_received_bytes_on_normal_mode(self, received_bytes):
+        self.before_recv_text_index = self.terminal_normal_text.index(self.vt100_cursor_normal)
         output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
         # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析，普通输出模式 ★★★★★★
         for block_bytes in output_block_ctrl_and_normal_content_list:
@@ -8077,6 +8446,12 @@ class TerminalVt100:
                 self.vt100_cursor_normal = tkinter.END + "-1c"
             self.terminal_normal_text.mark_set("insert", self.vt100_cursor_normal)
             print(f"TerminalVt100.process_received_bytes_on_normal_mode: 行数相同，end进行mart_set {self.vt100_cursor_normal}")
+        # 匹配用户自定义高亮词汇
+        last_recv_content_str = self.terminal_normal_text.get(self.before_recv_text_index, self.vt100_cursor_normal)
+        custom_tag_config_obj = CustomTagConfig(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
+                                                start_index=self.before_recv_text_index,
+                                                terminal_mode=VT100_TERMINAL_MODE_NORMAL)
+        custom_tag_config_obj.set_custom_tag()
         self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
         self.terminal_normal_text.focus_force()
 
@@ -8650,12 +9025,244 @@ class Vt100OutputBlock:
                 TagConfigRecord(self.output_block_tag_config_name, FONT_TYPE_BOLD, self.terminal_vt100_obj.terminal_application_text))
 
 
+class CustomMatchObject:
+    def __init__(self, match_pattern='', foreground='', backgroun='', underline=False, underlinefg='', overstrike=False, overstrikefg='',
+                 bold=False, italic=False):
+        self.match_pattern = match_pattern  # <str>
+        self.foreground = foreground  # <color_str> 如 '#ff00bb'
+        self.backgroun = backgroun  # <color_str> 如 '#ff00bb'
+        self.underline = underline  # <bool> <int> 置True时表示使用下划线，置False时表示不使用下划线
+        self.underlinefg = underlinefg  # <color_str> 如 '#ff00bb' 仅设置下划线时有效
+        self.overstrike = overstrike  # <bool> <int> 置True时表示使用删除线，置False时表示不使用删除线
+        self.overstrikefg = overstrikefg  # <color_str> 如 '#ff00bb' 仅设置删除线时有效
+        self.bold = bold  # <bool>字体是否加粗，默认不加粗
+        self.italic = italic  # <bool>字体是否使用斜体，默认不使用斜体
+
+
+class CustomTagConfigScheme:
+    def __init__(self, name='default', description='default', project_oid='default', create_timestamp=None,
+                 last_modify_timestamp=0, oid=None, global_info=None):
+        if oid is None:
+            self.oid = uuid.uuid4().__str__()  # <str>
+        else:
+            self.oid = oid
+        self.name = name  # <str>
+        self.description = description  # <str>
+        self.project_oid = project_oid  # <str>
+        if create_timestamp is None:
+            self.create_timestamp = time.time()  # <float>
+        else:
+            self.create_timestamp = create_timestamp
+        self.last_modify_timestamp = last_modify_timestamp  # <float>
+        self.custom_match_object_list = []  # 元素为<CustomMatchObject>对象
+        self.global_info = global_info
+
+    def save(self):
+        sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
+        sqlite_cursor = sqlite_conn.cursor()  # 创建一个游标，用于执行sql语句
+        # ★查询是否有名为'tb_host'的表★
+        sql = f'SELECT * FROM sqlite_master WHERE "type"="table" and "tbl_name"="tb_custome_tag_config_scheme"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        # 若未查询到有此表，则创建此表
+        if len(result) == 0:
+            sql_list = ["create table tb_custome_tag_config_scheme  ( oid varchar(36) NOT NULL PRIMARY KEY,",
+                        "name varchar(128),",
+                        "description varchar(256),",
+                        "project_oid varchar(36),",
+                        "create_timestamp double,",
+                        "last_modify_timestamp double )"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        # 开始插入数据
+        sql = f"select * from tb_custome_tag_config_scheme where oid='{self.oid}'"
+        sqlite_cursor.execute(sql)
+        if len(sqlite_cursor.fetchall()) == 0:  # ★★ 若未查询到有此项记录，则创建此项记录 ★★
+            sql_list = [f"insert into tb_custome_tag_config_scheme (oid,",
+                        "name,",
+                        "description,",
+                        "project_oid,",
+                        "create_timestamp,",
+                        "last_modify_timestamp ) values",
+                        f"('{self.oid}',",
+                        f"'{self.name}',",
+                        f"'{self.description}',",
+                        f"'{self.project_oid}',",
+                        f"{self.create_timestamp},",
+                        f"{self.last_modify_timestamp} )"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        else:  # ★★ 若查询到有此项记录，则更新此项记录 ★★
+            sql_list = [f"update tb_custome_tag_config_scheme set ",
+                        f"name='{self.name}',",
+                        f"description='{self.description}',",
+                        f"project_oid='{self.project_oid}',",
+                        f"create_timestamp={self.create_timestamp},",
+                        f"last_modify_timestamp={self.last_modify_timestamp}",
+                        "where",
+                        f"oid='{self.oid}'"]
+            print(" ".join(sql_list))
+            sqlite_cursor.execute(" ".join(sql_list))
+        # ★查询是否有名为'tb_custome_tag_config_scheme_include_match_object'的表★
+        sql = 'SELECT * FROM sqlite_master WHERE \
+                        "type"="table" and "tbl_name"="tb_custome_tag_config_scheme_include_match_object"'
+        sqlite_cursor.execute(sql)
+        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
+        print("exist tables: ", result)
+        if len(result) == 0:  # 若未查询到有此表，则创建此表
+            sql_list = ["create table tb_custome_tag_config_scheme_include_match_object  (scheme_oid varchar(36),",
+                        "match_pattern varchar(256),",
+                        "foreground varchar(32),",
+                        "backgroun varchar(32),",
+                        "underline int,",
+                        "underlinefg varchar(32),",
+                        "overstrike int,",
+                        "overstrikefg varchar(32),",
+                        "bold int,",
+                        "italic int",
+                        " );"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        # 开始插入数据
+        sql = f"delete from tb_custome_tag_config_scheme_include_match_object where scheme_oid='{self.oid}'"
+        sqlite_cursor.execute(sql)  # ★先清空所有的match_obj，再重新插入（既可用于新建，又可用于更新）
+        for match_obj_oid in self.custom_match_object_list:
+            sql_list = [f"insert into tb_custome_tag_config_scheme_include_match_object (scheme_oid,",
+                        "match_pattern,",
+                        "foreground,",
+                        "backgroun,",
+                        "underline,",
+                        "underlinefg,",
+                        "overstrike,",
+                        "overstrikefg,",
+                        "bold,",
+                        "italic ) values ",
+                        f"('{self.oid}',",
+                        f"'{match_obj_oid.match_pattern}',",
+                        f"'{match_obj_oid.foreground}',",
+                        f"'{match_obj_oid.backgroun}',",
+                        f"{match_obj_oid.underline},",
+                        f"'{match_obj_oid.underlinefg}',",
+                        f"{match_obj_oid.overstrike},",
+                        f"'{match_obj_oid.overstrikefg}',",
+                        f"{match_obj_oid.bold},",
+                        f"{match_obj_oid.italic}",
+                        " )"]
+            sqlite_cursor.execute(" ".join(sql_list))
+        sqlite_cursor.close()
+        sqlite_conn.commit()  # 保存，提交
+        sqlite_conn.close()  # 关闭数据库连接
+
+    def update(self, name=None, description=None, project_oid=None, last_modify_timestamp=None,
+               create_timestamp=None, global_info=None):
+        if name is not None:
+            self.name = name
+        if description is not None:
+            self.description = description
+        if project_oid is not None:
+            self.project_oid = project_oid
+        if last_modify_timestamp is not None:
+            self.last_modify_timestamp = last_modify_timestamp
+        else:
+            self.last_modify_timestamp = time.time()  # 更新last_modify时间
+        if create_timestamp is not None:
+            self.create_timestamp = create_timestamp
+        if global_info is not None:
+            self.global_info = global_info
+        # 最后更新数据库
+        self.save()
+
+
+class CustomTagConfig:
+    def __init__(self, output_recv_content='', terminal_vt100_obj=None, start_index="",
+                 terminal_mode=VT100_TERMINAL_MODE_NORMAL):
+        self.output_recv_content = output_recv_content  # <str> 一次recv接收到的所有字符（不含控制序列字符）
+        self.terminal_vt100_obj = terminal_vt100_obj
+        self.terminal_mode = terminal_mode
+        self.start_index = start_index
+
+    def set_custom_tag(self):
+        if self.terminal_mode == VT100_TERMINAL_MODE_NORMAL:
+            self.set_custom_tag_normal()
+        else:
+            pass
+
+    def set_custom_tag_normal(self):
+        custom_match_object_list = []
+        custom_match_object_1 = CustomMatchObject(match_pattern=r'(\d{1,3}\.){3}\d{1,3}', foreground="#ff4dff",
+                                                  backgroun="black")
+        custom_match_object_2 = CustomMatchObject(match_pattern=r'([0-9a-f]{1,2}:){5}[0-9a-f]{1,3}', foreground="#ff4dff",
+                                                  backgroun="black")
+        custom_match_object_3 = CustomMatchObject(match_pattern=r'(\d{1,3}/){2,}\d{1,3}', foreground="green",
+                                                  backgroun="black")
+        custom_match_object_4 = CustomMatchObject(match_pattern=r'\bdown\b', foreground="red",
+                                                  backgroun="black", bold=True)
+        custom_match_object_5 = CustomMatchObject(match_pattern=r'\bup\b', foreground="green",
+                                                  backgroun="black", italic=True)
+        custom_match_object_6 = CustomMatchObject(match_pattern=r'\bundo\b', foreground="red",
+                                                  backgroun="black", underline=True, underlinefg="yellow")
+        custom_match_object_7 = CustomMatchObject(match_pattern=r'\bshutdown\b', foreground="red",
+                                                  backgroun="black", overstrike=True, overstrikefg='yellow')
+        custom_match_object_8 = CustomMatchObject(match_pattern=r'\binterface\b', foreground="cyan",
+                                                  backgroun="black")
+        custom_match_object_9 = CustomMatchObject(match_pattern=r'\benable\b', foreground="green", bold=True,
+                                                  backgroun="black")
+        custom_match_object_10 = CustomMatchObject(match_pattern=r'\bvlan[if]*', foreground="#b26904",
+                                                   backgroun="black")
+        custom_match_object_11 = CustomMatchObject(match_pattern=r'\bdefault\b', foreground="#ba7131",
+                                                   backgroun="black")
+        custom_match_object_list.append(custom_match_object_1)
+        custom_match_object_list.append(custom_match_object_2)
+        custom_match_object_list.append(custom_match_object_3)
+        custom_match_object_list.append(custom_match_object_4)
+        custom_match_object_list.append(custom_match_object_5)
+        custom_match_object_list.append(custom_match_object_6)
+        custom_match_object_list.append(custom_match_object_7)
+        custom_match_object_list.append(custom_match_object_8)
+        custom_match_object_list.append(custom_match_object_9)
+        custom_match_object_list.append(custom_match_object_10)
+        custom_match_object_list.append(custom_match_object_11)
+        for custom_match_object in custom_match_object_list:
+            match_pattern = custom_match_object.match_pattern
+            ret = re.finditer(match_pattern, self.output_recv_content, re.I)
+            tag_config_name = uuid.uuid4().__str__()  # <str>
+            custom_match_font = font.Font(size=self.terminal_vt100_obj.font_size,
+                                          name=self.terminal_vt100_obj.font_name)
+            if custom_match_object.bold:
+                custom_match_font.configure(weight="bold")
+            if custom_match_object.italic:
+                custom_match_font.configure(slant="italic")
+            for ret_item in ret:
+                print(f"CustomTagConfig.set_custom_tag_normal: 匹配到了{match_pattern}")
+                start_index, end_index = ret_item.span()
+                start_index_count = "+" + str(start_index) + "c"
+                end_index_count = "+" + str(end_index) + "c"
+                print("CustomTagConfig.set_custom_tag_normal:匹配内容",
+                      self.terminal_vt100_obj.terminal_normal_text.get(self.start_index + start_index_count,
+                                                                       self.start_index + end_index_count))
+                try:
+                    # terminal_text.tag_delete("matched")
+
+                    self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{tag_config_name}", self.start_index + start_index_count,
+                                                                         self.start_index + end_index_count)
+                    self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                            foreground=custom_match_object.foreground,
+                                                                            backgroun=custom_match_object.backgroun,
+                                                                            underline=custom_match_object.underline,
+                                                                            underlinefg=custom_match_object.underlinefg,
+                                                                            overstrike=custom_match_object.overstrike,
+                                                                            overstrikefg=custom_match_object.overstrikefg,
+                                                                            font=custom_match_font)
+                except tkinter.TclError as e:
+                    print("CustomTagConfig.set_custom_tag_normal: 未选择文字", e)
+                    return
+
+
 if __name__ == '__main__':
-    global_info_obj = GlobalInfo()  # 创建全局信息类，用于存储所有资源类的对象
-    global_info_obj.load_all_data_from_sqlite3()  # 首先加载数据库，加载所有资源（若未指定数据库文件名称，则默认为"cofable_default.db"）
+    global_info_obj = GlobalInfo()  # 创建全局信息类，用于存储所有资源类的对象，（若未指定数据库文件名称，则默认为"cofable_default.db"）
+    global_info_obj.project_obj_list = global_info_obj.load_project_from_dbfile()  # 首先加载数据库，加载项目资源
     if len(global_info_obj.project_obj_list) == 0:  # 如果项目为空，默认先自动创建一个名为default的项目
         project_default = Project(global_info=global_info_obj)
         global_info_obj.project_obj_list.append(project_default)
         project_default.save()
+    global_info_obj.load_all_data_from_sqlite3()  # 项目加载完成后，再加载其他资源
     main_window_obj = MainWindow(width=800, height=480, title='CofAble', global_info=global_info_obj)  # 创建程序主界面
     main_window_obj.show()
