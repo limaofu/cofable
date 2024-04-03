@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-02
+# update: 2024-04-03
 
 """
 开发日志：
@@ -33,15 +33,17 @@
 ★. 查看历史巡检作业日志时，如果巡检模板已更改，则显示的是更改后对应的输出，而不是更改前的，这个需要改进，
     对历史巡检模板做一个快照，展示历史作业日志时按旧的资源来显示
 ★. 支持工作流，一个工作流包含多个巡检模板，依次进行，可进行分支判断
-★. 在host_job_item的text界面看巡检输出信息，不全，有很多缺失，                          2024年3月14日 已解决
+★. 在host_job_item的text界面看巡检输出信息，不全，有很多缺失，                           2024年3月14日 已解决
     原因是显示是未遍历SSHOperatorOutput.interactive_output_bytes_list
 ★. 主机命令在线批量执行，在“主机组”界面，对这一组主机在线下发命令
 ★. 首次登录后，对输出进行判断，有的设备首次登录后会要求改密码，或者长时间未登录的设备要求修改密码
-★. 不同巡检线程都去读写sqlite3数据库文件时，报错了，得加个锁                              2024年3月23日 完成
-★. 在vt100终端里实现了 光标的左右移动及插入/删除字符                                    2024年3月23日 完成
-★. 实现 vt100终端的 普通输出 与 应用输出模式的切换                                     2024年3月27日 完成
-★. 实现 复制会话日志到文件，以及在会话中查找字符串                                       2024年3月29日 完成
-★. 根据字体大小，获取单个字（半角）的宽高大小，方便调整Text的宽度及高度                     2024年3月30日 完成
+★. 不同巡检线程都去读写sqlite3数据库文件时，报错了，得加个锁                               2024年3月23日 完成
+★. 在vt100终端里实现了 光标的左右移动及插入/删除字符                                     2024年3月23日 完成
+★. 实现 vt100终端的 普通输出 与 应用输出模式的切换                                      2024年3月27日 完成
+★. 实现 复制会话日志到文件，以及在会话中查找字符串                                        2024年3月29日 完成
+★. 根据字体大小，获取单个字（半角）的宽高大小，方便调整Text的宽度及高度                      2024年3月30日 完成
+★. 支持设置主机的字符集，如utf8,gbk等  默认使用utf8
+★. 在向Terminal终端会话粘贴内容时，如果内容有多行，需要弹出确认框，用户确认才发送要粘贴的内容    2024年4月3日 完成
 
 资源操作逻辑：
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -2064,7 +2066,7 @@ class GlobalInfo:
             self.inspection_template_obj_list = self.load_inspection_template_from_dbfile()
             self.inspection_job_record_obj_list = self.load_inspection_job_record_from_dbfile()
             self.inspection_job_record_obj_list.reverse()  # 逆序，按时间从新到旧
-            self.create_builtin_custome_tag_config_scheme()  # 创建内置的shell着色方案
+            self.create_builtin_custome_tag_config_scheme()  # 创建内置的shell着色方案★★
             self.custome_tag_config_scheme_obj_list = self.load_custome_tag_config_scheme()  # 加载所有着色方案，含刚刚创建的内置方案
             # 加载完成所有资源后，创建定时作业监听器
             self.launch_template_trigger()
@@ -2082,9 +2084,9 @@ class GlobalInfo:
     def create_builtin_custome_tag_config_scheme(self):
         project_obj = self.get_project_by_name("default")
         if project_obj is not None:
-            project_oid=project_obj.oid
+            project_oid = project_obj.oid
         else:
-            project_oid="None"
+            project_oid = "None"
         scheme_linux = CustomTagConfigScheme(name="linux", description="system builtin scheme for linux device",
                                              oid="7d285a2c-cf94-4012-9846-19ac7ac070e1",
                                              project_oid=project_oid,
@@ -2697,7 +2699,7 @@ class GlobalInfo:
                 # print('tuple: ', obj_info_tuple)
                 obj = CustomMatchObject(match_pattern=obj_info_tuple[1],
                                         foreground=obj_info_tuple[2],
-                                        backgroun=obj_info_tuple[2],
+                                        backgroun=obj_info_tuple[3],
                                         underline=obj_info_tuple[4],
                                         underlinefg=obj_info_tuple[5],
                                         overstrike=obj_info_tuple[6],
@@ -3238,11 +3240,11 @@ class MainWindow:
         self.nav_frame_r_bottom_height = self.height - 35
         self.global_info = global_info  # <GlobalInfo>对象
         self.current_project = current_project
-        self.about_info_list = ["CofAble，可视化运维巡检工具，版本: v1.0",
-                                "个人运维工作中的瑞士军刀",
+        self.about_info_list = ["CofAble，可视化运维巡检工具，个人运维工具中的瑞士军刀",
+                                "版本:  v1.0 dev",
                                 "本软件使用GPL-v3.0协议开源",
-                                "作者: Cof-Lee（李茂福）",
-                                "更新时间: 2024-04-02"]
+                                "作者:  Cof-Lee（李茂福）",
+                                "更新时间: 2024-04-03"]
         self.padx = 2
         self.pady = 2
         self.view_width = 20
@@ -3269,17 +3271,19 @@ class MainWindow:
 
     def create_menu_bar_init(self):  # 创建菜单栏-init界面的
         self.menu_bar = tkinter.Menu(self.window_obj)  # 创建一个菜单，做菜单栏
-        menu_open_db_file = tkinter.Menu(self.menu_bar, tearoff=0)  # 创建一个菜单，不分窗，表示此菜单不可拉出来变成一个可移动的独立弹窗
-        menu_open_db_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file_of_menu_bar_init)
+        menu_open_db_file = tkinter.Menu(self.menu_bar, tearoff=0)  # 创建一个菜单，1级子菜单，不分窗，表示此菜单不可拉出来变成一个可移动的独立弹窗
         menu_settings = tkinter.Menu(self.menu_bar, tearoff=0, activebackground="green", activeforeground="white",
-                                     background="white", foreground="black")  # 创建一个菜单，不分窗
-        menu_settings.add_command(label="配色方案设置", command=self.click_menu_settings_of_menu_bar_init)
-        menu_about = tkinter.Menu(self.menu_bar, tearoff=0, activebackground="green", activeforeground="white",
-                                  background="white", foreground="black")  # 创建一个菜单，不分窗
-        menu_about.add_command(label="About", command=self.click_menu_about_of_menu_bar_init)
+                                     background="white", foreground="black")  # 创建一个菜单，1级子菜单，不分窗
+        menu_help = tkinter.Menu(self.menu_bar, tearoff=0, activebackground="green", activeforeground="white",
+                                 background="white", foreground="black")  # 创建一个菜单，1级子菜单，不分窗
+        # 菜单栏添加1级子菜单
         self.menu_bar.add_cascade(label="File", menu=menu_open_db_file)
         self.menu_bar.add_cascade(label="Settings", menu=menu_settings)
-        self.menu_bar.add_cascade(label="Help", menu=menu_about)
+        self.menu_bar.add_cascade(label="Help", menu=menu_help)
+        # 1级子菜单添加2级子菜单（功能按钮）
+        menu_open_db_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file_of_menu_bar_init)
+        menu_settings.add_command(label="配色方案设置", command=self.click_menu_settings_scheme_of_menu_bar_init)
+        menu_help.add_command(label="About", command=self.click_menu_about_of_menu_bar_init)
         self.window_obj.config(menu=self.menu_bar)
 
     def create_nav_frame_l_init(self):  # 创建导航框架1-init界面的，主界面左边的导航框 ★★★★★
@@ -3386,13 +3390,13 @@ class MainWindow:
     def click_menu_about_of_menu_bar_init(self):
         messagebox.showinfo("About", "\n".join(self.about_info_list))
 
-    def click_menu_settings_of_menu_bar_init(self):
+    def click_menu_settings_scheme_of_menu_bar_init(self):
         pop_window = tkinter.Toplevel(self.window_obj)
         pop_window.title("配色方案设置")
         screen_width = self.window_obj.winfo_screenwidth()
         screen_height = self.window_obj.winfo_screenheight()
-        width = int(self.width * 0.8)
-        height = int(self.height * 0.8)
+        width = self.nav_frame_r_width
+        height = self.height
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
@@ -3406,6 +3410,15 @@ class MainWindow:
         bottom_frame.pack_propagate(False)
         top_frame.grid(row=0, column=0)
         bottom_frame.grid(row=1, column=0)
+        # 在top_frame添加功能按钮
+        button_create_resource = tkinter.Button(top_frame, text="创建方案",
+                                                command=lambda: self.create_custom_tag_config_scheme_of_pop_window(pop_window))
+        button_create_resource.pack(padx=self.padx, side=tkinter.LEFT)
+        button_load_resource = tkinter.Button(top_frame, text="导入方案",
+                                              command=lambda: self.create_custom_tag_config_scheme_of_pop_window(pop_window))
+        button_load_resource.pack(padx=self.padx, side=tkinter.LEFT)
+        button_other = tkinter.Button(top_frame, text="其他")
+        button_other.pack(padx=self.padx, side=tkinter.LEFT)
         # 在bottom_frame创建滚动Frame，用于显示配色方案列表
         nav_frame_r_widget_dict = {"pop_window": pop_window}
         self.clear_tkinter_widget(bottom_frame)
@@ -3425,6 +3438,36 @@ class MainWindow:
         pop_window.destroy()  # 关闭子窗口
         self.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.window_obj.focus_force()  # 使主窗口获得焦点
+
+    def create_custom_tag_config_scheme_of_pop_window(self, pop_window):
+        for widget in pop_window.winfo_children():
+            widget.destroy()
+        # pop_window.configure(width=self.nav_frame_r_width,height=self.height)
+        # 在框架2中添加canvas-frame滚动框
+        nav_frame_r_widget_dict = {"scrollbar": tkinter.Scrollbar(pop_window)}
+        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(pop_window, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)  # 创建画布
+        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
+        nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
+        nav_frame_r_widget_dict["frame"].pack()
+        nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
+        # ★在canvas - frame滚动框内添加创建资源控件
+        create_obj = CreateResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
+        create_obj.show()
+        # ★创建“保存”按钮
+        save_obj = SaveResourceInMainWindow(self, create_obj.resource_info_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
+        button_save = tkinter.Button(pop_window, text="保存", command=save_obj.save)
+        button_save.place(x=10, y=self.height - 40, width=50, height=25)
+        # ★创建“取消”按钮
+        button_cancel = tkinter.Button(pop_window, text="取消",
+                                       command=lambda: self.back_to_custom_tag_config_pop_window(pop_window))  # 返回
+        button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
+
+    def back_to_custom_tag_config_pop_window(self, pop_window):
+        pop_window.destroy()
+        self.window_obj.focus_force()
+        self.click_menu_settings_scheme_of_menu_bar_init()
 
     def click_menu_open_db_file_of_menu_bar_init(self):
         file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.db"), ("All files", "*.*")])
@@ -3668,6 +3711,8 @@ class CreateResourceInFrame:
             self.create_inspection_code_block()
         elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
             self.create_inspection_template()
+        elif self.resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
+            self.create_custom_tag_config()
         else:
             print("<class CreateResourceInFrame> resource_type is Unknown")
         self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
@@ -4339,6 +4384,9 @@ class CreateResourceInFrame:
         self.resource_info_dict["listbox_inspection_code_block"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_inspection_code_block"].yview)
         frame.grid(row=12, column=1, padx=self.padx, pady=self.pady)
+
+    def create_custom_tag_config(self):
+        pass
 
 
 class ListResourceInFrame:
@@ -5017,7 +5065,7 @@ class ViewResourceInFrame:
     def back_to_custom_tag_config_pop_window(self):
         self.nav_frame_r_widget_dict["pop_window"].destroy()
         self.main_window.window_obj.focus_force()
-        self.main_window.click_menu_settings_of_menu_bar_init()
+        self.main_window.click_menu_settings_scheme_of_menu_bar_init()
 
 
 class EditResourceInFrame:
@@ -5079,7 +5127,7 @@ class EditResourceInFrame:
     def back_to_custom_tag_config_pop_window(self):
         self.nav_frame_r_widget_dict["pop_window"].destroy()
         self.main_window.window_obj.focus_force()
-        self.main_window.click_menu_settings_of_menu_bar_init()
+        self.main_window.click_menu_settings_scheme_of_menu_bar_init()
 
     def proces_mouse_scroll(self, event):
         if event.delta > 0:
@@ -6225,7 +6273,7 @@ class UpdateResourceInFrame:
             # 更新信息后，返回“显示资源列表”页面
             self.resource_info_dict["pop_window"].destroy()
             self.main_window.window_obj.focus_force()
-            self.main_window.click_menu_settings_of_menu_bar_init()
+            self.main_window.click_menu_settings_scheme_of_menu_bar_init()
 
 
 class DeleteResourceInFrame:
@@ -6299,7 +6347,7 @@ class DeleteResourceInFrame:
 
     def delete_custome_tag_config_scheme(self):
         self.global_info.delete_custome_tag_config_scheme_obj(self.resource_obj)
-        self.main_window.click_menu_settings_of_menu_bar_init()
+        self.main_window.click_menu_settings_scheme_of_menu_bar_init()
 
 
 class SaveResourceInMainWindow:
@@ -6326,6 +6374,8 @@ class SaveResourceInMainWindow:
             self.save_inspection_code_block()
         elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
             self.save_inspection_template()
+        elif self.resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
+            self.save_custom_tag_config()
         else:
             print("<class SaveResourceInMainWindow> resource_type is Unknown")
 
@@ -6584,6 +6634,9 @@ class SaveResourceInMainWindow:
             else:
                 pass
             self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_INSPECTION_TEMPLATE)  # 返回顶级展示页面
+
+    def save_custom_tag_config(self):
+        pass
 
 
 class StartInspectionTemplateInFrame:
@@ -7736,7 +7789,7 @@ class TerminalVt100:
         pop_menu_bar = tkinter.Menu(terminal_text, tearoff=0)
         pop_menu_bar.add_command(label="复制", command=lambda: self.copy_selected_text_on_terminal_text(terminal_text))
         # pop_menu_bar.add_command(label="复制为RTF", command=lambda: self.copy_selected_text_on_terminal_text_rtf(terminal_text))
-        pop_menu_bar.add_command(label="粘贴", command=self.paste_text_on_terminal_text)
+        pop_menu_bar.add_command(label="粘贴", command=lambda: self.paste_text_on_terminal_text(terminal_text))
         pop_menu_bar.add_command(label="查找", command=lambda: self.search_text_on_terminal_text(terminal_text))
         pop_menu_bar.add_command(label="保存会话内容", command=lambda: self.save_all_text_on_terminal_text(terminal_text))
         pop_menu_bar.add_command(label="清空会话内容★", command=lambda: self.clear_all_text_on_terminal_text(terminal_text))
@@ -7767,10 +7820,57 @@ class TerminalVt100:
             print("TerminalVt100.copy_selected_text_on_terminal_text: 未选择任何文字", e)
             return
 
-    def paste_text_on_terminal_text(self):
-        pasted_text = pyperclip.paste()  # 这里需要判断一下复制的是否为纯文本文字
-        pasted_text_r = pasted_text.replace("\r\n", "\r")  # 只发送\r回车，不发送\n换行
+    def paste_text_on_terminal_text(self, terminal_text):
+        pasted_text = pyperclip.paste()
+        pasted_text_r = pasted_text.replace("\r\n", "\r").replace("\n", "\r")  # 只发送\r回车，不发送\n换行
+        match_pattern = '\\r'
+        ret = re.search(match_pattern, pasted_text_r)
+        if ret is not None:  # 要粘贴的内容有换行，需要先询问一下人类用户，是否粘贴
+            terminal_text.focus_force()
+            # result = messagebox.askyesno("粘贴内容确认", f"是否粘贴以下内容:\n{pasted_text}")
+            # messagebox.askyesno()参数1为弹窗标题，参数2为弹窗内容，有2个按钮（是，否），点击"是"时返回True
+            pop_askyesno_window = tkinter.Toplevel(self.terminal_frame)
+            pop_askyesno_window.title("粘贴内容确认")
+            screen_width = self.terminal_frame.winfo_screenwidth()
+            screen_height = self.terminal_frame.winfo_screenheight()
+            pop_win_width = 480
+            pop_win_height = 180
+            win_pos = f"{pop_win_width}x{pop_win_height}+{screen_width // 2 - pop_win_width // 2}+{screen_height // 2 - pop_win_height // 2}"
+            pop_askyesno_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+            pop_askyesno_window.configure(bg="pink")
+            # 子窗口点击右上角的关闭按钮后，触发此函数:
+            pop_askyesno_window.protocol("WM_DELETE_WINDOW",
+                                         lambda: self.pop_pop_askyesno_window_window_on_closing(pop_askyesno_window,
+                                                                                                terminal_text))
+            # 查找窗口中添加控件
+            text = tkinter.Text(pop_askyesno_window)
+            button_ok = tkinter.Button(pop_askyesno_window, text="确定",
+                                       command=lambda: self.paste_text_on_terminal_text_ok(pop_askyesno_window,
+                                                                                           terminal_text, text))
+            button_cancel = tkinter.Button(pop_askyesno_window, text="取消",
+                                           command=lambda: self.pop_pop_askyesno_window_window_on_closing(pop_askyesno_window,
+                                                                                                          terminal_text))
+            text.place(x=10, y=0, width=pop_win_width - 20, height=pop_win_height - 35)
+            button_ok.place(x=100, y=pop_win_height - 32, width=50, height=30)
+            button_cancel.place(x=260, y=pop_win_height - 32, width=50, height=30)
+            text.insert(tkinter.END, pasted_text)
+            text.focus_force()
+        else:
+            # 要粘贴的内容无换行，直接粘贴
+            self.user_input_byte_queue.put(pasted_text_r.encode("utf8"))
+            terminal_text.focus_force()
+
+    def paste_text_on_terminal_text_ok(self, pop_askyesno_window, terminal_text, content_text):
+        pasted_text_r = content_text.get("1.0", tkinter.END + "-1c").replace("\r\n", "\r").replace("\n", "\r")  # 只发送\r回车，不发送\n换行
+        pop_askyesno_window.destroy()
+        terminal_text.focus_force()
         self.user_input_byte_queue.put(pasted_text_r.encode("utf8"))
+
+    @staticmethod
+    def pop_pop_askyesno_window_window_on_closing(pop_askyesno_window, terminal_text):
+        print("TerminalVt100.pop_pop_askyesno_window_window_on_closing: 用户取消了粘贴")
+        pop_askyesno_window.destroy()
+        terminal_text.focus_force()
 
     def search_text_on_terminal_text(self, terminal_text):
         try:
@@ -8448,9 +8548,9 @@ class TerminalVt100:
             print(f"TerminalVt100.process_received_bytes_on_normal_mode: 行数相同，end进行mart_set {self.vt100_cursor_normal}")
         # 匹配用户自定义高亮词汇
         last_recv_content_str = self.terminal_normal_text.get(self.before_recv_text_index, self.vt100_cursor_normal)
-        custom_tag_config_obj = CustomTagConfig(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
-                                                start_index=self.before_recv_text_index,
-                                                terminal_mode=VT100_TERMINAL_MODE_NORMAL)
+        custom_tag_config_obj = CustomTagConfigSet(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
+                                                   start_index=self.before_recv_text_index, host_obj=self.host_obj,
+                                                   terminal_mode=VT100_TERMINAL_MODE_NORMAL, global_info=self.global_info)
         custom_tag_config_obj.set_custom_tag()
         self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
         self.terminal_normal_text.focus_force()
@@ -9171,13 +9271,15 @@ class CustomTagConfigScheme:
         self.save()
 
 
-class CustomTagConfig:
-    def __init__(self, output_recv_content='', terminal_vt100_obj=None, start_index="",
-                 terminal_mode=VT100_TERMINAL_MODE_NORMAL):
+class CustomTagConfigSet:
+    def __init__(self, output_recv_content='', terminal_vt100_obj=None, start_index="", host_obj=None,
+                 terminal_mode=VT100_TERMINAL_MODE_NORMAL, global_info=None):
         self.output_recv_content = output_recv_content  # <str> 一次recv接收到的所有字符（不含控制序列字符）
         self.terminal_vt100_obj = terminal_vt100_obj
         self.terminal_mode = terminal_mode
         self.start_index = start_index
+        self.host_obj = host_obj
+        self.global_info = global_info
 
     def set_custom_tag(self):
         if self.terminal_mode == VT100_TERMINAL_MODE_NORMAL:
@@ -9186,41 +9288,12 @@ class CustomTagConfig:
             pass
 
     def set_custom_tag_normal(self):
-        custom_match_object_list = []
-        custom_match_object_1 = CustomMatchObject(match_pattern=r'(\d{1,3}\.){3}\d{1,3}', foreground="#ff4dff",
-                                                  backgroun="black")
-        custom_match_object_2 = CustomMatchObject(match_pattern=r'([0-9a-f]{1,2}:){5}[0-9a-f]{1,3}', foreground="#ff4dff",
-                                                  backgroun="black")
-        custom_match_object_3 = CustomMatchObject(match_pattern=r'(\d{1,3}/){2,}\d{1,3}', foreground="green",
-                                                  backgroun="black")
-        custom_match_object_4 = CustomMatchObject(match_pattern=r'\bdown\b', foreground="red",
-                                                  backgroun="black", bold=True)
-        custom_match_object_5 = CustomMatchObject(match_pattern=r'\bup\b', foreground="green",
-                                                  backgroun="black", italic=True)
-        custom_match_object_6 = CustomMatchObject(match_pattern=r'\bundo\b', foreground="red",
-                                                  backgroun="black", underline=True, underlinefg="yellow")
-        custom_match_object_7 = CustomMatchObject(match_pattern=r'\bshutdown\b', foreground="red",
-                                                  backgroun="black", overstrike=True, overstrikefg='yellow')
-        custom_match_object_8 = CustomMatchObject(match_pattern=r'\binterface\b', foreground="cyan",
-                                                  backgroun="black")
-        custom_match_object_9 = CustomMatchObject(match_pattern=r'\benable\b', foreground="green", bold=True,
-                                                  backgroun="black")
-        custom_match_object_10 = CustomMatchObject(match_pattern=r'\bvlan[if]*', foreground="#b26904",
-                                                   backgroun="black")
-        custom_match_object_11 = CustomMatchObject(match_pattern=r'\bdefault\b', foreground="#ba7131",
-                                                   backgroun="black")
-        custom_match_object_list.append(custom_match_object_1)
-        custom_match_object_list.append(custom_match_object_2)
-        custom_match_object_list.append(custom_match_object_3)
-        custom_match_object_list.append(custom_match_object_4)
-        custom_match_object_list.append(custom_match_object_5)
-        custom_match_object_list.append(custom_match_object_6)
-        custom_match_object_list.append(custom_match_object_7)
-        custom_match_object_list.append(custom_match_object_8)
-        custom_match_object_list.append(custom_match_object_9)
-        custom_match_object_list.append(custom_match_object_10)
-        custom_match_object_list.append(custom_match_object_11)
-        for custom_match_object in custom_match_object_list:
+        # 查找目标主机对应的配色方案，CustomTagConfigScheme对象
+        scheme_obj = self.global_info.get_custome_tag_config_scheme_by_oid(self.host_obj.custome_tag_config_scheme_oid)
+        if scheme_obj is None:
+            print("CustomTagConfigSet.set_custom_tag_normal: 未找到目标主机的配色方案，已退出此函数")
+            return
+        for custom_match_object in scheme_obj.custom_match_object_list:
             match_pattern = custom_match_object.match_pattern
             ret = re.finditer(match_pattern, self.output_recv_content, re.I)
             tag_config_name = uuid.uuid4().__str__()  # <str>
@@ -9231,11 +9304,11 @@ class CustomTagConfig:
             if custom_match_object.italic:
                 custom_match_font.configure(slant="italic")
             for ret_item in ret:
-                print(f"CustomTagConfig.set_custom_tag_normal: 匹配到了{match_pattern}")
+                print(f"CustomTagConfigSet.set_custom_tag_normal: 匹配到了{match_pattern}")
                 start_index, end_index = ret_item.span()
                 start_index_count = "+" + str(start_index) + "c"
                 end_index_count = "+" + str(end_index) + "c"
-                print("CustomTagConfig.set_custom_tag_normal:匹配内容",
+                print("CustomTagConfigSet.set_custom_tag_normal:匹配内容",
                       self.terminal_vt100_obj.terminal_normal_text.get(self.start_index + start_index_count,
                                                                        self.start_index + end_index_count))
                 try:
@@ -9252,7 +9325,7 @@ class CustomTagConfig:
                                                                             overstrikefg=custom_match_object.overstrikefg,
                                                                             font=custom_match_font)
                 except tkinter.TclError as e:
-                    print("CustomTagConfig.set_custom_tag_normal: 未选择文字", e)
+                    print("CustomTagConfigSet.set_custom_tag_normal: 未选择文字", e)
                     return
 
 
