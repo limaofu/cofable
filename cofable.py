@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-03
+# update: 2024-04-04
 
 """
 开发日志：
@@ -84,6 +84,7 @@ from tkinter import messagebox
 from tkinter import filedialog
 from tkinter import ttk
 from tkinter import font
+from tkinter import colorchooser
 from multiprocessing.dummy import Pool as ThreadPool
 # external_dependencies:
 import paramiko
@@ -2092,27 +2093,27 @@ class GlobalInfo:
                                              project_oid=project_oid,
                                              global_info=self)
         scheme_linux.custom_match_object_list = [
-            CustomMatchObject(match_pattern=r'(\d{1,3}\.){3}\d{1,3}', foreground="#ff4dff",
+            CustomMatchObject(match_pattern_lines=r'(\d{1,3}\.){3}\d{1,3}', foreground="#ff4dff",
                               backgroun="black"),
-            CustomMatchObject(match_pattern=r'([0-9a-f]{1,2}:){5}[0-9a-f]{1,3}', foreground="#ff4dff",
+            CustomMatchObject(match_pattern_lines=r'([0-9a-f]{1,2}:){5}[0-9a-f]{1,3}', foreground="#ff4dff",
                               backgroun="black"),
-            CustomMatchObject(match_pattern=r'(\d{1,3}/){2,}\d{1,3}', foreground="green",
+            CustomMatchObject(match_pattern_lines=r'(\d{1,3}/){2,}\d{1,3}', foreground="green",
                               backgroun="black"),
-            CustomMatchObject(match_pattern=r'\bdown\b', foreground="red",
+            CustomMatchObject(match_pattern_lines=r'\bdown\b', foreground="red",
                               backgroun="black", bold=True),
-            CustomMatchObject(match_pattern=r'\bup\b', foreground="green",
+            CustomMatchObject(match_pattern_lines=r'\bup\b', foreground="green",
                               backgroun="black", italic=True),
-            CustomMatchObject(match_pattern=r'\bundo\b', foreground="red",
+            CustomMatchObject(match_pattern_lines=r'\bundo\b', foreground="red",
                               backgroun="black", underline=True, underlinefg="yellow"),
-            CustomMatchObject(match_pattern=r'\bshutdown\b', foreground="red",
+            CustomMatchObject(match_pattern_lines=r'\bshutdown\b', foreground="red",
                               backgroun="black", overstrike=True, overstrikefg='yellow'),
-            CustomMatchObject(match_pattern=r'\binterface\b', foreground="cyan",
+            CustomMatchObject(match_pattern_lines=r'\binterface\b', foreground="cyan",
                               backgroun="black"),
-            CustomMatchObject(match_pattern=r'\benable\b', foreground="green", bold=True,
+            CustomMatchObject(match_pattern_lines=r'\benable\b', foreground="green", bold=True,
                               backgroun="black"),
-            CustomMatchObject(match_pattern=r'\bvlan[if]*', foreground="#b26904",
+            CustomMatchObject(match_pattern_lines=r'\bvlan[if]*', foreground="#b26904",
                               backgroun="black"),
-            CustomMatchObject(match_pattern=r'\bdefault\b', foreground="#ba7131",
+            CustomMatchObject(match_pattern_lines=r'\bdefault\b' + "\n" + r"\bunknown\b", foreground="#ba7131",
                               backgroun="black")]
         scheme_linux.save()
         self.custome_tag_config_scheme_obj_list.append(scheme_linux)
@@ -2697,7 +2698,7 @@ class GlobalInfo:
             search_result = sqlite_cursor.fetchall()
             for obj_info_tuple in search_result:
                 # print('tuple: ', obj_info_tuple)
-                obj = CustomMatchObject(match_pattern=obj_info_tuple[1],
+                obj = CustomMatchObject(match_pattern_lines=base64.b64decode(obj_info_tuple[1]).decode("utf8"),
                                         foreground=obj_info_tuple[2],
                                         backgroun=obj_info_tuple[3],
                                         underline=obj_info_tuple[4],
@@ -3269,24 +3270,37 @@ class MainWindow:
         # 创建导航框架2，主界面右边的资源信息框
         self.create_nav_frame_r_init()
 
-    def create_menu_bar_init(self):  # 创建菜单栏-init界面的
+    def create_menu_bar_init(self):
+        """
+        创建菜单栏-主界面的
+        创建完菜单栏后，一般不会再修改此组件了
+        :return:
+        """
         self.menu_bar = tkinter.Menu(self.window_obj)  # 创建一个菜单，做菜单栏
-        menu_open_db_file = tkinter.Menu(self.menu_bar, tearoff=0)  # 创建一个菜单，1级子菜单，不分窗，表示此菜单不可拉出来变成一个可移动的独立弹窗
+        menu_file = tkinter.Menu(self.menu_bar, tearoff=0)  # 创建一个菜单，做1级子菜单，不分窗，表示此菜单不可拉出来变成一个可移动的独立弹窗
         menu_settings = tkinter.Menu(self.menu_bar, tearoff=0, activebackground="green", activeforeground="white",
-                                     background="white", foreground="black")  # 创建一个菜单，1级子菜单，不分窗
+                                     background="white", foreground="black")  # 创建一个菜单，1级子菜单
+        menu_tools = tkinter.Menu(self.menu_bar, tearoff=0, activebackground="green", activeforeground="white",
+                                  background="white", foreground="black")  # 创建一个菜单，1级子菜单
         menu_help = tkinter.Menu(self.menu_bar, tearoff=0, activebackground="green", activeforeground="white",
-                                 background="white", foreground="black")  # 创建一个菜单，1级子菜单，不分窗
+                                 background="white", foreground="black")  # 创建一个菜单，做1级子菜单
         # 菜单栏添加1级子菜单
-        self.menu_bar.add_cascade(label="File", menu=menu_open_db_file)
+        self.menu_bar.add_cascade(label="File", menu=menu_file)
         self.menu_bar.add_cascade(label="Settings", menu=menu_settings)
+        self.menu_bar.add_cascade(label="Tools", menu=menu_tools)
         self.menu_bar.add_cascade(label="Help", menu=menu_help)
         # 1级子菜单添加2级子菜单（功能按钮）
-        menu_open_db_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file_of_menu_bar_init)
+        menu_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file_of_menu_bar_init)
         menu_settings.add_command(label="配色方案设置", command=self.click_menu_settings_scheme_of_menu_bar_init)
+        menu_tools.add_command(label="工具")
         menu_help.add_command(label="About", command=self.click_menu_about_of_menu_bar_init)
         self.window_obj.config(menu=self.menu_bar)
 
-    def create_nav_frame_l_init(self):  # 创建导航框架1-init界面的，主界面左边的导航框 ★★★★★
+    def create_nav_frame_l_init(self):
+        """
+        创建导航框架1-init界面的，主界面左边的导航框 ★★★★★
+        :return:
+        """
         self.nav_frame_l = tkinter.Frame(self.window_obj, bg="green", width=self.nav_frame_l_width, height=self.height)
         self.nav_frame_l.grid_propagate(False)
         self.nav_frame_l.pack_propagate(False)
@@ -3338,7 +3352,12 @@ class MainWindow:
             label_current_project_content = "当前项目-" + self.global_info.current_project_obj.name
         print(label_current_project_content)
 
-    def create_nav_frame_r_init(self):  # 创建导航框架2-init界面的，主界面右边的资源信息框
+    def create_nav_frame_r_init(self):
+        """
+        创建导航框架2-init界面的，主界面右边的资源信息框
+        此界面为运行程序后的初始化界面，点击左侧导航栏的各个资源按钮后，此界面就被更新了，变成其他的功能界面了
+        :return:
+        """
         self.nav_frame_r = tkinter.Frame(self.window_obj, bg="blue", width=self.nav_frame_r_width, height=self.height)
         self.nav_frame_r.grid_propagate(False)
         self.nav_frame_r.pack_propagate(False)
@@ -3348,7 +3367,6 @@ class MainWindow:
         scrollbar = tkinter.Scrollbar(self.nav_frame_r)
         scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
         canvas = tkinter.Canvas(self.nav_frame_r, yscrollcommand=scrollbar.set)  # 创建画布
-        # canvas.pack(fill=tkinter.X, expand=tkinter.TRUE)
         canvas.place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
         scrollbar.config(command=canvas.yview)
         frame = tkinter.Frame(canvas)
@@ -3383,6 +3401,11 @@ class MainWindow:
         label_inspect_job_count.grid(row=7, column=0)
 
     def refresh_label_current_time(self, label):
+        """
+        每秒钟更新左侧导航栏下面的时间
+        :param label:
+        :return:
+        """
         label.__setitem__('text', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
         # 继续调用回调函数更新label
         self.window_obj.after(1000, self.refresh_label_current_time, label)
@@ -3391,6 +3414,10 @@ class MainWindow:
         messagebox.showinfo("About", "\n".join(self.about_info_list))
 
     def click_menu_settings_scheme_of_menu_bar_init(self):
+        """
+        点击菜单栏上的 “Settings”→"配色方案设置" 后，进入配色方案设置界面（子窗口）
+        :return:
+        """
         pop_window = tkinter.Toplevel(self.window_obj)
         pop_window.title("配色方案设置")
         screen_width = self.window_obj.winfo_screenwidth()
@@ -3402,7 +3429,7 @@ class MainWindow:
         self.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
-        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.on_closing_settings_pop_window(pop_window))
+        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.on_closing_settings_scheme_pop_window(pop_window))
         # 创建2个容器Frame
         top_frame = tkinter.Frame(pop_window, width=width, height=35, bg="pink")
         bottom_frame = tkinter.Frame(pop_window, width=width, height=height - 35, bg="green")
@@ -3413,28 +3440,28 @@ class MainWindow:
         # 在top_frame添加功能按钮
         button_create_resource = tkinter.Button(top_frame, text="创建方案",
                                                 command=lambda: self.create_custom_tag_config_scheme_of_pop_window(pop_window))
-        button_create_resource.pack(padx=self.padx, side=tkinter.LEFT)
+        button_create_resource.grid(row=0, column=0, padx=self.padx)
         button_load_resource = tkinter.Button(top_frame, text="导入方案",
                                               command=lambda: self.create_custom_tag_config_scheme_of_pop_window(pop_window))
-        button_load_resource.pack(padx=self.padx, side=tkinter.LEFT)
+        button_load_resource.grid(row=0, column=1, padx=self.padx)
         button_other = tkinter.Button(top_frame, text="其他")
-        button_other.pack(padx=self.padx, side=tkinter.LEFT)
-        # 在bottom_frame创建滚动Frame，用于显示配色方案列表
-        nav_frame_r_widget_dict = {"pop_window": pop_window}
+        button_other.grid(row=0, column=2, padx=self.padx)
+        # 在bottom_frame创建滚动Frame，用于列出配色方案列表
+        bottom_frame_widget_dict = {"pop_window": pop_window}
         self.clear_tkinter_widget(bottom_frame)
-        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(bottom_frame)
-        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(bottom_frame, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
-        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=width - 20, height=height - 35)
-        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
-        nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
-        nav_frame_r_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
-        nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
+        bottom_frame_widget_dict["scrollbar"] = tkinter.Scrollbar(bottom_frame)
+        bottom_frame_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        bottom_frame_widget_dict["canvas"] = tkinter.Canvas(bottom_frame, yscrollcommand=bottom_frame_widget_dict["scrollbar"].set)
+        bottom_frame_widget_dict["canvas"].place(x=0, y=0, width=width - 20, height=height - 35)
+        bottom_frame_widget_dict["scrollbar"].config(command=bottom_frame_widget_dict["canvas"].yview)
+        bottom_frame_widget_dict["frame"] = tkinter.Frame(bottom_frame_widget_dict["canvas"])
+        bottom_frame_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
+        bottom_frame_widget_dict["canvas"].create_window((0, 0), window=bottom_frame_widget_dict["frame"], anchor='nw')
         # 在canvas-frame滚动框内添加资源列表控件
-        list_obj = ListResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
+        list_obj = ListResourceInFrame(self, bottom_frame_widget_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
         list_obj.show()
 
-    def on_closing_settings_pop_window(self, pop_window):
+    def on_closing_settings_scheme_pop_window(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
         self.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.window_obj.focus_force()  # 使主窗口获得焦点
@@ -3442,18 +3469,18 @@ class MainWindow:
     def create_custom_tag_config_scheme_of_pop_window(self, pop_window):
         for widget in pop_window.winfo_children():
             widget.destroy()
-        # pop_window.configure(width=self.nav_frame_r_width,height=self.height)
-        # 在框架2中添加canvas-frame滚动框
-        nav_frame_r_widget_dict = {"scrollbar": tkinter.Scrollbar(pop_window)}
-        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(pop_window, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)  # 创建画布
-        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
-        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
-        nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
-        nav_frame_r_widget_dict["frame"].pack()
-        nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
-        # ★在canvas - frame滚动框内添加创建资源控件
-        create_obj = CreateResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
+        # 在配色方案设置pop_window中添加canvas-frame滚动框
+        pop_window_widget_dict = {"scrollbar": tkinter.Scrollbar(pop_window)}
+        pop_window_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        pop_window_widget_dict["canvas"] = tkinter.Canvas(pop_window, yscrollcommand=pop_window_widget_dict["scrollbar"].set)
+        pop_window_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        pop_window_widget_dict["scrollbar"].config(command=pop_window_widget_dict["canvas"].yview)
+        pop_window_widget_dict["frame"] = tkinter.Frame(pop_window_widget_dict["canvas"])
+        pop_window_widget_dict["frame"].pack()
+        pop_window_widget_dict["canvas"].create_window((0, 0), window=pop_window_widget_dict["frame"], anchor='nw')
+        pop_window_widget_dict["pop_window"] = pop_window
+        # ★在canvas-frame滚动框内添加创建资源控件
+        create_obj = CreateResourceInFrame(self, pop_window_widget_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
         create_obj.show()
         # ★创建“保存”按钮
         save_obj = SaveResourceInMainWindow(self, create_obj.resource_info_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
@@ -3502,17 +3529,17 @@ class MainWindow:
     def create_resource_of_nav_frame_r_page(self, resource_type):
         """
         ★★★★★ 创建资源-页面 ★★★★★
+        在 资源选项卡-主页面 点击“创建资源”时，进入此界面（更新资源选项卡-主页面）
         :return:
         """
         # 更新导航框架2
-        nav_frame_r = self.window_obj.winfo_children()[2]
-        nav_frame_r.__setitem__("bg", "green")
+        self.nav_frame_r.__setitem__("bg", "green")
         nav_frame_r_widget_dict = {}
         # 在框架2中添加canvas-frame滚动框
-        self.clear_tkinter_widget(nav_frame_r)
-        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(nav_frame_r)
+        self.clear_tkinter_widget(self.nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(self.nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)  # 创建画布
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(self.nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
         nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
         nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
         nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
@@ -3523,10 +3550,10 @@ class MainWindow:
         create_obj.show()
         # ★创建“保存”按钮
         save_obj = SaveResourceInMainWindow(self, create_obj.resource_info_dict, self.global_info, resource_type)
-        button_save = tkinter.Button(nav_frame_r, text="保存", command=save_obj.save)
+        button_save = tkinter.Button(self.nav_frame_r, text="保存", command=save_obj.save)
         button_save.place(x=10, y=self.height - 40, width=50, height=25)
         # ★创建“取消”按钮
-        button_cancel = tkinter.Button(nav_frame_r, text="取消",
+        button_cancel = tkinter.Button(self.nav_frame_r, text="取消",
                                        command=lambda: self.nav_frame_r_resource_top_page_display(resource_type))  # 返回资源选项卡主界面
         button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
 
@@ -3601,6 +3628,7 @@ class MainWindow:
         if resource_type != RESOURCE_TYPE_INSPECTION_JOB:
             for widget in self.nav_frame_r.winfo_children():
                 widget.destroy()
+            # 将主界面右侧frame一分为二，self.nav_frame_r分为上下2个frame
             frame_top_of_nav_frame_r_page = tkinter.Frame(self.nav_frame_r, bg="green", width=self.nav_frame_r_width, height=35)
             frame_bottom_of_nav_frame_r_page = tkinter.Frame(self.nav_frame_r, bg="pink", width=self.nav_frame_r_width,
                                                              height=self.height - 35)
@@ -3630,6 +3658,7 @@ class MainWindow:
         nav_frame_r_widget_dict = {}
         # 在框架2中添加canvas-frame滚动框
         self.clear_tkinter_widget(self.nav_frame_r)
+        # 没有将self.nav_frame_r分为多个frame，就一个frame用于显示作业列表
         nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(self.nav_frame_r)
         nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
         nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(self.nav_frame_r,
@@ -3657,7 +3686,7 @@ class MainWindow:
         self.window_obj.minsize(*self.minsize)  # 可调整的最小宽度及高度
         self.window_obj.maxsize(*self.maxsize)  # 可调整的最大宽度及高度
         self.window_obj.pack_propagate(True)  # True表示窗口内的控件大小自适应
-        self.window_obj.configure(bg=self.background)  # 设置背景色，RGB
+        self.window_obj.configure(bg=self.background)  # 设置主窗口背景色，RGB
         # 加载初始化界面控件
         self.load_main_window_init_widget()  # ★★★ 接下来，所有的事情都在此界面操作 ★★★
         # 监听窗口大小变化事件，自动更新窗口内控件大小（未完善，暂时不搞这个）
@@ -3671,33 +3700,34 @@ class CreateResourceInFrame:
     在主窗口的创建资源界面，添加用于输入资源信息的控件
     """
 
-    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
+    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
         self.main_window = main_window
-        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.top_frame_widget_dict = top_frame_widget_dict  # 在 top_frame_widget_dict["frame"]里添加组件，用于设置要创建的资源的属性
         self.global_info = global_info
         self.resource_type = resource_type
-        self.resource_info_dict = {}  # 用于存储资源对象信息的diction
+        self.resource_info_dict = {}  # 用于存储要创建的资源对象信息，传出信息给其<SaveResourceInMainWindow>对象进行处理
         self.padx = 2
         self.pady = 2
 
-    def proces_mouse_scroll(self, event):
+    def proces_mouse_scroll_of_top_frame(self, event):
         if event.delta > 0:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+            self.top_frame_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
         else:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+            self.top_frame_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
 
-    def update_frame(self):
+    def update_top_frame(self):
         # 更新Frame的尺寸
-        self.nav_frame_r_widget_dict["frame"].update_idletasks()
-        self.nav_frame_r_widget_dict["canvas"].configure(
-            scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
-                          self.nav_frame_r_widget_dict["frame"].winfo_height()))
-        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
+        self.top_frame_widget_dict["frame"].update_idletasks()
+        self.top_frame_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.top_frame_widget_dict["frame"].winfo_width(),
+                          self.top_frame_widget_dict["frame"].winfo_height()))
+        self.top_frame_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        self.top_frame_widget_dict["frame"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         # 滚动条移到最开头
-        self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+        self.top_frame_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
 
     def show(self):
-        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+        for widget in self.top_frame_widget_dict["frame"].winfo_children():
             widget.destroy()
         if self.resource_type == RESOURCE_TYPE_PROJECT:
             self.create_project()
@@ -3715,226 +3745,237 @@ class CreateResourceInFrame:
             self.create_custom_tag_config()
         else:
             print("<class CreateResourceInFrame> resource_type is Unknown")
-        self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
+        self.update_top_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
 
     def create_project(self):
         # ★创建-project
-        label_create_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 创建项目 ★★")
-        label_create_project.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_create_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 创建项目 ★★")
+        label_create_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_project.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★project-名称
-        label_project_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目名称")
-        label_project_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_project_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目名称")
+        label_project_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_project_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_project_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
-        entry_project_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_project_name = tkinter.Entry(self.top_frame_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_project_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_project_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★project-描述
-        label_project_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_project_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_project_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_project_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_project_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_project_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_project_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_description"])
-        entry_project_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_project_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_project_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
 
     def create_credential(self):
         # ★创建-credential
-        label_create_credential = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 创建凭据 ★★")
-        label_create_credential.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_create_credential = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 创建凭据 ★★")
+        label_create_credential.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_credential.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★credential-名称
-        label_credential_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据名称")
-        label_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据名称")
+        label_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_credential_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
-        entry_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_name = tkinter.Entry(self.top_frame_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★credential-描述
-        label_credential_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_credential_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                      textvariable=self.resource_info_dict["sv_description"])
-        entry_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★credential-所属项目
-        label_credential_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_credential_project.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_credential_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         for project_obj in self.global_info.project_obj_list:
             project_obj_name_list.append(project_obj.name)
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★credential-凭据类型
-        label_credential_type = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据类型")
-        label_credential_type.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_type = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据类型")
+        label_credential_type.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_type.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         cred_type_name_list = ["ssh_password", "ssh_key", "telnet", "ftp", "registry", "git"]
-        self.resource_info_dict["combobox_cred_type"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=cred_type_name_list,
+        self.resource_info_dict["combobox_cred_type"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=cred_type_name_list,
                                                                      state="readonly")
         self.resource_info_dict["combobox_cred_type"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★credential-用户名
-        label_credential_username = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="username")
-        label_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_username = tkinter.Label(self.top_frame_widget_dict["frame"], text="username")
+        label_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_username.grid(row=5, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_username"] = tkinter.StringVar()
-        entry_credential_username = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_username = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_username"])
-        entry_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_username.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★credential-密码
-        label_credential_password = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="password")
-        label_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_password = tkinter.Label(self.top_frame_widget_dict["frame"], text="password")
+        label_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_password.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_password"] = tkinter.StringVar()
-        entry_credential_password = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_password = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_password"])
-        entry_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_password.grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★credential-密钥
-        label_credential_private_key = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssh_private_key")
-        label_credential_private_key.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_private_key = tkinter.Label(self.top_frame_widget_dict["frame"], text="ssh_private_key")
+        label_credential_private_key.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_private_key.grid(row=7, column=0, padx=self.padx, pady=self.pady)
-        self.resource_info_dict["text_private_key"] = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], height=3, width=32)
+        self.resource_info_dict["text_private_key"] = tkinter.Text(master=self.top_frame_widget_dict["frame"], height=3, width=32)
         self.resource_info_dict["text_private_key"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权类型
-        label_credential_privilege_escalation_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+        label_credential_privilege_escalation_method = tkinter.Label(self.top_frame_widget_dict["frame"],
                                                                      text="privilege_escalation_method")
-        label_credential_privilege_escalation_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_method.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_privilege_escalation_method.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         privilege_escalation_method_list = ["su", "sudo"]
         self.resource_info_dict["combobox_privilege_escalation_method"] = \
-            ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=privilege_escalation_method_list, state="readonly")
+            ttk.Combobox(self.top_frame_widget_dict["frame"], values=privilege_escalation_method_list, state="readonly")
         self.resource_info_dict["combobox_privilege_escalation_method"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权用户
-        label_credential_privilege_escalation_username = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+        label_credential_privilege_escalation_username = tkinter.Label(self.top_frame_widget_dict["frame"],
                                                                        text="privilege_escalation_username")
-        label_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_privilege_escalation_username.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_privilege_escalation_username"] = tkinter.StringVar()
-        entry_credential_privilege_escalation_username = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_privilege_escalation_username = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                                        textvariable=self.resource_info_dict[
                                                                            "sv_privilege_escalation_username"])
-        entry_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_privilege_escalation_username.grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权密码
-        label_credential_privilege_escalation_password = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+        label_credential_privilege_escalation_password = tkinter.Label(self.top_frame_widget_dict["frame"],
                                                                        text="privilege_escalation_password")
-        label_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_privilege_escalation_password.grid(row=10, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_privilege_escalation_password"] = tkinter.StringVar()
-        entry_credential_privilege_escalation_password = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_privilege_escalation_password = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                                        textvariable=self.resource_info_dict[
                                                                            "sv_privilege_escalation_password"])
-        entry_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_privilege_escalation_password.grid(row=10, column=1, padx=self.padx, pady=self.pady)
         # ★credential-auth_url
-        label_credential_auth_url = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="auth_url")
-        label_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_auth_url = tkinter.Label(self.top_frame_widget_dict["frame"], text="auth_url")
+        label_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_auth_url.grid(row=11, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_auth_url"] = tkinter.StringVar()
-        entry_credential_auth_url = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_auth_url = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_auth_url"])
-        entry_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_auth_url.grid(row=11, column=1, padx=self.padx, pady=self.pady)
         # ★credential-ssl_verify
-        label_credential_ssl_verify = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssl_verify")
-        label_credential_ssl_verify.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_ssl_verify = tkinter.Label(self.top_frame_widget_dict["frame"], text="ssl_verify")
+        label_credential_ssl_verify.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_ssl_verify.grid(row=12, column=0, padx=self.padx, pady=self.pady)
         ssl_verify_name_list = ["No", "Yes"]
-        self.resource_info_dict["combobox_ssl_verify"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=ssl_verify_name_list,
+        self.resource_info_dict["combobox_ssl_verify"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=ssl_verify_name_list,
                                                                       state="readonly")
         self.resource_info_dict["combobox_ssl_verify"].grid(row=12, column=1, padx=self.padx, pady=self.pady)
 
     def create_host(self):
         # ★创建-host
-        label_create_host = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 创建主机 ★★")
-        label_create_host.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_create_host = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 创建主机 ★★")
+        label_create_host.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_host.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★host-名称
-        label_host_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机名称")
-        label_host_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机名称")
+        label_host_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_host_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
-        entry_host_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_name = tkinter.Entry(self.top_frame_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_host_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★host-描述
-        label_host_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_host_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_host_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_host_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_host_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                textvariable=self.resource_info_dict["sv_description"])
-        entry_host_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★host-所属项目
-        label_host_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_host_project.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_host_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         for project_obj in self.global_info.project_obj_list:
             project_obj_name_list.append(project_obj.name)
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★host-address
-        label_host_address = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="address")
-        label_host_address.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_address = tkinter.Label(self.top_frame_widget_dict["frame"], text="address")
+        label_host_address.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_address.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_address"] = tkinter.StringVar()
-        entry_host_address = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_host_address = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                            textvariable=self.resource_info_dict["sv_address"])
-        entry_host_address.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_address.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_address.grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★host-ssh_port
-        label_host_ssh_port = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssh_port")
-        label_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_ssh_port = tkinter.Label(self.top_frame_widget_dict["frame"], text="ssh_port")
+        label_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_ssh_port.grid(row=5, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_ssh_port"] = tkinter.StringVar()
-        entry_host_ssh_port = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_host_ssh_port = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                             textvariable=self.resource_info_dict["sv_ssh_port"])
-        entry_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_ssh_port.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★host-telnet_port
-        label_host_telnet_port = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="telnet_port")
-        label_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_telnet_port = tkinter.Label(self.top_frame_widget_dict["frame"], text="telnet_port")
+        label_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_telnet_port.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_telnet_port"] = tkinter.StringVar()
-        entry_host_telnet_port = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_host_telnet_port = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                textvariable=self.resource_info_dict["sv_telnet_port"])
-        entry_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_telnet_port.grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★host-login_protocol
-        label_host_login_protocol = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="远程登录类型")
-        label_host_login_protocol.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_login_protocol = tkinter.Label(self.top_frame_widget_dict["frame"], text="远程登录类型")
+        label_host_login_protocol.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_login_protocol.grid(row=7, column=0, padx=self.padx, pady=self.pady)
         login_protocol_name_list = ["ssh", "telnet"]
-        self.resource_info_dict["combobox_login_protocol"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_login_protocol"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                           values=login_protocol_name_list,
                                                                           state="readonly")
         self.resource_info_dict["combobox_login_protocol"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★host-first_auth_method
-        label_host_first_auth_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="优先认证类型")
-        label_host_first_auth_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_first_auth_method = tkinter.Label(self.top_frame_widget_dict["frame"], text="优先认证类型")
+        label_host_first_auth_method.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_first_auth_method.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         first_auth_method_name_list = ["priKey", "password"]
-        self.resource_info_dict["combobox_first_auth_method"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_first_auth_method"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                              values=first_auth_method_name_list,
                                                                              state="readonly")
         self.resource_info_dict["combobox_first_auth_method"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
+        # ★host-custom_scheme 终端配色方案
+        label_host_custom_scheme = tkinter.Label(self.top_frame_widget_dict["frame"], text="终端配色方案")
+        label_host_custom_scheme.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        label_host_custom_scheme.grid(row=9, column=0, padx=self.padx, pady=self.pady)
+        custom_scheme_name_list = []
+        for scheme in self.global_info.custome_tag_config_scheme_obj_list:
+            custom_scheme_name_list.append(scheme.name)
+        self.resource_info_dict["combobox_custom_scheme"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
+                                                                         values=custom_scheme_name_list,
+                                                                         state="readonly")
+        self.resource_info_dict["combobox_custom_scheme"].grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★host-凭据列表
-        label_credential_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据列表")
-        label_credential_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_credential_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        label_credential_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据列表")
+        label_credential_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        label_credential_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_credential"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
@@ -3945,45 +3986,45 @@ class CreateResourceInFrame:
             self.resource_info_dict["listbox_credential"].insert(tkinter.END, cred.name)  # 添加item选项
         self.resource_info_dict["listbox_credential"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_credential"].yview)
-        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
 
     def create_host_group(self):
         # ★创建-host_group
-        label_create_host_group = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 创建主机组 ★★")
-        label_create_host_group.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_create_host_group = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 创建主机组 ★★")
+        label_create_host_group.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_host_group.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★host_group-名称
-        label_host_group_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组名称")
-        label_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机组名称")
+        label_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_host_group_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
-        entry_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_group_name = tkinter.Entry(self.top_frame_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_group_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★host_group-描述
-        label_host_group_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_host_group_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_host_group_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                      textvariable=self.resource_info_dict["sv_description"])
-        entry_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_group_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★host_group-所属项目
-        label_host_group_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_host_group_project.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_host_group_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         for project_obj in self.global_info.project_obj_list:
             project_obj_name_list.append(project_obj.name)
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★添加host_group列表
-        label_host_group_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组列表")
-        label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机组列表")
+        label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_list.grid(row=4, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_host_group"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
@@ -3996,10 +4037,10 @@ class CreateResourceInFrame:
         list_scrollbar.config(command=self.resource_info_dict["listbox_host_group"].yview)
         frame.grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★添加host列表
-        label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机列表")
-        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机列表")
+        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_list.grid(row=5, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_host"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
@@ -4014,47 +4055,48 @@ class CreateResourceInFrame:
 
     def create_inspection_code_block(self):
         # ★创建-inspection_code_block
-        label_create_inspection_code_block = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 创建巡检代码块 ★★")
-        label_create_inspection_code_block.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_create_inspection_code_block = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 创建巡检代码块 ★★")
+        label_create_inspection_code_block.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_inspection_code_block.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★inspection_code_block-名称
-        label_inspection_code_block_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码块名称")
-        label_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码块名称")
+        label_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_inspection_code_block_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_code_block_name = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                          textvariable=self.resource_info_dict["sv_name"])
-        entry_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_code_block_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_code_block-描述
-        label_inspection_code_block_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_inspection_code_block_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_code_block_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                                 textvariable=self.resource_info_dict["sv_description"])
-        entry_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_code_block_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_code_block-所属项目
-        label_inspection_code_block_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_inspection_code_block_project.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_inspection_code_block_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         for project_obj in self.global_info.project_obj_list:
             project_obj_name_list.append(project_obj.name)
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★★★添加巡检代码内容并在treeview里显示★★★
         self.resource_info_dict["one_line_code_obj_list"] = []
-        label_inspection_code_block_code_content = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码内容:")
-        label_inspection_code_block_code_content.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_code_content = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码内容:")
+        label_inspection_code_block_code_content.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_code_content.grid(row=4, column=0, padx=self.padx, pady=self.pady)
-        button_add_code_list = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="添加",
-                                              command=lambda: self.click_button_add_code_list(treeview_code_content))  # 添加代码
-        button_add_code_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        button_add_code_list = tkinter.Button(self.top_frame_widget_dict["frame"], text="添加",
+                                              command=lambda: self.create_inspection_code_block__click_button_add_code_list(
+                                                  treeview_code_content))  # 添加代码
+        button_add_code_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         button_add_code_list.grid(row=4, column=1, padx=self.padx, pady=self.pady)
-        treeview_code_content = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=7,
+        treeview_code_content = ttk.Treeview(self.top_frame_widget_dict["frame"], cursor="arrow", height=7,
                                              columns=("index", "code_content", "need_interactive"), show="headings")
         # 设置每一个列的宽度和对齐的方式
         treeview_code_content.column("index", width=50, anchor="w")
@@ -4066,9 +4108,10 @@ class CreateResourceInFrame:
         treeview_code_content.heading("need_interactive", text="需要交互", anchor="w")
         treeview_code_content.grid(row=5, column=0, columnspan=2, padx=self.padx, pady=self.pady)
         # 单击每行命令后，可单独设置每行命令的高级属性
-        treeview_code_content.bind("<<TreeviewSelect>>", lambda event: self.edit_treeview_code_content_item(event, treeview_code_content))
+        treeview_code_content.bind("<<TreeviewSelect>>", lambda event: self.create_inspection_code_block__edit_treeview_code_content_item(
+            event, treeview_code_content))
 
-    def click_button_add_code_list(self, treeview_code_content):
+    def create_inspection_code_block__click_button_add_code_list(self, treeview_code_content):
         self.resource_info_dict["one_line_code_obj_list"] = []
         pop_window = tkinter.Toplevel(self.main_window.window_obj)
         pop_window.title("添加巡检代码内容")
@@ -4081,23 +4124,28 @@ class CreateResourceInFrame:
         self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
-        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.edit_or_add_treeview_code_content_on_closing(pop_window))
+        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.create_inspection_code_block__edit_or_add_treeview_code_content_on_closing(
+            pop_window))
         label_inspection_code_block_code_content = tkinter.Label(pop_window, text="巡检代码内容")
         label_inspection_code_block_code_content.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         text_code_content = tkinter.Text(master=pop_window, width=50, height=16)
         text_code_content.grid(row=1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
         ok_button = tkinter.Button(pop_window, text="确定",
-                                   command=lambda: self.click_button_add_code_list_ok(treeview_code_content, text_code_content, pop_window))
+                                   command=lambda: self.create_inspection_code_block__click_button_add_code_list_ok(treeview_code_content,
+                                                                                                                    text_code_content,
+                                                                                                                    pop_window))
         ok_button.grid(row=2, column=0, padx=self.padx, pady=self.pady)
-        cancel_button = tkinter.Button(pop_window, text="取消", command=lambda: self.click_button_add_code_list_cancel(pop_window))
+        cancel_button = tkinter.Button(pop_window, text="取消",
+                                       command=lambda: self.create_inspection_code_block__click_button_add_code_list_cancel(
+                                           pop_window))
         cancel_button.grid(row=2, column=1, padx=self.padx, pady=self.pady)
 
-    def click_button_add_code_list_cancel(self, pop_window):
+    def create_inspection_code_block__click_button_add_code_list_cancel(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
         self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
-    def click_button_add_code_list_ok(self, treeview_code_content, text_code_content, pop_window):
+    def create_inspection_code_block__click_button_add_code_list_ok(self, treeview_code_content, text_code_content, pop_window):
         code_content_str = text_code_content.get("1.0", tkinter.END).strip()
         code_index = 0
         for code_line_str in code_content_str.split("\n"):
@@ -4120,7 +4168,7 @@ class CreateResourceInFrame:
                                          values=(index, code_obj.code_content, need_interactive_value[code_obj.need_interactive]))
             index += 1
 
-    def edit_treeview_code_content_item(self, _, treeview_code_content):
+    def create_inspection_code_block__edit_treeview_code_content_item(self, _, treeview_code_content):
         item_index = treeview_code_content.focus()
         print("item_index=", item_index)
         if item_index == "":
@@ -4139,7 +4187,8 @@ class CreateResourceInFrame:
         self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
-        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.edit_or_add_treeview_code_content_on_closing(pop_window))
+        pop_window.protocol("WM_DELETE_WINDOW", lambda: self.create_inspection_code_block__edit_or_add_treeview_code_content_on_closing(
+            pop_window))
         one_line_code_info_dict = {}
         # OneLineCode-code_index
         label_code_index = tkinter.Label(pop_window, text="巡检代码index")
@@ -4203,19 +4252,21 @@ class CreateResourceInFrame:
         entry_description.grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # 添加按钮
         ok_button = tkinter.Button(pop_window, text="确定",
-                                   command=lambda: self.edit_treeview_code_content_item_save(one_line_code_info_dict,
-                                                                                             one_line_code_obj,
-                                                                                             pop_window, treeview_code_content))
+                                   command=lambda: self.create_inspection_code_block__edit_treeview_code_content_item_save(
+                                       one_line_code_info_dict, one_line_code_obj, pop_window, treeview_code_content))
         ok_button.grid(row=8, column=0, padx=self.padx, pady=self.pady)
-        cancel_button = tkinter.Button(pop_window, text="取消", command=lambda: self.edit_treeview_code_content_item_cancel(pop_window))
+        cancel_button = tkinter.Button(pop_window, text="取消",
+                                       command=lambda: self.create_inspection_code_block__edit_treeview_code_content_item_cancel(
+                                           pop_window))
         cancel_button.grid(row=8, column=1, padx=self.padx, pady=self.pady)
 
-    def edit_treeview_code_content_item_cancel(self, pop_window):
+    def create_inspection_code_block__edit_treeview_code_content_item_cancel(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
         self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
-    def edit_treeview_code_content_item_save(self, one_line_code_info_dict, one_line_code_obj, pop_window, treeview_code_content):
+    def create_inspection_code_block__edit_treeview_code_content_item_save(self, one_line_code_info_dict, one_line_code_obj, pop_window,
+                                                                           treeview_code_content):
         one_line_code_obj.code_content = one_line_code_info_dict["sv_code_content"].get()
         one_line_code_obj.code_post_wait_time = float(one_line_code_info_dict["sv_code_post_wait_time"].get())
         if one_line_code_info_dict["combobox_need_interactive"].current() == -1:
@@ -4241,104 +4292,104 @@ class CreateResourceInFrame:
             treeview_code_content.set(item_id_list[index], 2, need_interactive_value[code_obj.need_interactive])
             index += 1
 
-    def edit_or_add_treeview_code_content_on_closing(self, pop_window):
+    def create_inspection_code_block__edit_or_add_treeview_code_content_on_closing(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
         self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def create_inspection_template(self):
         # ★创建-inspection_template
-        label_create_inspection_template = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 创建巡检模板 ★★")
-        label_create_inspection_template.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_create_inspection_template = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 创建巡检模板 ★★")
+        label_create_inspection_template.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_inspection_template.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★inspection_template-名称
-        label_inspection_template_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检模板名称")
-        label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检模板名称")
+        label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_inspection_template_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_template_name = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                        textvariable=self.resource_info_dict["sv_name"])
-        entry_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_template_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-描述
-        label_inspection_template_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_inspection_template_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_template_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                               textvariable=self.resource_info_dict["sv_description"])
-        entry_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_template_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-所属项目
-        label_inspection_template_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_inspection_template_project.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_inspection_template_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         for project_obj in self.global_info.project_obj_list:
             project_obj_name_list.append(project_obj.name)
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-execution_method
-        label_inspection_template_execution_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="execution_method")
-        label_inspection_template_execution_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_execution_method = tkinter.Label(self.top_frame_widget_dict["frame"], text="execution_method")
+        label_inspection_template_execution_method.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_execution_method.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         execution_method_name_list = ["无", "定时执行", "周期执行", "After"]
-        self.resource_info_dict["combobox_execution_method"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_execution_method"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                             values=execution_method_name_list,
                                                                             state="readonly")
         self.resource_info_dict["combobox_execution_method"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-execution_at_time 这里应该使用日历框及时间设置框，先简化为直接输入 "2024-03-14 09:51:26" 这类字符串
-        label_inspection_template_execution_at_time = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="execution_at_time")
-        label_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_execution_at_time = tkinter.Label(self.top_frame_widget_dict["frame"], text="execution_at_time")
+        label_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_execution_at_time.grid(row=5, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_execution_at_time"] = tkinter.StringVar()
-        entry_inspection_template_execution_at_time = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_template_execution_at_time = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                                     textvariable=self.resource_info_dict["sv_execution_at_time"])
-        entry_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_template_execution_at_time.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-update_code_on_launch
-        label_inspection_template_update_code_on_launch = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行前更新code")
-        label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_update_code_on_launch = tkinter.Label(self.top_frame_widget_dict["frame"], text="运行前更新code")
+        label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_update_code_on_launch.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         update_code_on_launch_name_list = ["No", "Yes"]
-        self.resource_info_dict["combobox_update_code_on_launch"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_update_code_on_launch"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                                  values=update_code_on_launch_name_list,
                                                                                  state="readonly")
         self.resource_info_dict["combobox_update_code_on_launch"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-forks
-        label_inspection_template_forks = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行线程数")
-        label_inspection_template_forks.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_forks = tkinter.Label(self.top_frame_widget_dict["frame"], text="运行线程数")
+        label_inspection_template_forks.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_forks.grid(row=7, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_forks"] = tkinter.StringVar()
-        spinbox_inspection_template_forks = tkinter.Spinbox(self.nav_frame_r_widget_dict["frame"], from_=1, to=256, increment=1,
+        spinbox_inspection_template_forks = tkinter.Spinbox(self.top_frame_widget_dict["frame"], from_=1, to=256, increment=1,
                                                             textvariable=self.resource_info_dict["sv_forks"])
         spinbox_inspection_template_forks.grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-save_output_to_file
-        label_inspection_template_save_output_to_file = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="自动保存巡检日志到文件")
-        label_inspection_template_save_output_to_file.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_save_output_to_file = tkinter.Label(self.top_frame_widget_dict["frame"], text="自动保存巡检日志到文件")
+        label_inspection_template_save_output_to_file.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_save_output_to_file.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         save_output_to_file_name_list = ["No", "Yes"]
-        self.resource_info_dict["combobox_save_output_to_file"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_save_output_to_file"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                                values=save_output_to_file_name_list,
                                                                                state="readonly")
         self.resource_info_dict["combobox_save_output_to_file"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-output_file_name_style
-        label_inspection_template_output_file_name_style = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检日志文件名称")
-        label_inspection_template_output_file_name_style.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_output_file_name_style = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检日志文件名称")
+        label_inspection_template_output_file_name_style.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_output_file_name_style.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         output_file_name_style_name_list = ["HOSTNAME", "HOSTNAME-DATE", "HOSTNAME-DATE-TIME", "DATE_DIR/HOSTNAME",
                                             "DATE_DIR/HOSTNAME-DATE",
                                             "DATE_DIR/HOSTNAME-DATE-TIME"]
-        self.resource_info_dict["combobox_output_file_name_style"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_output_file_name_style"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                                   values=output_file_name_style_name_list,
                                                                                   state="readonly", width=32)
         self.resource_info_dict["combobox_output_file_name_style"].grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★添加host_group列表
-        label_host_group_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组列表")
-        label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机组列表")
+        label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_host_group"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
@@ -4351,10 +4402,10 @@ class CreateResourceInFrame:
         list_scrollbar.config(command=self.resource_info_dict["listbox_host_group"].yview)
         frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
         # ★添加host列表
-        label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机列表")
-        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机列表")
+        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_list.grid(row=11, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_host"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
@@ -4367,10 +4418,10 @@ class CreateResourceInFrame:
         list_scrollbar.config(command=self.resource_info_dict["listbox_host"].yview)
         frame.grid(row=11, column=1, padx=self.padx, pady=self.pady)
         # ★添加-巡检代码块列表
-        label_inspection_code_block_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码块列表")
-        label_inspection_code_block_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码块列表")
+        label_inspection_code_block_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_list.grid(row=12, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_inspection_code_block"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2,
@@ -4386,7 +4437,276 @@ class CreateResourceInFrame:
         frame.grid(row=12, column=1, padx=self.padx, pady=self.pady)
 
     def create_custom_tag_config(self):
-        pass
+        self.resource_info_dict["pop_window"] = self.top_frame_widget_dict["pop_window"]
+        # ★创建-custom_scheme
+        label_create_custom_scheme = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 创建巡检模板 ★★")
+        label_create_custom_scheme.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        label_create_custom_scheme.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        # ★custom_scheme-名称
+        label_custom_scheme_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检模板名称")
+        label_custom_scheme_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        label_custom_scheme_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_name"] = tkinter.StringVar()
+        entry_custom_scheme_name = tkinter.Entry(self.top_frame_widget_dict["frame"],
+                                                 textvariable=self.resource_info_dict["sv_name"])
+        entry_custom_scheme_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        entry_custom_scheme_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        # ★custom_scheme-描述
+        label_custom_scheme_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_custom_scheme_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        label_custom_scheme_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_description"] = tkinter.StringVar()
+        entry_custom_scheme_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
+                                                        textvariable=self.resource_info_dict["sv_description"])
+        entry_custom_scheme_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        entry_custom_scheme_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        # ★custom_scheme-所属项目
+        label_custom_scheme_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_custom_scheme_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        label_custom_scheme_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        project_obj_name_list = []
+        for project_obj in self.global_info.project_obj_list:
+            project_obj_name_list.append(project_obj.name)
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
+                                                                   state="readonly")
+        self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # ★添加匹配对象 CustomMatchObject
+        self.resource_info_dict["custome_match_obj_list"] = []
+        custome_match_obj_frame_width = self.main_window.nav_frame_r_width - 25
+        custome_match_obj_frame_height = self.main_window.height - 220
+        custome_match_obj_frame = tkinter.Frame(self.top_frame_widget_dict["frame"], width=custome_match_obj_frame_width,
+                                                height=custome_match_obj_frame_height, bg="pink")
+        # 在custome_match_obj_frame中添加canvas-frame滚动框
+        self.resource_info_dict["custome_match_obj_frame_scrollbar"] = tkinter.Scrollbar(custome_match_obj_frame)
+        self.resource_info_dict["custome_match_obj_frame_scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        self.resource_info_dict["custome_match_obj_frame_canvas"] = tkinter.Canvas(custome_match_obj_frame, bg="black",
+                                                                                   width=custome_match_obj_frame_width - 25,
+                                                                                   height=custome_match_obj_frame_height,
+                                                                                   yscrollcommand=self.resource_info_dict[
+                                                                                       "custome_match_obj_frame_scrollbar"].set)
+        self.resource_info_dict["custome_match_obj_frame_canvas"].pack()
+        self.resource_info_dict["custome_match_obj_frame_scrollbar"].config(
+            command=self.resource_info_dict["custome_match_obj_frame_canvas"].yview)
+        self.resource_info_dict["custome_match_obj_frame_frame"] = tkinter.Frame(self.resource_info_dict["custome_match_obj_frame_canvas"],
+                                                                                 bg="black")
+        self.resource_info_dict["custome_match_obj_frame_frame"].pack()
+        self.resource_info_dict["custome_match_obj_frame_canvas"].create_window((0, 0), window=self.resource_info_dict[
+            "custome_match_obj_frame_frame"], anchor='nw')
+        add_custome_match_obj_button = tkinter.Button(self.top_frame_widget_dict["frame"], text="添加匹配对象",
+                                                      command=lambda: self.create_custom_tag_config__add_custome_match_object())
+        add_custome_match_obj_button.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        custome_match_obj_frame.grid(row=5, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+
+    def create_custom_tag_config__add_custome_match_object(self):
+        add_match_obj_pop_window = tkinter.Toplevel(self.resource_info_dict["pop_window"])
+        add_match_obj_pop_window.title("配色方案设置")
+        screen_width = add_match_obj_pop_window.winfo_screenwidth()
+        screen_height = add_match_obj_pop_window.winfo_screenheight()
+        width = self.main_window.nav_frame_r_width - 50
+        height = self.main_window.height - 50
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        add_match_obj_pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.resource_info_dict["pop_window"].attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        add_match_obj_pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        add_match_obj_pop_window.protocol("WM_DELETE_WINDOW", lambda: self.create_custom_tag_config__on_closing_add_match_obj_pop_window(
+            add_match_obj_pop_window))
+        # 添加用于设置CustomMatchObject属性的控件
+        match_obj_info_dict = {}
+        label_match_pattern_lines = tkinter.Label(add_match_obj_pop_window, text="添加需要匹配的单词或正则表达式，一行一个")
+        label_match_pattern_lines.grid(row=0, column=0, columnspan=4, padx=self.padx, pady=self.pady, sticky="w")
+        match_obj_info_dict["text_match_pattern_lines"] = tkinter.Text(add_match_obj_pop_window, height=9)
+        match_obj_info_dict["text_match_pattern_lines"].grid(row=1, column=0, columnspan=4, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-前景色
+        label_foreground = tkinter.Label(add_match_obj_pop_window, text="匹配字符-前景色")
+        label_foreground.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        match_obj_info_dict["sv_foreground"] = tkinter.StringVar()
+        entry_foreground = tkinter.Entry(add_match_obj_pop_window, textvariable=match_obj_info_dict["sv_foreground"])
+        entry_foreground.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        color_button_foreground = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
+                                                 command=lambda: self.create_custom_tag_config__choose_color_of_custome_match_object(
+                                                     entry_foreground, add_match_obj_pop_window))
+        color_button_foreground.grid(row=2, column=2, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-背景色
+        label_backgroun = tkinter.Label(add_match_obj_pop_window, text="匹配字符-背景色")
+        label_backgroun.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        match_obj_info_dict["sv_backgroun"] = tkinter.StringVar()
+        entry_backgroun = tkinter.Entry(add_match_obj_pop_window, textvariable=match_obj_info_dict["sv_backgroun"])
+        entry_backgroun.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        color_button_backgroun = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
+                                                command=lambda: self.create_custom_tag_config__choose_color_of_custome_match_object(
+                                                    entry_backgroun, add_match_obj_pop_window))
+        color_button_backgroun.grid(row=3, column=2, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-下划线
+        match_obj_info_dict["var_ck_underline"] = tkinter.BooleanVar()
+        ck_underline = tkinter.Checkbutton(add_match_obj_pop_window, text="添加下划线", variable=match_obj_info_dict["var_ck_underline"])
+        ck_underline.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-下划线颜色
+        label_underlinefg = tkinter.Label(add_match_obj_pop_window, text="下划线颜色")
+        label_underlinefg.grid(row=4, column=1, padx=self.padx, pady=self.pady, sticky="e")
+        match_obj_info_dict["sv_underlinefg"] = tkinter.StringVar()
+        entry_underlinefg = tkinter.Entry(add_match_obj_pop_window, textvariable=match_obj_info_dict["sv_underlinefg"])
+        entry_underlinefg.grid(row=4, column=2, padx=self.padx, pady=self.pady)
+        color_button_underlinefg = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
+                                                  command=lambda: self.create_custom_tag_config__choose_color_of_custome_match_object(
+                                                      entry_underlinefg, add_match_obj_pop_window))
+        color_button_underlinefg.grid(row=4, column=3, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-删除线
+        match_obj_info_dict["var_ck_overstrike"] = tkinter.BooleanVar()
+        ck_overstrike = tkinter.Checkbutton(add_match_obj_pop_window, text="添加删除线", variable=match_obj_info_dict["var_ck_overstrike"])
+        ck_overstrike.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-删除线颜色
+        label_overstrikefg = tkinter.Label(add_match_obj_pop_window, text="删除线颜色")
+        label_overstrikefg.grid(row=5, column=1, padx=self.padx, pady=self.pady, sticky="e")
+        match_obj_info_dict["sv_overstrikefg"] = tkinter.StringVar()
+        entry_overstrikefg = tkinter.Entry(add_match_obj_pop_window, textvariable=match_obj_info_dict["sv_overstrikefg"])
+        entry_overstrikefg.configure()
+        entry_overstrikefg.grid(row=5, column=2, padx=self.padx, pady=self.pady)
+        color_button_overstrikefg = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
+                                                   command=lambda: self.create_custom_tag_config__choose_color_of_custome_match_object(
+                                                       entry_overstrikefg, add_match_obj_pop_window))
+        color_button_overstrikefg.grid(row=5, column=3, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-粗体
+        match_obj_info_dict["var_ck_bold"] = tkinter.BooleanVar()
+        ck_bold = tkinter.Checkbutton(add_match_obj_pop_window, text="粗体", variable=match_obj_info_dict["var_ck_bold"])
+        ck_bold.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-斜体
+        match_obj_info_dict["var_ck_italic"] = tkinter.BooleanVar()
+        ck_italic = tkinter.Checkbutton(add_match_obj_pop_window, text="斜体", variable=match_obj_info_dict["var_ck_italic"])
+        ck_italic.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # 最下面添加一个显示效果 暂不添加
+        # 添加确定按钮
+        button_ok = tkinter.Button(add_match_obj_pop_window, text="确定",
+                                   command=lambda: self.create_custom_tag_config__add_custome_match_object__ok(match_obj_info_dict,
+                                                                                                               add_match_obj_pop_window))
+        button_ok.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        # 添加取消按钮
+        button_cancel = tkinter.Button(add_match_obj_pop_window, text="取消",
+                                       command=lambda: self.create_custom_tag_config__add_custome_match_object__cancel(
+                                           add_match_obj_pop_window))
+        button_cancel.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+
+    def create_custom_tag_config__add_custome_match_object__ok(self, match_obj_info_dict,
+                                                               add_match_obj_pop_window):
+        # 先在 custome_match_obj_frame_frame 列出刚刚添加的match_obj
+        match_obj = CustomMatchObject(match_pattern_lines=match_obj_info_dict["text_match_pattern_lines"].get("1.0", tkinter.END + "-1c"),
+                                      foreground=match_obj_info_dict["sv_foreground"].get(),
+                                      backgroun=match_obj_info_dict["sv_backgroun"].get(),
+                                      underline=match_obj_info_dict["var_ck_underline"].get(),
+                                      underlinefg=match_obj_info_dict["sv_underlinefg"].get(),
+                                      overstrike=match_obj_info_dict["var_ck_overstrike"].get(),
+                                      overstrikefg=match_obj_info_dict["sv_overstrikefg"].get(),
+                                      bold=match_obj_info_dict["var_ck_bold"].get(),
+                                      italic=match_obj_info_dict["var_ck_italic"].get()
+                                      )
+        self.resource_info_dict["custome_match_obj_list"].append(match_obj)
+        self.create_custom_tag_config__list_custome_match_obj_in_frame_frame()
+        # 再返回到 创建配色方案 界面
+        add_match_obj_pop_window.destroy()  # 关闭子窗口
+        self.resource_info_dict["pop_window"].attributes("-disabled", 0)  # 使主窗口响应
+        self.resource_info_dict["pop_window"].focus_force()  # 使主窗口获得焦点
+
+    def create_custom_tag_config__add_custome_match_object__cancel(self, add_match_obj_pop_window):
+        # 返回到 创建配色方案 界面
+        add_match_obj_pop_window.destroy()  # 关闭子窗口
+        self.resource_info_dict["pop_window"].attributes("-disabled", 0)  # 使主窗口响应
+        self.resource_info_dict["pop_window"].focus_force()  # 使主窗口获得焦点
+
+    def create_custom_tag_config__list_custome_match_obj_in_frame_frame(self):
+        for widget in self.resource_info_dict["custome_match_obj_frame_frame"].winfo_children():
+            widget.destroy()
+        row = 0
+        for match_obj in self.resource_info_dict["custome_match_obj_list"]:
+            label_index = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"], text=str(row))
+            text_demo = tkinter.Text(self.resource_info_dict["custome_match_obj_frame_frame"], fg="white",
+                                     bg="black", width=12, height=3,
+                                     font=("", 14),
+                                     wrap=tkinter.NONE, spacing1=0, spacing2=0, spacing3=0)
+            text_demo.insert(tkinter.END, match_obj.match_pattern_lines)
+            label_foreground = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                             text="前景色: \n" + match_obj.foreground)
+            label_backgroun = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                            text="背景色: \n" + match_obj.backgroun)
+            if match_obj.underline:
+                is_underline = "Yes"
+            else:
+                is_underline = "No"
+            label_underline = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                            text="下划线: " + is_underline + "\n" + match_obj.underlinefg)
+            if match_obj.overstrike:
+                is_overstrike = "Yes"
+            else:
+                is_overstrike = "No"
+            label_overstrike = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                             text="删除线: " + is_overstrike + "\n" + match_obj.overstrikefg)
+            custom_match_font = font.Font(size=14, name="")
+            if match_obj.bold:
+                is_bold = "Yes"
+                custom_match_font.configure(weight="bold")
+            else:
+                is_bold = "No"
+            label_bold = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                       text="粗体: " + "\n" + is_bold)
+            if match_obj.italic:
+                is_italic = "Yes"
+                custom_match_font.configure(slant="italic")
+            else:
+                is_italic = "No"
+            label_italic = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                         text="斜体: " + "\n" + is_italic)
+            tag_config_name = uuid.uuid4().__str__()  # <str>
+            text_demo.tag_add(f"{tag_config_name}", "1.0", tkinter.END)
+            text_demo.tag_config(f"{tag_config_name}",
+                                 foreground=match_obj.foreground,
+                                 backgroun=match_obj.backgroun,
+                                 underline=match_obj.underline,
+                                 underlinefg=match_obj.underlinefg,
+                                 overstrike=match_obj.overstrike,
+                                 overstrikefg=match_obj.overstrikefg,
+                                 font=custom_match_font)
+            button_edit = tkinter.Button(self.resource_info_dict["custome_match_obj_frame_frame"], text="编辑")
+            button_delete = tkinter.Button(self.resource_info_dict["custome_match_obj_frame_frame"], text="删除")
+            label_index.grid(row=row, column=0, padx=self.padx, pady=self.pady, sticky="nswe")
+            text_demo.grid(row=row, column=1, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_foreground.grid(row=row, column=2, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_backgroun.grid(row=row, column=3, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_underline.grid(row=row, column=4, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_overstrike.grid(row=row, column=5, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_bold.grid(row=row, column=6, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_italic.grid(row=row, column=7, padx=self.padx, pady=self.pady, sticky="nswe")
+            button_edit.grid(row=row, column=8, padx=self.padx, pady=self.pady, sticky="nswe")
+            button_delete.grid(row=row, column=9, padx=self.padx, pady=self.pady, sticky="nswe")
+            row += 1
+        # 还要更新frame和canvas才可滚动
+        self.resource_info_dict["custome_match_obj_frame_frame"].update_idletasks()
+        self.resource_info_dict["custome_match_obj_frame_canvas"].configure(
+            scrollregion=(0, 0, self.resource_info_dict["custome_match_obj_frame_frame"].winfo_width(),
+                          self.resource_info_dict["custome_match_obj_frame_frame"].winfo_height()))
+        self.resource_info_dict["custome_match_obj_frame_canvas"].bind("<MouseWheel>",
+                                                                       self.create_custom_tag_config__proces_mouse_scroll__frame_frame)
+        # 滚动条移到最开头
+        self.resource_info_dict["custome_match_obj_frame_canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+
+    def create_custom_tag_config__proces_mouse_scroll__frame_frame(self, event):
+        if event.delta > 0:
+            self.resource_info_dict["custome_match_obj_frame_canvas"].yview_scroll(-1, 'units')  # 向上移动
+        else:
+            self.resource_info_dict["custome_match_obj_frame_canvas"].yview_scroll(1, 'units')  # 向下移动
+
+    @staticmethod
+    def create_custom_tag_config__choose_color_of_custome_match_object(entry, add_match_obj_pop_window):
+        add_match_obj_pop_window.focus_force()
+        color = tkinter.colorchooser.askcolor()
+        if color[1] is not None:
+            entry.delete(0, tkinter.END)
+            entry.insert(0, color[1])
+            entry.configure(bg=color[1])
+        add_match_obj_pop_window.focus_force()
+
+    def create_custom_tag_config__on_closing_add_match_obj_pop_window(self, pop_window):
+        pop_window.destroy()  # 关闭子窗口
+        self.resource_info_dict["pop_window"].attributes("-disabled", 0)  # 使主窗口响应
+        self.resource_info_dict["pop_window"].focus_force()  # 使主窗口获得焦点
 
 
 class ListResourceInFrame:
@@ -4394,22 +4714,22 @@ class ListResourceInFrame:
     在主窗口的查看资源界面，添加用于显示资源信息的控件
     """
 
-    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
+    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
         self.main_window = main_window
-        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.top_frame_widget_dict = top_frame_widget_dict  # 在 top_frame_widget_dict["frame"]里添加组件，用于列出资源列表
         self.global_info = global_info
         self.resource_type = resource_type
         self.padx = 2
         self.pady = 2
 
-    def proces_mouse_scroll(self, event):
+    def proces_mouse_scroll_of_top_frame(self, event):
         if event.delta > 0:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+            self.top_frame_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
         else:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+            self.top_frame_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
 
     def show(self):  # 入口函数
-        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+        for widget in self.top_frame_widget_dict["frame"].winfo_children():
             widget.destroy()
         if self.resource_type == RESOURCE_TYPE_PROJECT:
             resource_display_frame_title = "★★ 项目列表 ★★"
@@ -4437,55 +4757,57 @@ class ListResourceInFrame:
             resource_display_frame_title = "★★ 项目列表 ★★"
             resource_obj_list = self.global_info.project_obj_list
         # 列出资源
-        label_display_resource = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+        label_display_resource = tkinter.Label(self.top_frame_widget_dict["frame"],
                                                text=resource_display_frame_title + "    数量: " + str(len(resource_obj_list)))
         label_display_resource.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        label_display_resource.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         index = 0
         for obj in resource_obj_list:
             print(obj.name)
-            label_index = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=str(index + 1) + " : ")
-            label_index.bind("<MouseWheel>", self.proces_mouse_scroll)
+            label_index = tkinter.Label(self.top_frame_widget_dict["frame"], text=str(index + 1) + " : ")
+            label_index.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
             label_index.grid(row=index + 1, column=0, padx=self.padx, pady=self.pady)
-            label_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text=obj.name)
-            label_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+            label_name = tkinter.Label(self.top_frame_widget_dict["frame"], text=obj.name)
+            label_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
             label_name.grid(row=index + 1, column=1, padx=self.padx, pady=self.pady)
             # 查看对象信息
-            view_obj = ViewResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
+            view_obj = ViewResourceInFrame(self.main_window, self.top_frame_widget_dict, self.global_info, obj,
                                            self.resource_type)
-            button_view = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="查看", command=view_obj.show)
-            button_view.bind("<MouseWheel>", self.proces_mouse_scroll)
+            button_view = tkinter.Button(self.top_frame_widget_dict["frame"], text="查看", command=view_obj.show)
+            button_view.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
             button_view.grid(row=index + 1, column=2, padx=self.padx, pady=self.pady)
             # 编辑对象信息
-            edit_obj = EditResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
+            edit_obj = EditResourceInFrame(self.main_window, self.top_frame_widget_dict, self.global_info, obj,
                                            self.resource_type)
-            button_edit = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑", command=edit_obj.show)
-            button_edit.bind("<MouseWheel>", self.proces_mouse_scroll)
+            button_edit = tkinter.Button(self.top_frame_widget_dict["frame"], text="编辑", command=edit_obj.show)
+            button_edit.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
             button_edit.grid(row=index + 1, column=3, padx=self.padx, pady=self.pady)
             # 删除对象
-            delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
+            delete_obj = DeleteResourceInFrame(self.main_window, self.top_frame_widget_dict, self.global_info, obj,
                                                self.resource_type)
-            button_delete = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="删除", command=delete_obj.show)
-            button_delete.bind("<MouseWheel>", self.proces_mouse_scroll)
+            button_delete = tkinter.Button(self.top_frame_widget_dict["frame"], text="删除", command=delete_obj.show)
+            button_delete.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
             button_delete.grid(row=index + 1, column=4, padx=self.padx, pady=self.pady)
             # ★巡检模板-start
             if self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
                 start_obj = StartInspectionTemplateInFrame(self.main_window, self.global_info, obj)
-                button_start = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="Start", command=start_obj.start)
-                button_start.bind("<MouseWheel>", self.proces_mouse_scroll)
+                button_start = tkinter.Button(self.top_frame_widget_dict["frame"], text="Start", command=start_obj.start)
+                button_start.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
                 button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
             # ★Host-open_terminal
             if self.resource_type == RESOURCE_TYPE_HOST:
                 open_single_terminal_obj = OpenSingleTerminalVt100(main_window=self.main_window, global_info=self.global_info, host_obj=obj)
-                button_start = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="打开终端",
+                button_start = tkinter.Button(self.top_frame_widget_dict["frame"], text="打开终端",
                                               command=open_single_terminal_obj.show)
-                button_start.bind("<MouseWheel>", self.proces_mouse_scroll)
+                button_start.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
                 button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
             index += 1
         # 信息控件添加完毕
-        self.nav_frame_r_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
-        self.nav_frame_r_widget_dict["canvas"].configure(
-            scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(), self.nav_frame_r_widget_dict["frame"].winfo_height()))
-        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
+        self.top_frame_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
+        self.top_frame_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.top_frame_widget_dict["frame"].winfo_width(), self.top_frame_widget_dict["frame"].winfo_height()))
+        self.top_frame_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        self.top_frame_widget_dict["frame"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
 
 
 class ViewResourceInFrame:
@@ -4493,10 +4815,10 @@ class ViewResourceInFrame:
     在主窗口的查看资源界面，添加用于显示资源信息的控件
     """
 
-    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, resource_obj=None,
+    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, resource_obj=None,
                  resource_type=RESOURCE_TYPE_PROJECT):
         self.main_window = main_window
-        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.top_frame_widget_dict = top_frame_widget_dict
         self.global_info = global_info
         self.resource_obj = resource_obj
         self.resource_type = resource_type
@@ -4505,7 +4827,7 @@ class ViewResourceInFrame:
         self.pady = 2
 
     def show(self):  # 入口函数
-        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+        for widget in self.top_frame_widget_dict["frame"].winfo_children():
             widget.destroy()
         if self.resource_type == RESOURCE_TYPE_PROJECT:
             self.view_project()
@@ -4523,29 +4845,30 @@ class ViewResourceInFrame:
             self.view_custome_tag_config_scheme()
         else:
             print("<class ViewResourceInFrame> resource_type is Unknown")
-        self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
+        self.update_top_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
 
-    def proces_mouse_scroll(self, event):
+    def proces_mouse_scroll_of_top_frame(self, event):
         if event.delta > 0:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+            self.top_frame_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
         else:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+            self.top_frame_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
 
-    def update_frame(self):
+    def update_top_frame(self):
         # 更新Frame的尺寸
-        self.nav_frame_r_widget_dict["frame"].update_idletasks()
-        self.nav_frame_r_widget_dict["canvas"].configure(
-            scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
-                          self.nav_frame_r_widget_dict["frame"].winfo_height()))
-        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
+        self.top_frame_widget_dict["frame"].update_idletasks()
+        self.top_frame_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.top_frame_widget_dict["frame"].winfo_width(),
+                          self.top_frame_widget_dict["frame"].winfo_height()))
+        self.top_frame_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        self.top_frame_widget_dict["frame"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         # 滚动条移到最开头
-        self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+        self.top_frame_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
 
     def view_project(self):
         # ★查看-project
         print("查看项目")
         print(self.resource_obj)
-        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
+        obj_info_text = tkinter.Text(master=self.top_frame_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
         obj_info_text.insert(tkinter.END, "★★ 查看项目 ★★\n")
         # ★project-名称
         project_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
@@ -4570,14 +4893,14 @@ class ViewResourceInFrame:
         # 显示info Text文本框
         obj_info_text.pack()
         # ★★添加返回“项目列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
+        button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回项目列表",
                                        command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_PROJECT))  # 返回“项目列表”
         button_return.pack()
 
     def view_credential(self):
         # 查看-credential
-        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
+        obj_info_text = tkinter.Text(master=self.top_frame_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
         obj_info_text.insert(tkinter.END, "★★ 查看凭据 ★★\n")
         # ★credential-名称
         credential_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
@@ -4645,14 +4968,14 @@ class ViewResourceInFrame:
         # 显示info Text文本框
         obj_info_text.pack()
         # ★★添加“返回项目列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回项目列表",
+        button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回项目列表",
                                        command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_CREDENTIAL))  # 返回凭据列表
         button_return.pack()
 
     def view_host(self):
         # 查看-host
-        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
+        obj_info_text = tkinter.Text(master=self.top_frame_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
         obj_info_text.insert(tkinter.END, "★★ 查看主机 ★★\n")
         # ★host-名称
         host_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
@@ -4685,6 +5008,14 @@ class ViewResourceInFrame:
         host_first_auth_method = "优先认证类型".ljust(self.view_width - 6, " ") + ": " + first_auth_method_name_list[
             self.resource_obj.first_auth_method] + "\n"
         obj_info_text.insert(tkinter.END, host_first_auth_method)
+        # ★host-custom_scheme 终端配色方案
+        custom_scheme = self.global_info.get_custome_tag_config_scheme_by_oid(self.resource_obj.custome_tag_config_scheme_oid)
+        if custom_scheme is None:
+            custom_scheme_name = "无"
+        else:
+            custom_scheme_name = custom_scheme.name
+        host_custom_scheme = "终端配色方案".ljust(self.view_width - 6, " ") + ": " + custom_scheme_name + "\n"
+        obj_info_text.insert(tkinter.END, host_custom_scheme)
         # ★host-ssh_port
         host_ssh_port = "ssh_port".ljust(self.view_width, " ") + ": " + str(self.resource_obj.ssh_port) + "\n"
         obj_info_text.insert(tkinter.END, host_ssh_port)
@@ -4714,14 +5045,14 @@ class ViewResourceInFrame:
         # 显示info Text文本框
         obj_info_text.pack()
         # ★★添加“返回主机列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回主机列表",
+        button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回主机列表",
                                        command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_HOST))  # 返回主机列表
         button_return.pack()
 
     def view_host_group(self):
         # 查看-host_group
-        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
+        obj_info_text = tkinter.Text(master=self.top_frame_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
         obj_info_text.insert(tkinter.END, "★★ 查看主机组 ★★\n")
         # ★host_group-名称
         host_group_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
@@ -4772,14 +5103,14 @@ class ViewResourceInFrame:
         # 显示info Text文本框
         obj_info_text.pack()
         # ★★添加“返回主机组列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回主机组列表",
+        button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回主机组列表",
                                        command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_HOST_GROUP))  # 返回主机组列表
         button_return.pack()
 
     def view_inspection_code_block(self):
         # 查看-inspection_code_block
-        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], height=9)  # 创建多行文本框，用于显示资源信息
+        obj_info_text = tkinter.Text(master=self.top_frame_widget_dict["frame"], height=9)  # 创建多行文本框，用于显示资源信息
         obj_info_text.insert(tkinter.END, "★★ 查看巡检代码块 ★★\n")
         # ★inspection_code_block-名称
         inspection_code_block_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
@@ -4815,10 +5146,10 @@ class ViewResourceInFrame:
         # 显示info Text文本框
         obj_info_text.pack()
         # 列出代码内容
-        label_code_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检命令内容")
-        label_code_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_code_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检命令内容")
+        label_code_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_code_list.pack()
-        treeview_code_content = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=7,
+        treeview_code_content = ttk.Treeview(self.top_frame_widget_dict["frame"], cursor="arrow", height=7,
                                              columns=("index", "code_content", "need_interactive"), show="headings")
         # 设置每一个列的宽度和对齐的方式
         treeview_code_content.column("index", width=50, anchor="w")
@@ -4839,7 +5170,7 @@ class ViewResourceInFrame:
         # 单击指定的命令行，显示其高级属性
         treeview_code_content.bind("<<TreeviewSelect>>", lambda event: self.view_treeview_code_content_item(event, treeview_code_content))
         # ★★添加“返回主机组列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回巡检代码块列表",
+        button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回巡检代码块列表",
                                        command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_INSPECTION_CODE_BLOCK))  # 返回巡检代码块列表
         button_return.pack()
@@ -4924,7 +5255,7 @@ class ViewResourceInFrame:
 
     def view_inspection_template(self):
         # 查看-inspection_template
-        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
+        obj_info_text = tkinter.Text(master=self.top_frame_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息
         obj_info_text.insert(tkinter.END, "★★ 查看巡检模板 ★★\n")
         # ★inspection_template-名称
         inspection_template_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
@@ -5015,7 +5346,7 @@ class ViewResourceInFrame:
         # 显示info Text文本框
         obj_info_text.pack()
         # ★★添加“返回巡检代码块列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回巡检模板列表",
+        button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回巡检模板列表",
                                        command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_INSPECTION_TEMPLATE))  # 返回巡检模板列表
         button_return.pack()
@@ -5024,11 +5355,13 @@ class ViewResourceInFrame:
         # ★查看-scheme
         print("查看配色方案")
         print(self.resource_obj)
-        obj_info_text = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
+        obj_info_text = tkinter.Text(master=self.top_frame_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
         obj_info_text.insert(tkinter.END, "★★ 查看配色方案 ★★\n")
         # ★配色方案-名称
         scheme_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
-        print(scheme_name)
+        obj_info_text.insert(tkinter.END, scheme_name)
+        # ★配色方案-oid
+        scheme_name = "id".ljust(self.view_width, " ") + ": " + self.resource_obj.oid + "\n"
         obj_info_text.insert(tkinter.END, scheme_name)
         # ★配色方案-描述
         scheme_description = "描述".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.description + "\n"
@@ -5058,12 +5391,12 @@ class ViewResourceInFrame:
         # 显示info Text文本框
         obj_info_text.pack()
         # ★★添加返回“配色方案列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回配色方案列表",
+        button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回配色方案列表",
                                        command=self.back_to_custom_tag_config_pop_window)  # 返回“配色方案列表”
         button_return.pack()
 
     def back_to_custom_tag_config_pop_window(self):
-        self.nav_frame_r_widget_dict["pop_window"].destroy()
+        self.top_frame_widget_dict["pop_window"].destroy()
         self.main_window.window_obj.focus_force()
         self.main_window.click_menu_settings_scheme_of_menu_bar_init()
 
@@ -5073,20 +5406,20 @@ class EditResourceInFrame:
     在主窗口的查看资源界面，添加用于编辑资源信息的控件
     """
 
-    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, resource_obj=None,
+    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, resource_obj=None,
                  resource_type=RESOURCE_TYPE_PROJECT):
         self.main_window = main_window
-        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.top_frame_widget_dict = top_frame_widget_dict
         self.global_info = global_info
         self.resource_obj = resource_obj
         self.resource_type = resource_type
-        self.resource_info_dict = {}  # 用于存储资源对象信息的diction
+        self.resource_info_dict = {}  # 用于存储资源对象信息的diction，传出信息给<UpdateResourceInFrame>对象进行处理的
         self.padx = 2
         self.pady = 2
         self.current_row_index = 0
 
     def show(self):  # 入口函数
-        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+        for widget in self.top_frame_widget_dict["frame"].winfo_children():
             widget.destroy()
         if self.resource_type == RESOURCE_TYPE_PROJECT:
             self.edit_project()
@@ -5104,68 +5437,69 @@ class EditResourceInFrame:
             self.edit_custome_tag_config_scheme()
         else:
             print("<class EditResourceInFrame> resource_type is Unknown")
-        self.add_save_and_return_button()
-        self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
+        self.add_save_and_return_button_in_top_frame()
+        self.update_top_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
 
-    def add_save_and_return_button(self):
+    def add_save_and_return_button_in_top_frame(self):
         # ★创建“保存更新”按钮
         save_obj = UpdateResourceInFrame(self.main_window, self.resource_info_dict, self.global_info, self.resource_obj,
                                          self.resource_type)
-        button_save = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="保存更新", command=save_obj.update)
-        button_save.bind("<MouseWheel>", self.proces_mouse_scroll)
+        button_save = tkinter.Button(self.top_frame_widget_dict["frame"], text="保存更新", command=save_obj.update)
+        button_save.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         button_save.grid(row=self.current_row_index + 1, column=0, padx=self.padx, pady=self.pady)
         # ★★添加“返回资源列表”按钮★★
         if self.resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
-            button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="取消编辑",
+            button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="取消编辑",
                                            command=self.back_to_custom_tag_config_pop_window)
         else:
-            button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="取消编辑",
+            button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="取消编辑",
                                            command=lambda: self.main_window.nav_frame_r_resource_top_page_display(self.resource_type))
-        button_return.bind("<MouseWheel>", self.proces_mouse_scroll)
+        button_return.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
 
     def back_to_custom_tag_config_pop_window(self):
-        self.nav_frame_r_widget_dict["pop_window"].destroy()
+        self.top_frame_widget_dict["pop_window"].destroy()
         self.main_window.window_obj.focus_force()
         self.main_window.click_menu_settings_scheme_of_menu_bar_init()
 
-    def proces_mouse_scroll(self, event):
+    def proces_mouse_scroll_of_top_frame(self, event):
         if event.delta > 0:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+            self.top_frame_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
         else:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+            self.top_frame_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
 
-    def update_frame(self):
+    def update_top_frame(self):
         # 更新Frame的尺寸
-        self.nav_frame_r_widget_dict["frame"].update_idletasks()
-        self.nav_frame_r_widget_dict["canvas"].configure(
-            scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
-                          self.nav_frame_r_widget_dict["frame"].winfo_height()))
-        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
+        self.top_frame_widget_dict["frame"].update_idletasks()
+        self.top_frame_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.top_frame_widget_dict["frame"].winfo_width(),
+                          self.top_frame_widget_dict["frame"].winfo_height()))
+        self.top_frame_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        self.top_frame_widget_dict["frame"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         # 滚动条移到最开头
-        self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+        self.top_frame_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
 
     def edit_project(self):
         # ★编辑-project
-        label_edit_project = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑项目 ★★")
+        label_edit_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 编辑项目 ★★")
         label_edit_project.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★project-名称
-        label_project_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目名称")
-        label_project_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_project_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目名称")
+        label_project_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_project_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_project_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
-        entry_project_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_project_name = tkinter.Entry(self.top_frame_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_project_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_project_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
         entry_project_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★project-描述
-        label_project_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_project_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_project_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_project_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_project_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_project_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_project_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_description"])
-        entry_project_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_project_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_project_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
         entry_project_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★★更新row_index
@@ -5173,30 +5507,30 @@ class EditResourceInFrame:
 
     def edit_credential(self):
         # ★编辑-credential
-        label_edit_credential = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑凭据 ★★")
+        label_edit_credential = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 编辑凭据 ★★")
         label_edit_credential.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★credential-名称
-        label_credential_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据名称")
-        label_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据名称")
+        label_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_credential_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
-        entry_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_name = tkinter.Entry(self.top_frame_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
         entry_credential_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★credential-描述
-        label_credential_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_credential_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                      textvariable=self.resource_info_dict["sv_description"])
-        entry_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
         entry_credential_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★credential-所属项目
-        label_credential_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_credential_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_project_oid = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_credential_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_project_oid.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         project_obj_index = 0
@@ -5206,99 +5540,99 @@ class EditResourceInFrame:
             if self.resource_obj.project_oid == project_obj.oid:
                 project_obj_index = index
             index += 1
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★credential-凭据类型
-        label_credential_type = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据类型")
-        label_credential_type.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_type = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据类型")
+        label_credential_type.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_type.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         cred_type_name_list = ["ssh_password", "ssh_key", "telnet", "ftp", "registry", "git"]
-        self.resource_info_dict["combobox_cred_type"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=cred_type_name_list,
+        self.resource_info_dict["combobox_cred_type"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=cred_type_name_list,
                                                                      state="readonly")
         if self.resource_obj.cred_type != -1:
             self.resource_info_dict["combobox_cred_type"].current(self.resource_obj.cred_type)  # 显示初始值，可重新选择
         self.resource_info_dict["combobox_cred_type"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★credential-用户名
-        label_credential_username = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="username")
-        label_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_username = tkinter.Label(self.top_frame_widget_dict["frame"], text="username")
+        label_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_username.grid(row=5, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_username"] = tkinter.StringVar()
-        entry_credential_username = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_username = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_username"])
         entry_credential_username.insert(0, self.resource_obj.username)  # 显示初始值，可编辑
-        entry_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_username.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★credential-密码
-        label_credential_password = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="password")
-        label_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_password = tkinter.Label(self.top_frame_widget_dict["frame"], text="password")
+        label_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_password.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_password"] = tkinter.StringVar()
-        entry_credential_password = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_password = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_password"])
-        entry_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_password.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_password.insert(0, self.resource_obj.password)  # 显示初始值，可编辑
         entry_credential_password.grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★credential-密钥
-        label_credential_private_key = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssh_private_key")
-        label_credential_private_key.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_private_key = tkinter.Label(self.top_frame_widget_dict["frame"], text="ssh_private_key")
+        label_credential_private_key.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_private_key.grid(row=7, column=0, padx=self.padx, pady=self.pady)
-        self.resource_info_dict["text_private_key"] = tkinter.Text(master=self.nav_frame_r_widget_dict["frame"], height=3, width=32)
+        self.resource_info_dict["text_private_key"] = tkinter.Text(master=self.top_frame_widget_dict["frame"], height=3, width=32)
         self.resource_info_dict["text_private_key"].insert(1.0, self.resource_obj.private_key)  # 显示初始值，可编辑
         self.resource_info_dict["text_private_key"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权类型
-        label_credential_privilege_escalation_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+        label_credential_privilege_escalation_method = tkinter.Label(self.top_frame_widget_dict["frame"],
                                                                      text="privilege_escalation_method")
-        label_credential_privilege_escalation_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_method.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_privilege_escalation_method.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         privilege_escalation_method_list = ["su", "sudo"]
-        self.resource_info_dict["combobox_privilege_escalation_method"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_privilege_escalation_method"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                                        values=privilege_escalation_method_list,
                                                                                        state="readonly")
         if self.resource_obj.privilege_escalation_method != -1:
             self.resource_info_dict["combobox_privilege_escalation_method"].current(self.resource_obj.privilege_escalation_method)
         self.resource_info_dict["combobox_privilege_escalation_method"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权用户
-        label_credential_privilege_escalation_username = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+        label_credential_privilege_escalation_username = tkinter.Label(self.top_frame_widget_dict["frame"],
                                                                        text="privilege_escalation_username")
-        label_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_privilege_escalation_username.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_privilege_escalation_username"] = tkinter.StringVar()
-        entry_credential_privilege_escalation_username = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_privilege_escalation_username = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                                        textvariable=self.resource_info_dict[
                                                                            "sv_privilege_escalation_username"])
-        entry_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_privilege_escalation_username.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_privilege_escalation_username.insert(0, self.resource_obj.privilege_escalation_username)  # 显示初始值，可编辑
         entry_credential_privilege_escalation_username.grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★credential-提权密码
-        label_credential_privilege_escalation_password = tkinter.Label(self.nav_frame_r_widget_dict["frame"],
+        label_credential_privilege_escalation_password = tkinter.Label(self.top_frame_widget_dict["frame"],
                                                                        text="privilege_escalation_password")
-        label_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_privilege_escalation_password.grid(row=10, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_privilege_escalation_password"] = tkinter.StringVar()
-        entry_credential_privilege_escalation_password = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_privilege_escalation_password = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                                        textvariable=self.resource_info_dict[
                                                                            "sv_privilege_escalation_password"])
-        entry_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_privilege_escalation_password.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_privilege_escalation_password.insert(0, self.resource_obj.privilege_escalation_password)  # 显示初始值，可编辑
         entry_credential_privilege_escalation_password.grid(row=10, column=1, padx=self.padx, pady=self.pady)
         # ★credential-auth_url
-        label_credential_auth_url = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="auth_url")
-        label_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_auth_url = tkinter.Label(self.top_frame_widget_dict["frame"], text="auth_url")
+        label_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_auth_url.grid(row=11, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_auth_url"] = tkinter.StringVar()
-        entry_credential_auth_url = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_credential_auth_url = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                   textvariable=self.resource_info_dict["sv_auth_url"])
-        entry_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_credential_auth_url.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_auth_url.insert(0, self.resource_obj.auth_url)  # 显示初始值，可编辑
         entry_credential_auth_url.grid(row=11, column=1, padx=self.padx, pady=self.pady)
         # ★credential-ssl_verify
-        label_credential_ssl_verify = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssl_verify")
-        label_credential_ssl_verify.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_credential_ssl_verify = tkinter.Label(self.top_frame_widget_dict["frame"], text="ssl_verify")
+        label_credential_ssl_verify.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_ssl_verify.grid(row=12, column=0, padx=self.padx, pady=self.pady)
         ssl_verify_name_list = ["No", "Yes"]
-        self.resource_info_dict["combobox_ssl_verify"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=ssl_verify_name_list,
+        self.resource_info_dict["combobox_ssl_verify"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=ssl_verify_name_list,
                                                                       state="readonly")
         if self.resource_obj.ssl_verify != -1:
             self.resource_info_dict["combobox_ssl_verify"].current(self.resource_obj.ssl_verify)  # 显示初始值
@@ -5308,31 +5642,31 @@ class EditResourceInFrame:
 
     def edit_host(self):
         # ★创建-host
-        label_edit_host = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑主机 ★★")
-        label_edit_host.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_edit_host = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 编辑主机 ★★")
+        label_edit_host.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_edit_host.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★host-名称
-        label_host_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机名称")
-        label_host_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机名称")
+        label_host_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_host_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
-        entry_host_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_name = tkinter.Entry(self.top_frame_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_host_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
         entry_host_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★host-描述
-        label_host_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_host_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_host_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_host_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_host_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                textvariable=self.resource_info_dict["sv_description"])
-        entry_host_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
         entry_host_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★host-所属项目
-        label_host_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_host_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_project_oid = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_host_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_project_oid.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         project_obj_index = 0
@@ -5342,65 +5676,82 @@ class EditResourceInFrame:
             if self.resource_obj.project_oid == project_obj.oid:
                 project_obj_index = index
             index += 1
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★host-address
-        label_host_address = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="address")
-        label_host_address.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_address = tkinter.Label(self.top_frame_widget_dict["frame"], text="address")
+        label_host_address.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_address.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_address"] = tkinter.StringVar()
-        entry_host_address = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_host_address = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                            textvariable=self.resource_info_dict["sv_address"])
-        entry_host_address.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_address.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_address.insert(0, self.resource_obj.address)  # 显示初始值，可编辑
         entry_host_address.grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★host-ssh_port
-        label_host_ssh_port = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="ssh_port")
-        label_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_ssh_port = tkinter.Label(self.top_frame_widget_dict["frame"], text="ssh_port")
+        label_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_ssh_port.grid(row=5, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_ssh_port"] = tkinter.StringVar()
-        entry_host_ssh_port = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_host_ssh_port = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                             textvariable=self.resource_info_dict["sv_ssh_port"])
-        entry_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_ssh_port.insert(0, self.resource_obj.ssh_port)  # 显示初始值，可编辑
         entry_host_ssh_port.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★host-telnet_port
-        label_host_telnet_port = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="telnet_port")
-        label_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_telnet_port = tkinter.Label(self.top_frame_widget_dict["frame"], text="telnet_port")
+        label_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_telnet_port.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_telnet_port"] = tkinter.StringVar()
-        entry_host_telnet_port = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_host_telnet_port = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                textvariable=self.resource_info_dict["sv_telnet_port"])
-        entry_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_telnet_port.insert(0, self.resource_obj.telnet_port)  # 显示初始值，可编辑
         entry_host_telnet_port.grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★host-login_protocol
-        label_host_login_protocol = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="远程登录类型")
-        label_host_login_protocol.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_login_protocol = tkinter.Label(self.top_frame_widget_dict["frame"], text="远程登录类型")
+        label_host_login_protocol.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_login_protocol.grid(row=7, column=0, padx=self.padx, pady=self.pady)
         login_protocol_name_list = ["ssh", "telnet"]
-        self.resource_info_dict["combobox_login_protocol"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_login_protocol"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                           values=login_protocol_name_list,
                                                                           state="readonly")
         self.resource_info_dict["combobox_login_protocol"].current(self.resource_obj.login_protocol)
         self.resource_info_dict["combobox_login_protocol"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★host-first_auth_method
-        label_host_first_auth_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="优先认证类型")
-        label_host_first_auth_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_first_auth_method = tkinter.Label(self.top_frame_widget_dict["frame"], text="优先认证类型")
+        label_host_first_auth_method.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_first_auth_method.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         first_auth_method_name_list = ["priKey", "password"]
-        self.resource_info_dict["combobox_first_auth_method"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_first_auth_method"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                              values=first_auth_method_name_list,
                                                                              state="readonly")
         self.resource_info_dict["combobox_first_auth_method"].current(self.resource_obj.first_auth_method)
         self.resource_info_dict["combobox_first_auth_method"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
+        # ★host-custom_scheme 终端配色方案
+        label_host_custom_scheme = tkinter.Label(self.top_frame_widget_dict["frame"], text="终端配色方案")
+        label_host_custom_scheme.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        label_host_custom_scheme.grid(row=9, column=0, padx=self.padx, pady=self.pady)
+        custom_scheme_name_list = []
+        current_scheme_index = 0
+        index = 0
+        for scheme in self.global_info.custome_tag_config_scheme_obj_list:
+            custom_scheme_name_list.append(scheme.name)
+            if self.resource_obj.custome_tag_config_scheme_oid == scheme.oid:
+                current_scheme_index = index
+            index += 1
+        self.resource_info_dict["combobox_custom_scheme"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
+                                                                         values=custom_scheme_name_list,
+                                                                         state="readonly")
+        self.resource_info_dict["combobox_custom_scheme"].current(current_scheme_index)
+        self.resource_info_dict["combobox_custom_scheme"].grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★host-凭据列表
-        label_credential_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="凭据列表")
-        label_credential_list.bind("<MouseWheel>", self.proces_mouse_scroll)
-        label_credential_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        label_credential_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据列表")
+        label_credential_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        label_credential_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_credential"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
@@ -5415,37 +5766,37 @@ class EditResourceInFrame:
                 self.resource_info_dict["listbox_credential"].select_set(cred_index)
         self.resource_info_dict["listbox_credential"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_credential"].yview)
-        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
         # ★★更新row_index
-        self.current_row_index = 9
+        self.current_row_index = 10
 
     def edit_host_group(self):
         # ★创建-host_group
-        label_edit_host_group = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑主机 ★★")
-        label_edit_host_group.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_edit_host_group = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 编辑主机 ★★")
+        label_edit_host_group.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_edit_host_group.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★host_group-名称
-        label_host_group_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机名称")
-        label_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机名称")
+        label_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_host_group_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
-        entry_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_group_name = tkinter.Entry(self.top_frame_widget_dict["frame"], textvariable=self.resource_info_dict["sv_name"])
+        entry_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_group_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
         entry_host_group_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★host_group-描述
-        label_host_group_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_host_group_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_host_group_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                      textvariable=self.resource_info_dict["sv_description"])
-        entry_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_group_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
         entry_host_group_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★host_group-所属项目
-        label_host_group_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_host_group_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_project_oid = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_host_group_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_project_oid.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         project_obj_index = 0
@@ -5455,15 +5806,15 @@ class EditResourceInFrame:
             if self.resource_obj.project_oid == project_obj.oid:
                 project_obj_index = index
             index += 1
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★host_group-列表
-        label_host_group_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组列表")
-        label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机组列表")
+        label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_list.grid(row=4, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_host_group"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
@@ -5480,10 +5831,10 @@ class EditResourceInFrame:
         list_scrollbar.config(command=self.resource_info_dict["listbox_host_group"].yview)
         frame.grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★host-列表
-        label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机列表")
-        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机列表")
+        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_list.grid(row=5, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_host"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
@@ -5504,32 +5855,32 @@ class EditResourceInFrame:
 
     def edit_inspection_code_block(self):
         # ★创建-inspection_code_block
-        label_edit_inspection_code_block = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑巡检代码块 ★★")
-        label_edit_inspection_code_block.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_edit_inspection_code_block = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 编辑巡检代码块 ★★")
+        label_edit_inspection_code_block.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_edit_inspection_code_block.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★inspection_code_block-名称
-        label_inspection_code_block_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码块名称")
-        label_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码块名称")
+        label_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_inspection_code_block_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_code_block_name = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                          textvariable=self.resource_info_dict["sv_name"])
-        entry_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_code_block_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
         entry_inspection_code_block_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_code_block-描述
-        label_inspection_code_block_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_inspection_code_block_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_code_block_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                                 textvariable=self.resource_info_dict["sv_description"])
-        entry_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_code_block_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
         entry_inspection_code_block_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_code_block-所属项目
-        label_inspection_code_block_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_inspection_code_block_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_project_oid = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_inspection_code_block_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_project_oid.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         project_obj_index = 0
@@ -5539,21 +5890,21 @@ class EditResourceInFrame:
             if self.resource_obj.project_oid == project_obj.oid:
                 project_obj_index = index
             index += 1
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★命令内容-列表
         # ★★★编辑巡检代码内容并在treeview里显示★★★
         self.resource_info_dict["one_line_code_obj_list"] = []
-        label_inspection_code_block_code_content = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码内容:")
-        label_inspection_code_block_code_content.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_code_content = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码内容:")
+        label_inspection_code_block_code_content.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_code_content.grid(row=4, column=0, padx=self.padx, pady=self.pady)
-        button_add_code_list = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="编辑",
+        button_add_code_list = tkinter.Button(self.top_frame_widget_dict["frame"], text="编辑",
                                               command=lambda: self.click_button_add_code_list(treeview_code_content))  # 新建代码
-        button_add_code_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        button_add_code_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         button_add_code_list.grid(row=4, column=1, padx=self.padx, pady=self.pady)
-        treeview_code_content = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=7,
+        treeview_code_content = ttk.Treeview(self.top_frame_widget_dict["frame"], cursor="arrow", height=7,
                                              columns=("index", "code_content", "need_interactive"), show="headings")
         # 设置每一个列的宽度和对齐的方式
         treeview_code_content.column("index", width=50, anchor="w")
@@ -5756,32 +6107,32 @@ class EditResourceInFrame:
 
     def edit_inspection_template(self):
         # ★创建-inspection_template
-        label_edit_inspection_template = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑巡检模板 ★★")
-        label_edit_inspection_template.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_edit_inspection_template = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 编辑巡检模板 ★★")
+        label_edit_inspection_template.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_edit_inspection_template.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★inspection_template-名称
-        label_inspection_template_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检模板名称")
-        label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检模板名称")
+        label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_inspection_template_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_template_name = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                        textvariable=self.resource_info_dict["sv_name"])
-        entry_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_template_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
         entry_inspection_template_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-描述
-        label_inspection_template_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_inspection_template_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_template_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                               textvariable=self.resource_info_dict["sv_description"])
-        entry_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_template_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
         entry_inspection_template_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-所属项目
-        label_inspection_template_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_inspection_template_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_project_oid = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_inspection_template_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_project_oid.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         project_obj_index = 0
@@ -5791,77 +6142,77 @@ class EditResourceInFrame:
             if self.resource_obj.project_oid == project_obj.oid:
                 project_obj_index = index
             index += 1
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-execution_method
-        label_inspection_template_execution_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="execution_method")
-        label_inspection_template_execution_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_execution_method = tkinter.Label(self.top_frame_widget_dict["frame"], text="execution_method")
+        label_inspection_template_execution_method.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_execution_method.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         execution_method_name_list = ["无", "定时执行", "周期执行", "After"]
-        self.resource_info_dict["combobox_execution_method"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_execution_method"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                             values=execution_method_name_list,
                                                                             state="readonly")
         self.resource_info_dict["combobox_execution_method"].current(self.resource_obj.execution_method)
         self.resource_info_dict["combobox_execution_method"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-execution_at_time 这里应该使用日历框及时间设置框，先简化为直接输入 "2024-03-14 09:51:26" 这类字符串
-        label_inspection_template_execution_at_time = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="execution_at_time")
-        label_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_execution_at_time = tkinter.Label(self.top_frame_widget_dict["frame"], text="execution_at_time")
+        label_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_execution_at_time.grid(row=5, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_execution_at_time"] = tkinter.StringVar()
-        entry_inspection_template_execution_at_time = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_template_execution_at_time = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                                     textvariable=self.resource_info_dict["sv_execution_at_time"])
         execution_at_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.execution_at_time))
         entry_inspection_template_execution_at_time.insert(0, execution_at_time)
-        entry_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_execution_at_time.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_template_execution_at_time.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-update_code_on_launch
-        label_inspection_template_update_code_on_launch = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行前更新code")
-        label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_update_code_on_launch = tkinter.Label(self.top_frame_widget_dict["frame"], text="运行前更新code")
+        label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_update_code_on_launch.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         update_code_on_launch_name_list = ["No", "Yes"]
-        self.resource_info_dict["combobox_update_code_on_launch"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_update_code_on_launch"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                                  values=update_code_on_launch_name_list,
                                                                                  state="readonly")
         self.resource_info_dict["combobox_update_code_on_launch"].current(self.resource_obj.update_code_on_launch)
         self.resource_info_dict["combobox_update_code_on_launch"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-forks
-        label_inspection_template_forks = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行线程数")
-        label_inspection_template_forks.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_forks = tkinter.Label(self.top_frame_widget_dict["frame"], text="运行线程数")
+        label_inspection_template_forks.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_forks.grid(row=7, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_forks"] = tkinter.StringVar()
-        spinbox_inspection_template_forks = tkinter.Spinbox(self.nav_frame_r_widget_dict["frame"], from_=1, to=256, increment=1,
+        spinbox_inspection_template_forks = tkinter.Spinbox(self.top_frame_widget_dict["frame"], from_=1, to=256, increment=1,
                                                             textvariable=self.resource_info_dict["sv_forks"])
         self.resource_info_dict["sv_forks"].set(self.resource_obj.forks)  # 显示初始值，可编辑
         spinbox_inspection_template_forks.grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-save_output_to_file
-        label_inspection_template_save_output_to_file = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="自动保存巡检日志到文件")
-        label_inspection_template_save_output_to_file.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_save_output_to_file = tkinter.Label(self.top_frame_widget_dict["frame"], text="自动保存巡检日志到文件")
+        label_inspection_template_save_output_to_file.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_save_output_to_file.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         save_output_to_file_name_list = ["No", "Yes"]
-        self.resource_info_dict["combobox_save_output_to_file"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_save_output_to_file"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                                values=save_output_to_file_name_list,
                                                                                state="readonly")
         self.resource_info_dict["combobox_save_output_to_file"].current(self.resource_obj.save_output_to_file)
         self.resource_info_dict["combobox_save_output_to_file"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-output_file_name_style
-        label_inspection_template_output_file_name_style = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检日志文件名称")
-        label_inspection_template_output_file_name_style.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_output_file_name_style = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检日志文件名称")
+        label_inspection_template_output_file_name_style.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_output_file_name_style.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         output_file_name_style_name_list = ["HOSTNAME", "HOSTNAME-DATE", "HOSTNAME-DATE-TIME", "DATE_DIR/HOSTNAME",
                                             "DATE_DIR/HOSTNAME-DATE",
                                             "DATE_DIR/HOSTNAME-DATE-TIME"]
-        self.resource_info_dict["combobox_output_file_name_style"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        self.resource_info_dict["combobox_output_file_name_style"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                                   values=output_file_name_style_name_list,
                                                                                   state="readonly", width=32)
         self.resource_info_dict["combobox_output_file_name_style"].current(self.resource_obj.output_file_name_style)
         self.resource_info_dict["combobox_output_file_name_style"].grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★host_group-列表
-        label_host_group_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机组列表")
-        label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_group_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机组列表")
+        label_host_group_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_host_group"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
@@ -5878,10 +6229,10 @@ class EditResourceInFrame:
         list_scrollbar.config(command=self.resource_info_dict["listbox_host_group"].yview)
         frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
         # ★host-列表
-        label_host_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="主机列表")
-        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_host_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机列表")
+        label_host_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_list.grid(row=11, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_host"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
@@ -5898,10 +6249,10 @@ class EditResourceInFrame:
         list_scrollbar.config(command=self.resource_info_dict["listbox_host"].yview)
         frame.grid(row=11, column=1, padx=self.padx, pady=self.pady)
         # ★巡检代码块-列表
-        label_inspection_code_block_list = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检代码块列表")
-        label_inspection_code_block_list.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_code_block_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码块列表")
+        label_inspection_code_block_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_list.grid(row=12, column=0, padx=self.padx, pady=self.pady)
-        frame = tkinter.Frame(self.nav_frame_r_widget_dict["frame"])
+        frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
         self.resource_info_dict["listbox_inspection_code_block"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2,
@@ -5923,34 +6274,34 @@ class EditResourceInFrame:
         self.current_row_index = 12
 
     def edit_custome_tag_config_scheme(self):
-        self.resource_info_dict["pop_window"] = self.nav_frame_r_widget_dict["pop_window"]
+        self.resource_info_dict["pop_window"] = self.top_frame_widget_dict["pop_window"]
         # ★创建-scheme
-        label_edit_inspection_template = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 编辑配色方案 ★★")
-        label_edit_inspection_template.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_edit_inspection_template = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 编辑配色方案 ★★")
+        label_edit_inspection_template.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_edit_inspection_template.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★scheme-名称
-        label_inspection_template_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="配色方案名称")
-        label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="配色方案名称")
+        label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
-        entry_inspection_template_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_template_name = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                        textvariable=self.resource_info_dict["sv_name"])
-        entry_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_template_name.insert(0, self.resource_obj.name)  # 显示初始值，可编辑
         entry_inspection_template_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★scheme-描述
-        label_inspection_template_description = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="描述")
-        label_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_description = tkinter.Label(self.top_frame_widget_dict["frame"], text="描述")
+        label_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_description.grid(row=2, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_description"] = tkinter.StringVar()
-        entry_inspection_template_description = tkinter.Entry(self.nav_frame_r_widget_dict["frame"],
+        entry_inspection_template_description = tkinter.Entry(self.top_frame_widget_dict["frame"],
                                                               textvariable=self.resource_info_dict["sv_description"])
-        entry_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_template_description.insert(0, self.resource_obj.description)  # 显示初始值，可编辑
         entry_inspection_template_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★scheme-所属项目
-        label_inspection_template_project_oid = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="项目")
-        label_inspection_template_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_project_oid = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_inspection_template_project_oid.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_project_oid.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
         project_obj_index = 0
@@ -5960,7 +6311,7 @@ class EditResourceInFrame:
             if self.resource_obj.project_oid == project_obj.oid:
                 project_obj_index = index
             index += 1
-        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.nav_frame_r_widget_dict["frame"], values=project_obj_name_list,
+        self.resource_info_dict["combobox_project"] = ttk.Combobox(self.top_frame_widget_dict["frame"], values=project_obj_name_list,
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
@@ -5976,7 +6327,7 @@ class UpdateResourceInFrame:
     def __init__(self, main_window=None, resource_info_dict=None, global_info=None, resource_obj=None,
                  resource_type=None):
         self.main_window = main_window
-        self.resource_info_dict = resource_info_dict
+        self.resource_info_dict = resource_info_dict  # 由<EditResourceInFrame>对象返回的被编辑资源的信息
         self.global_info = global_info
         self.resource_obj = resource_obj
         self.resource_type = resource_type
@@ -6099,6 +6450,12 @@ class UpdateResourceInFrame:
             host_first_auth_method = 0
         else:
             host_first_auth_method = self.resource_info_dict["combobox_first_auth_method"].current()
+        # ★custom_scheme 终端配色方案
+        if self.resource_info_dict["combobox_custom_scheme"].current() == -1:
+            host_custom_scheme_index = 0
+        else:
+            host_custom_scheme_index = self.resource_info_dict["combobox_custom_scheme"].current()
+        host_custom_scheme = self.global_info.custome_tag_config_scheme_obj_list[host_custom_scheme_index]
         # 先更新host的credential_oid_list
         self.resource_obj.credential_oid_list = []
         for selected_credential_index in self.resource_info_dict["listbox_credential"].curselection():  # host对象添加凭据列表
@@ -6118,6 +6475,7 @@ class UpdateResourceInFrame:
                                      ssh_port=host_ssh_port, telnet_port=host_telnet_port,
                                      login_protocol=host_login_protocol,
                                      first_auth_method=host_first_auth_method,
+                                     custome_tag_config_scheme_oid=host_custom_scheme.oid,
                                      global_info=self.global_info)
             self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST, )  # 更新host信息后，返回“显示host列表”页面
 
@@ -6281,10 +6639,10 @@ class DeleteResourceInFrame:
     在主窗口的查看资源界面，删除选中的资源对象
     """
 
-    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, resource_obj=None,
+    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, resource_obj=None,
                  resource_type=RESOURCE_TYPE_PROJECT):
         self.main_window = main_window
-        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.top_frame_widget_dict = top_frame_widget_dict
         self.global_info = global_info
         self.resource_obj = resource_obj
         self.resource_type = resource_type
@@ -6293,8 +6651,8 @@ class DeleteResourceInFrame:
         result = messagebox.askyesno("删除资源", f"是否删除'{self.resource_obj.name}'资源对象？")
         # messagebox.askyesno()参数1为弹窗标题，参数2为弹窗内容，有2个按钮（是，否），点击"是"时返回True
         if result:
-            for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
-                widget.destroy()
+            # for widget in self.top_frame_widget_dict["frame"].winfo_children():
+            #     widget.destroy()
             if self.resource_type == RESOURCE_TYPE_PROJECT:
                 self.delete_project()
             elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
@@ -6315,31 +6673,31 @@ class DeleteResourceInFrame:
                 print("<class DeleteResourceInFrame> resource_type is Unknown")
         else:
             print("用户取消了删除操作")
-            self.nav_frame_r_widget_dict["frame"].focus_force()
+            self.top_frame_widget_dict["frame"].focus_force()
 
     def delete_project(self):
         self.global_info.delete_project_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_PROJECT, )
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_PROJECT)
 
     def delete_credential(self):
         self.global_info.delete_credential_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_CREDENTIAL, )
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_CREDENTIAL)
 
     def delete_host(self):
         self.global_info.delete_host_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST, )
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
 
     def delete_host_group(self):
         self.global_info.delete_host_group_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST_GROUP, )
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST_GROUP)
 
     def delete_inspection_code_block(self):
         self.global_info.delete_inspection_code_block_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_CODE_BLOCK, )
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_CODE_BLOCK)
 
     def delete_inspection_template(self):
         self.global_info.delete_inspection_template_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_TEMPLATE, )
+        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_TEMPLATE)
 
     def delete_inspection_job_record(self):
         self.global_info.delete_inspection_job_record_obj(self.resource_obj)
@@ -6357,7 +6715,7 @@ class SaveResourceInMainWindow:
 
     def __init__(self, main_window=None, resource_info_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
         self.main_window = main_window
-        self.resource_info_dict = resource_info_dict
+        self.resource_info_dict = resource_info_dict  # 由<CreateResourceInFrame>对象返回的被创建资源的信息
         self.global_info = global_info
         self.resource_type = resource_type
 
@@ -6481,6 +6839,12 @@ class SaveResourceInMainWindow:
             host_first_auth_method = 0
         else:
             host_first_auth_method = self.resource_info_dict["combobox_first_auth_method"].current()
+        # ★custom_scheme 终端配色方案
+        if self.resource_info_dict["combobox_custom_scheme"].current() == -1:
+            host_custom_scheme_index = 0
+        else:
+            host_custom_scheme_index = self.resource_info_dict["combobox_custom_scheme"].current()
+        host_custom_scheme = self.global_info.custome_tag_config_scheme_obj_list[host_custom_scheme_index]
         # 创建host
         if host_name == '':
             messagebox.showinfo("创建主机-Error", f"主机名称不能为空")
@@ -6496,6 +6860,7 @@ class SaveResourceInMainWindow:
                         ssh_port=host_ssh_port, telnet_port=host_telnet_port,
                         login_protocol=host_login_protocol,
                         first_auth_method=host_first_auth_method,
+                        custome_tag_config_scheme_oid=host_custom_scheme.oid,
                         global_info=self.global_info)
             for selected_credential_index in self.resource_info_dict["listbox_credential"].curselection():  # host对象添加凭据列表
                 host.add_credential(self.global_info.credential_obj_list[selected_credential_index])
@@ -6636,7 +7001,37 @@ class SaveResourceInMainWindow:
             self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_INSPECTION_TEMPLATE)  # 返回顶级展示页面
 
     def save_custom_tag_config(self):
-        pass
+        custom_scheme_name = self.resource_info_dict["sv_name"].get()
+        custom_scheme_description = self.resource_info_dict["sv_description"].get()
+        # ★project_oid  凡是combobox未选择的（值为-1）都要设置为默认值0
+        combobox_project_current = self.resource_info_dict["combobox_project"].current()
+        if combobox_project_current == -1:
+            project_oid = self.global_info.project_obj_list[0].oid
+        else:
+            project_oid = self.global_info.project_obj_list[combobox_project_current].oid
+        # 创建custom_scheme
+        if custom_scheme_name == '':
+            messagebox.showinfo("创建配色方案-Error", f"配色方案名称不能为空")
+        elif len(custom_scheme_name) > 128:
+            messagebox.showinfo("创建配色方案-Error", f"配色方案名称>128字符")
+        elif len(custom_scheme_description) > 256:
+            messagebox.showinfo("创建配色方案-Error", f"配色方案描述>256字符")
+        elif self.global_info.is_custome_tag_config_scheme_name_existed(custom_scheme_name):
+            messagebox.showinfo("创建配色方案-Error", f"配色方案名称 {custom_scheme_name} 已存在")
+        else:
+            custom_scheme = CustomTagConfigScheme(name=custom_scheme_name, description=custom_scheme_description,
+                                                  project_oid=project_oid,
+                                                  global_info=self.global_info)
+            # ★custom_scheme对象添加CustomMatchObject对象
+            custom_scheme.custom_match_object_list = self.resource_info_dict["custome_match_obj_list"]
+            custom_scheme.save()  # 保存资源对象
+            self.global_info.custome_tag_config_scheme_obj_list.append(custom_scheme)
+            # 返回配色方案设置页面
+            self.resource_info_dict["pop_window"].destroy()
+            self.main_window.window_obj.focus_force()
+            self.main_window.click_menu_settings_scheme_of_menu_bar_init()
+            return
+        self.resource_info_dict["pop_window"].focus_force()
 
 
 class StartInspectionTemplateInFrame:
@@ -6712,6 +7107,7 @@ class StartInspectionTemplateInFrame:
             scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
                           self.nav_frame_r_widget_dict["frame"].winfo_height()))
         self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
+        self.nav_frame_r_widget_dict["frame"].bind("<MouseWheel>", self.proces_mouse_scroll)
         # 滚动条移到最开头
         self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
 
@@ -6724,7 +7120,7 @@ class StartInspectionTemplateInFrame:
         button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
 
     def show_inspection_job_status(self):
-        # ★巡检作业详情 这里要把 self.nav_frame_r_widget_dict["frame"] 改为 main_window.nav_frame_r ，并添加滚动条
+        # ★巡检作业详情 这里要把 self.top_frame_widget_dict["frame"] 改为 main_window.nav_frame_r ，并添加滚动条
         label_show_inspection_job_status = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 巡检作业详情 ★★")
         label_show_inspection_job_status.bind("<MouseWheel>", self.proces_mouse_scroll)
         label_show_inspection_job_status.grid(row=0, column=0, padx=self.padx, pady=self.pady)
@@ -6780,6 +7176,7 @@ class StartInspectionTemplateInFrame:
         # ★host-列表
         inspection_host_treeview = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=9,
                                                 columns=("index", "host", "status", "rate_or_progress", "time"), show="headings")
+        inspection_host_treeview.bind("<MouseWheel>", self.proces_mouse_scroll)
         # 设置每一个列的宽度和对齐的方式
         inspection_host_treeview.column("index", width=60, anchor="w")
         inspection_host_treeview.column("host", width=180, anchor="w")
@@ -6882,30 +7279,38 @@ class StartInspectionTemplateInFrame:
         frame.pack()
         canvas.create_window((0, 0), window=frame, anchor='nw')
         canvas.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
+        frame.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-name
         host_obj = self.global_info.get_host_by_oid(host_job_status_obj.host_oid)
         label_host_name = tkinter.Label(frame, text="主机名称")
         label_host_name.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        label_host_name.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         entry_host_name = tkinter.Entry(frame)
         entry_host_name.insert(0, host_obj.name)  # 显示初始值，不可编辑★
         entry_host_name.grid(row=0, column=1, padx=self.padx, pady=self.pady)
+        entry_host_name.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-job_status
         label_host_job_status = tkinter.Label(frame, text="作业状态")
         label_host_job_status.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        label_host_job_status.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         status_name_list = ["unknown", "started", "completed", "part_completed", "failed"]
         combobox_job_status = ttk.Combobox(frame, values=status_name_list, state="readonly")
         combobox_job_status.current(host_job_status_obj.job_status)
         combobox_job_status.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        combobox_job_status.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-find_credential_status
         label_host_find_credential_status = tkinter.Label(frame, text="凭据验证情况")
         label_host_find_credential_status.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        label_host_find_credential_status.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         status_name_list = ["Succeed", "Timeout", "Failed"]
         combobox_find_credential_status = ttk.Combobox(frame, values=status_name_list, state="readonly")
         combobox_find_credential_status.current(host_job_status_obj.find_credential_status)
         combobox_find_credential_status.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        combobox_find_credential_status.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-time_usage
         label_host_time_usage = tkinter.Label(frame, text="执行时长(秒)")
         label_host_time_usage.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        label_host_time_usage.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         entry_host_time_usage = tkinter.Entry(frame)
         if host_job_status_obj.exec_timeout == COF_YES:
             time_usage = "执行超时"
@@ -6915,21 +7320,27 @@ class StartInspectionTemplateInFrame:
             time_usage = str(host_job_status_obj.end_time - host_job_status_obj.start_time)
         entry_host_time_usage.insert(0, time_usage)  # 显示初始值，不可编辑★
         entry_host_time_usage.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        entry_host_time_usage.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-sum_of_code_block
         label_sum_of_code_block = tkinter.Label(frame, text="巡检代码段数量")
         label_sum_of_code_block.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        label_sum_of_code_block.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         entry_sum_of_code_block = tkinter.Entry(frame)
         entry_sum_of_code_block.insert(0, host_job_status_obj.sum_of_code_block)  # 显示初始值，不可编辑★
         entry_sum_of_code_block.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        entry_sum_of_code_block.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-sum_of_code_lines
         label_sum_of_code_lines = tkinter.Label(frame, text="巡检命令总行数")
         label_sum_of_code_lines.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        label_sum_of_code_lines.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         entry_sum_of_code_lines = tkinter.Entry(frame)
         entry_sum_of_code_lines.insert(0, host_job_status_obj.sum_of_code_lines)  # 显示初始值，不可编辑★
         entry_sum_of_code_lines.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        entry_sum_of_code_lines.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-rate_or_progress
         label_rate_or_progress = tkinter.Label(frame, text="巡检命令执行进度")
         label_rate_or_progress.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        label_rate_or_progress.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         entry_rate_or_progress = tkinter.Entry(frame)
         if host_job_status_obj.sum_of_code_lines <= 0:
             rate_or_progress = 0.0
@@ -6937,6 +7348,7 @@ class StartInspectionTemplateInFrame:
             rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
         entry_rate_or_progress.insert(0, "{:.2%}".format(rate_or_progress))
         entry_rate_or_progress.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        entry_rate_or_progress.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # 显示巡检命令及输出结果
         index = 0
         for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
@@ -6959,8 +7371,10 @@ class StartInspectionTemplateInFrame:
         save_to_file_button = tkinter.Button(frame, text="保存到文件",
                                              command=lambda: self.save_to_file_inspection_host_item(pop_window, host_job_status_obj))
         save_to_file_button.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
+        save_to_file_button.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         cancel_button = tkinter.Button(frame, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
         cancel_button.grid(row=7 + index * 2, column=1, padx=self.padx, pady=self.pady)
+        cancel_button.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # 更新Frame的尺寸
         frame.update_idletasks()
         canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
@@ -7058,6 +7472,7 @@ class ListInspectionJobInFrame:
         self.nav_frame_r_widget_dict["canvas"].configure(
             scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(), self.nav_frame_r_widget_dict["frame"].winfo_height()))
         self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
+        self.nav_frame_r_widget_dict["frame"].bind("<MouseWheel>", self.proces_mouse_scroll)
 
 
 class ViewInspectionJobInFrame:
@@ -7065,9 +7480,9 @@ class ViewInspectionJobInFrame:
     在主窗口的查看资源界面，显示巡检模板执行作业的详情
     """
 
-    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None, inspection_job_record_obj=None):
+    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, inspection_job_record_obj=None):
         self.main_window = main_window
-        self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
+        self.top_frame_widget_dict = top_frame_widget_dict
         self.global_info = global_info
         self.inspection_job_record_obj = inspection_job_record_obj
         self.padx = 2
@@ -7077,92 +7492,95 @@ class ViewInspectionJobInFrame:
 
     def show(self):
         # ★进入作业详情页面★
-        for widget in self.nav_frame_r_widget_dict["frame"].winfo_children():
+        for widget in self.top_frame_widget_dict["frame"].winfo_children():
             widget.destroy()
         self.show_inspection_job_status()
-        self.add_return_button()
-        self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
+        self.add_return_button_in_top_frame()
+        self.update_top_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
 
-    def proces_mouse_scroll(self, event):
+    def proces_mouse_scroll_of_top_frame(self, event):
         if event.delta > 0:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+            self.top_frame_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
         else:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+            self.top_frame_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
 
-    def update_frame(self):
+    def update_top_frame(self):
         # 更新Frame的尺寸
-        self.nav_frame_r_widget_dict["frame"].update_idletasks()
-        self.nav_frame_r_widget_dict["canvas"].configure(
-            scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
-                          self.nav_frame_r_widget_dict["frame"].winfo_height()))
-        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
+        self.top_frame_widget_dict["frame"].update_idletasks()
+        self.top_frame_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.top_frame_widget_dict["frame"].winfo_width(),
+                          self.top_frame_widget_dict["frame"].winfo_height()))
+        self.top_frame_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        self.top_frame_widget_dict["frame"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         # 滚动条移到最开头
-        self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+        self.top_frame_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
 
-    def add_return_button(self):
+    def add_return_button_in_top_frame(self):
         # ★★添加“返回资源列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回巡检作业列表",
+        button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回巡检作业列表",
                                        command=lambda: self.main_window.list_inspection_job_of_nav_frame_r_page())
-        button_return.bind("<MouseWheel>", self.proces_mouse_scroll)
+        button_return.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
 
     def show_inspection_job_status(self):
         # ★巡检作业详情
-        label_show_inspection_job_status = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="★★ 巡检作业详情 ★★")
-        label_show_inspection_job_status.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_show_inspection_job_status = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 巡检作业详情 ★★")
+        label_show_inspection_job_status.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_show_inspection_job_status.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        label_show_inspection_job_status.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         # ★inspection_template-名称
-        label_inspection_template_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检模板名称")
-        label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检模板名称")
+        label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
-        entry_inspection_template_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], width=42)
-        entry_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_template_name = tkinter.Entry(self.top_frame_widget_dict["frame"], width=42)
+        entry_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_template_name.insert(0, self.inspection_template_obj.name)  # 显示初始值，可编辑
         entry_inspection_template_name.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_job-名称
-        label_inspection_job_name = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="巡检作业名称")
-        label_inspection_job_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_job_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检作业名称")
+        label_inspection_job_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_job_name.grid(row=2, column=0, padx=self.padx, pady=self.pady)
-        entry_inspection_job_name = tkinter.Entry(self.nav_frame_r_widget_dict["frame"], width=42)
-        entry_inspection_job_name.bind("<MouseWheel>", self.proces_mouse_scroll)
+        entry_inspection_job_name = tkinter.Entry(self.top_frame_widget_dict["frame"], width=42)
+        entry_inspection_job_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_job_name.insert(0, self.inspection_job_record_obj.name)  # 显示初始值，可编辑
         entry_inspection_job_name.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-execution_method
-        label_inspection_template_execution_method = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="execution_method")
-        label_inspection_template_execution_method.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_execution_method = tkinter.Label(self.top_frame_widget_dict["frame"], text="execution_method")
+        label_inspection_template_execution_method.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_execution_method.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         execution_method_name_list = ["无", "定时执行", "周期执行", "After"]
-        combobox_execution_method = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        combobox_execution_method = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                  values=execution_method_name_list,
                                                  state="readonly")
         combobox_execution_method.current(self.inspection_template_obj.execution_method)
         combobox_execution_method.grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-update_code_on_launch
-        label_inspection_template_update_code_on_launch = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行前更新code")
-        label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_update_code_on_launch = tkinter.Label(self.top_frame_widget_dict["frame"], text="运行前更新code")
+        label_inspection_template_update_code_on_launch.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_update_code_on_launch.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         update_code_on_launch_name_list = ["No", "Yes"]
-        combobox_update_code_on_launch = ttk.Combobox(self.nav_frame_r_widget_dict["frame"],
+        combobox_update_code_on_launch = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                       values=update_code_on_launch_name_list,
                                                       state="readonly")
         combobox_update_code_on_launch.current(self.inspection_template_obj.update_code_on_launch)
         combobox_update_code_on_launch.grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-forks
-        label_inspection_template_forks = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="运行线程数")
-        label_inspection_template_forks.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_template_forks = tkinter.Label(self.top_frame_widget_dict["frame"], text="运行线程数")
+        label_inspection_template_forks.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_forks.grid(row=5, column=0, padx=self.padx, pady=self.pady)
         sv_forks = tkinter.StringVar()
-        spinbox_inspection_template_forks = tkinter.Spinbox(self.nav_frame_r_widget_dict["frame"], from_=1, to=256, increment=1,
+        spinbox_inspection_template_forks = tkinter.Spinbox(self.top_frame_widget_dict["frame"], from_=1, to=256, increment=1,
                                                             textvariable=sv_forks)
         sv_forks.set(self.inspection_template_obj.forks)  # 显示初始值，可编辑
         spinbox_inspection_template_forks.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_job-作业完成情况
-        label_inspection_job_status = tkinter.Label(self.nav_frame_r_widget_dict["frame"], text="作业完成情况:")
-        label_inspection_job_status.bind("<MouseWheel>", self.proces_mouse_scroll)
+        label_inspection_job_status = tkinter.Label(self.top_frame_widget_dict["frame"], text="作业完成情况:")
+        label_inspection_job_status.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_job_status.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         # ★host-列表
-        inspection_host_treeview = ttk.Treeview(self.nav_frame_r_widget_dict["frame"], cursor="arrow", height=9,
+        inspection_host_treeview = ttk.Treeview(self.top_frame_widget_dict["frame"], cursor="arrow", height=9,
                                                 columns=("index", "host", "status", "rate_or_progress", "time"), show="headings")
+        inspection_host_treeview.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         # 设置每一个列的宽度和对齐的方式
         inspection_host_treeview.column("index", width=60, anchor="w")
         inspection_host_treeview.column("host", width=180, anchor="w")
@@ -7263,30 +7681,38 @@ class ViewInspectionJobInFrame:
         frame.pack()
         canvas.create_window((0, 0), window=frame, anchor='nw')
         canvas.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
+        frame.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-name
         host_obj = self.global_info.get_host_by_oid(host_job_status_obj.host_oid)
         label_host_name = tkinter.Label(frame, text="主机名称")
         label_host_name.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        label_host_name.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         entry_host_name = tkinter.Entry(frame)
         entry_host_name.insert(0, host_obj.name)  # 显示初始值，不可编辑★
         entry_host_name.grid(row=0, column=1, padx=self.padx, pady=self.pady)
+        entry_host_name.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-job_status
         label_host_job_status = tkinter.Label(frame, text="作业状态")
         label_host_job_status.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        label_host_job_status.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         status_name_list = ["unknown", "started", "completed", "part_completed", "failed"]
         combobox_job_status = ttk.Combobox(frame, values=status_name_list, state="readonly")
         combobox_job_status.current(host_job_status_obj.job_status)
         combobox_job_status.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        combobox_job_status.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-find_credential_status
         label_host_find_credential_status = tkinter.Label(frame, text="凭据验证情况")
         label_host_find_credential_status.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        label_host_find_credential_status.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         status_name_list = ["Succeed", "Timeout", "Failed"]
         combobox_find_credential_status = ttk.Combobox(frame, values=status_name_list, state="readonly")
         combobox_find_credential_status.current(host_job_status_obj.find_credential_status)
         combobox_find_credential_status.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        combobox_find_credential_status.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-time_usage
         label_host_time_usage = tkinter.Label(frame, text="执行时长(秒)")
         label_host_time_usage.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        label_host_time_usage.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         entry_host_time_usage = tkinter.Entry(frame)
         if host_job_status_obj.exec_timeout == COF_YES:
             time_usage = "执行超时"
@@ -7296,21 +7722,27 @@ class ViewInspectionJobInFrame:
             time_usage = str(host_job_status_obj.end_time - host_job_status_obj.start_time)
         entry_host_time_usage.insert(0, time_usage)  # 显示初始值，不可编辑★
         entry_host_time_usage.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        entry_host_time_usage.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-sum_of_code_block
         label_sum_of_code_block = tkinter.Label(frame, text="巡检代码段数量")
         label_sum_of_code_block.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        label_sum_of_code_block.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         entry_sum_of_code_block = tkinter.Entry(frame)
         entry_sum_of_code_block.insert(0, host_job_status_obj.sum_of_code_block)  # 显示初始值，不可编辑★
         entry_sum_of_code_block.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        entry_sum_of_code_block.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-sum_of_code_lines
         label_sum_of_code_lines = tkinter.Label(frame, text="巡检命令总行数")
         label_sum_of_code_lines.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        label_sum_of_code_lines.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         entry_sum_of_code_lines = tkinter.Entry(frame)
         entry_sum_of_code_lines.insert(0, host_job_status_obj.sum_of_code_lines)  # 显示初始值，不可编辑★
         entry_sum_of_code_lines.grid(row=5, column=1, padx=self.padx, pady=self.pady)
+        entry_sum_of_code_lines.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # Host-rate_or_progress
         label_rate_or_progress = tkinter.Label(frame, text="巡检命令执行进度")
         label_rate_or_progress.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        label_rate_or_progress.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         entry_rate_or_progress = tkinter.Entry(frame)
         if host_job_status_obj.sum_of_code_lines <= 0:
             rate_or_progress = 0.0
@@ -7318,6 +7750,7 @@ class ViewInspectionJobInFrame:
             rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
         entry_rate_or_progress.insert(0, "{:.2%}".format(rate_or_progress))
         entry_rate_or_progress.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        entry_rate_or_progress.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # 显示巡检命令及输出结果
         index = 0
         for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
@@ -7341,8 +7774,10 @@ class ViewInspectionJobInFrame:
         save_to_file_button = tkinter.Button(frame, text="保存到文件",
                                              command=lambda: self.save_to_file_inspection_host_item(pop_window, host_job_status_obj))
         save_to_file_button.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
+        save_to_file_button.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         return_button = tkinter.Button(frame, text="返回", command=lambda: self.exit_view_inspection_host_item(pop_window))
         return_button.grid(row=7 + index * 2, column=1, padx=self.padx, pady=self.pady)
+        return_button.bind("<MouseWheel>", lambda event: self.proces_mouse_scroll_on_pop_window(event, canvas))
         # 更新Frame的尺寸
         frame.update_idletasks()
         canvas.configure(scrollregion=(0, 0, frame.winfo_width(), frame.winfo_height()))
@@ -9126,15 +9561,28 @@ class Vt100OutputBlock:
 
 
 class CustomMatchObject:
-    def __init__(self, match_pattern='', foreground='', backgroun='', underline=False, underlinefg='', overstrike=False, overstrikefg='',
+    def __init__(self, match_pattern_lines='', foreground='', backgroun='', underline=False, underlinefg='', overstrike=False,
+                 overstrikefg='',
                  bold=False, italic=False):
-        self.match_pattern = match_pattern  # <str>
-        self.foreground = foreground  # <color_str> 如 '#ff00bb'
-        self.backgroun = backgroun  # <color_str> 如 '#ff00bb'
+        self.match_pattern_lines = match_pattern_lines  # <str>
+        if foreground == "":
+            self.foreground = "white"
+        else:
+            self.foreground = foreground  # <color_str> 如 '#ff00bb'
+        if backgroun == "":
+            self.backgroun = "black"
+        else:
+            self.backgroun = backgroun  # <color_str> 如 '#ff00bb'
         self.underline = underline  # <bool> <int> 置True时表示使用下划线，置False时表示不使用下划线
-        self.underlinefg = underlinefg  # <color_str> 如 '#ff00bb' 仅设置下划线时有效
+        if underlinefg == "":
+            self.underlinefg = "yellow"
+        else:
+            self.underlinefg = underlinefg  # <color_str> 如 '#ff00bb' 仅设置下划线时有效
         self.overstrike = overstrike  # <bool> <int> 置True时表示使用删除线，置False时表示不使用删除线
-        self.overstrikefg = overstrikefg  # <color_str> 如 '#ff00bb' 仅设置删除线时有效
+        if overstrikefg == "":
+            self.overstrikefg = "pink"
+        else:
+            self.overstrikefg = overstrikefg  # <color_str> 如 '#ff00bb' 仅设置删除线时有效
         self.bold = bold  # <bool>字体是否加粗，默认不加粗
         self.italic = italic  # <bool>字体是否使用斜体，默认不使用斜体
 
@@ -9210,7 +9658,7 @@ class CustomTagConfigScheme:
         print("exist tables: ", result)
         if len(result) == 0:  # 若未查询到有此表，则创建此表
             sql_list = ["create table tb_custome_tag_config_scheme_include_match_object  (scheme_oid varchar(36),",
-                        "match_pattern varchar(256),",
+                        "match_pattern_lines varchar(4096),",
                         "foreground varchar(32),",
                         "backgroun varchar(32),",
                         "underline int,",
@@ -9225,8 +9673,9 @@ class CustomTagConfigScheme:
         sql = f"delete from tb_custome_tag_config_scheme_include_match_object where scheme_oid='{self.oid}'"
         sqlite_cursor.execute(sql)  # ★先清空所有的match_obj，再重新插入（既可用于新建，又可用于更新）
         for match_obj_oid in self.custom_match_object_list:
+            match_pattern_lines_b64 = base64.b64encode(match_obj_oid.match_pattern_lines.encode("utf8")).decode("utf8")
             sql_list = [f"insert into tb_custome_tag_config_scheme_include_match_object (scheme_oid,",
-                        "match_pattern,",
+                        "match_pattern_lines,",
                         "foreground,",
                         "backgroun,",
                         "underline,",
@@ -9236,7 +9685,7 @@ class CustomTagConfigScheme:
                         "bold,",
                         "italic ) values ",
                         f"('{self.oid}',",
-                        f"'{match_obj_oid.match_pattern}',",
+                        f"'{match_pattern_lines_b64}',",
                         f"'{match_obj_oid.foreground}',",
                         f"'{match_obj_oid.backgroun}',",
                         f"{match_obj_oid.underline},",
@@ -9294,39 +9743,41 @@ class CustomTagConfigSet:
             print("CustomTagConfigSet.set_custom_tag_normal: 未找到目标主机的配色方案，已退出此函数")
             return
         for custom_match_object in scheme_obj.custom_match_object_list:
-            match_pattern = custom_match_object.match_pattern
-            ret = re.finditer(match_pattern, self.output_recv_content, re.I)
-            tag_config_name = uuid.uuid4().__str__()  # <str>
             custom_match_font = font.Font(size=self.terminal_vt100_obj.font_size,
                                           name=self.terminal_vt100_obj.font_name)
             if custom_match_object.bold:
                 custom_match_font.configure(weight="bold")
             if custom_match_object.italic:
                 custom_match_font.configure(slant="italic")
-            for ret_item in ret:
-                print(f"CustomTagConfigSet.set_custom_tag_normal: 匹配到了{match_pattern}")
-                start_index, end_index = ret_item.span()
-                start_index_count = "+" + str(start_index) + "c"
-                end_index_count = "+" + str(end_index) + "c"
-                print("CustomTagConfigSet.set_custom_tag_normal:匹配内容",
-                      self.terminal_vt100_obj.terminal_normal_text.get(self.start_index + start_index_count,
-                                                                       self.start_index + end_index_count))
-                try:
-                    # terminal_text.tag_delete("matched")
+            for match_pattern in custom_match_object.match_pattern_lines.split("\n"):
+                if match_pattern == "":
+                    continue
+                ret = re.finditer(match_pattern, self.output_recv_content, re.I)
+                tag_config_name = uuid.uuid4().__str__()  # <str>
+                for ret_item in ret:
+                    print(f"CustomTagConfigSet.set_custom_tag_normal: 匹配到了{match_pattern}")
+                    start_index, end_index = ret_item.span()
+                    start_index_count = "+" + str(start_index) + "c"
+                    end_index_count = "+" + str(end_index) + "c"
+                    print("CustomTagConfigSet.set_custom_tag_normal:匹配内容",
+                          self.terminal_vt100_obj.terminal_normal_text.get(self.start_index + start_index_count,
+                                                                           self.start_index + end_index_count))
+                    try:
+                        # terminal_text.tag_delete("matched")
 
-                    self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{tag_config_name}", self.start_index + start_index_count,
-                                                                         self.start_index + end_index_count)
-                    self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
-                                                                            foreground=custom_match_object.foreground,
-                                                                            backgroun=custom_match_object.backgroun,
-                                                                            underline=custom_match_object.underline,
-                                                                            underlinefg=custom_match_object.underlinefg,
-                                                                            overstrike=custom_match_object.overstrike,
-                                                                            overstrikefg=custom_match_object.overstrikefg,
-                                                                            font=custom_match_font)
-                except tkinter.TclError as e:
-                    print("CustomTagConfigSet.set_custom_tag_normal: 未选择文字", e)
-                    return
+                        self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{tag_config_name}", self.start_index + start_index_count,
+                                                                             self.start_index + end_index_count)
+                        self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                                foreground=custom_match_object.foreground,
+                                                                                backgroun=custom_match_object.backgroun,
+                                                                                underline=custom_match_object.underline,
+                                                                                underlinefg=custom_match_object.underlinefg,
+                                                                                overstrike=custom_match_object.overstrike,
+                                                                                overstrikefg=custom_match_object.overstrikefg,
+                                                                                font=custom_match_font)
+                    except tkinter.TclError as e:
+                        print("CustomTagConfigSet.set_custom_tag_normal: 未选择文字", e)
+                        return
 
 
 if __name__ == '__main__':
@@ -9338,4 +9789,4 @@ if __name__ == '__main__':
         project_default.save()
     global_info_obj.load_all_data_from_sqlite3()  # 项目加载完成后，再加载其他资源
     main_window_obj = MainWindow(width=800, height=480, title='CofAble', global_info=global_info_obj)  # 创建程序主界面
-    main_window_obj.show()
+    main_window_obj.show()  # 显示主界面，一切从这里开始
