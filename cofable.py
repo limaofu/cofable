@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # coding=utf-8
 # module name: cofable
-# external_dependencies:  cofnet (https://github.com/limaofu/cofnet)  &  paramiko  &  schedule
+# external_dependencies:  cofnet (https://github.com/limaofu/cofnet)  &  paramiko  &  schedule  &  pyglet
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-04
+# update: 2024-04-06
 
 """
 开发日志：
@@ -44,6 +44,7 @@
 ★. 根据字体大小，获取单个字（半角）的宽高大小，方便调整Text的宽度及高度                      2024年3月30日 完成
 ★. 支持设置主机的字符集，如utf8,gbk等  默认使用utf8
 ★. 在向Terminal终端会话粘贴内容时，如果内容有多行，需要弹出确认框，用户确认才发送要粘贴的内容    2024年4月3日 完成
+★. 支持用户自定义高亮字符设置（着色方案），支持正则表达式匹配并设置显示样式，每台主机可单独设置着色方案    2024年4月6日 完成
 
 资源操作逻辑：
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -88,6 +89,7 @@ from tkinter import colorchooser
 from multiprocessing.dummy import Pool as ThreadPool
 # external_dependencies:
 import paramiko
+import pyglet
 
 # import schedule
 
@@ -163,8 +165,14 @@ TAG_CONFIG_TYPE_CURSOR = 4
 # vt100终端tag_config_record里的字体类型
 FONT_TYPE_NORMAL = 0
 FONT_TYPE_BOLD = 1
+FONT_TYPE_ITALIC = 2
+FONT_TYPE_BOLD_ITALIC = 3
 VT100_TERMINAL_MODE_NORMAL = 0
 VT100_TERMINAL_MODE_APP = 1
+# 调用某对象的发起对象类型
+CALL_BACK_CLASS_CREATE_RESOURCE = 0
+CALL_BACK_CLASS_EDIT_RESOURCE = 1
+CALL_BACK_CLASS_LIST_RESOURCE = 2
 
 
 class Project:
@@ -2034,7 +2042,7 @@ class GlobalInfo:
     全局变量类，用于存储所有资源类的实例信息，从数据库导入数据变为内存中的类对象，以及新建的类对象追加到某个list列表中
     """
 
-    def __init__(self, sqlite3_dbfile_name="cofable_default.db"):
+    def __init__(self, sqlite3_dbfile_name="cofable_default.db", builtin_font_file_path=''):
         self.sqlite3_dbfile_name = sqlite3_dbfile_name  # 若未指定数据库文件名称，则默认为"cofable_default.db"
         self.project_obj_list = []
         self.credential_obj_list = []
@@ -2047,6 +2055,11 @@ class GlobalInfo:
         self.custome_tag_config_scheme_obj_list = []
         self.current_project_obj = None  # 需要在项目界面将某个项目设置为当前项目，才会赋值
         self.lock_sqlite3_db = threading.Lock()  # 操作本地sqlite3数据库文件的锁，同一时间段内只能有一个线程操作此数据库
+        self.builtin_font_file_path = builtin_font_file_path
+
+    def load_builtin_font_file(self):
+        pyglet.options['win32_gdi_font'] = True
+        pyglet.font.add_file(self.builtin_font_file_path)
 
     def set_sqlite3_dbfile_name(self, file_name):
         self.sqlite3_dbfile_name = file_name
@@ -2083,6 +2096,10 @@ class GlobalInfo:
                 cron_trigger1.start_crond_job()
 
     def create_builtin_custome_tag_config_scheme(self):
+        self.create_builtin_custome_tag_config_scheme_linux()
+        self.create_builtin_custome_tag_config_scheme_huawei()
+
+    def create_builtin_custome_tag_config_scheme_linux(self):
         project_obj = self.get_project_by_name("default")
         if project_obj is not None:
             project_oid = project_obj.oid
@@ -2092,31 +2109,113 @@ class GlobalInfo:
                                              oid="7d285a2c-cf94-4012-9846-19ac7ac070e1",
                                              project_oid=project_oid,
                                              global_info=self)
-        scheme_linux.custom_match_object_list = [
-            CustomMatchObject(match_pattern_lines=r'(\d{1,3}\.){3}\d{1,3}', foreground="#ff4dff",
-                              backgroun="black"),
-            CustomMatchObject(match_pattern_lines=r'([0-9a-f]{1,2}:){5}[0-9a-f]{1,3}', foreground="#ff4dff",
-                              backgroun="black"),
-            CustomMatchObject(match_pattern_lines=r'(\d{1,3}/){2,}\d{1,3}', foreground="green",
-                              backgroun="black"),
-            CustomMatchObject(match_pattern_lines=r'\bdown\b', foreground="red",
-                              backgroun="black", bold=True),
-            CustomMatchObject(match_pattern_lines=r'\bup\b', foreground="green",
-                              backgroun="black", italic=True),
-            CustomMatchObject(match_pattern_lines=r'\bundo\b', foreground="red",
-                              backgroun="black", underline=True, underlinefg="yellow"),
-            CustomMatchObject(match_pattern_lines=r'\bshutdown\b', foreground="red",
-                              backgroun="black", overstrike=True, overstrikefg='yellow'),
-            CustomMatchObject(match_pattern_lines=r'\binterface\b', foreground="cyan",
-                              backgroun="black"),
-            CustomMatchObject(match_pattern_lines=r'\benable\b', foreground="green", bold=True,
-                              backgroun="black"),
-            CustomMatchObject(match_pattern_lines=r'\bvlan[if]*', foreground="#b26904",
-                              backgroun="black"),
-            CustomMatchObject(match_pattern_lines=r'\bdefault\b' + "\n" + r"\bunknown\b", foreground="#ba7131",
-                              backgroun="black")]
+        # ★ ip-mac地址 前景色-紫色
+        match_pattern_ip_mac_addr = [r'(\d{1,3}\.){3}\d{1,3}', r'([0-9a-f]{2}:){5}[0-9a-f]{2}', r'[^:]([0-9a-f]{4}:){2}[0-9a-f]{4}[^:]',
+                                     r'([0-9a-f]{2}-){5}[0-9a-f]{2}', r'[^-]([0-9a-f]{4}-){2}[0-9a-f]{4}[^-]']  # ipv6暂未匹配
+        scheme_linux.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_ip_mac_addr), foreground="#ff4dff"))
+        # ★ 错误，禁止，关闭等词语 前景色-红色
+        match_pattern_error_disable = [r'\bdown\b', r'\berror\b', r'\bdisable\b', r'\bdisabled\b']
+        scheme_linux.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_error_disable), foreground="red"))
+        # ★ 完成，成功，开启等词语 前景色-绿色
+        match_pattern_completed_enable = [r'\bcomplete\b', r'\bcompleted\b', r'\bdone\b', r'\bfinish\b', r'\bfinished\b',
+                                          r'\bsucceed\b', r'\bsuccess\b', r'\bsuccessful\b', r'\bsuccessfully\b',
+                                          r'\benable\b', r'\benabled\b', r'\bok\b', r'\bup\b']
+        scheme_linux.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_completed_enable), foreground="green"))
+        # ★ 默认，未知等词语 前景色-棕 #ba7131
+        match_pattern_default_unknown = [r'\bdefault\b', r'\bunknow\b', r'\bunknown\b']
+        scheme_linux.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_default_unknown), foreground="#ba7131"))
+        # ★ 数字+大小（G,M,K），表示磁盘大小，网络大小 前景色-青色
+        match_pattern_disk_size_net_speed = [r'\b(\d{1,}\.){,1}\d{1,}T[b]{,1}\b', r'\b(\d{1,}\.){,1}\d{1,}G[i]{,1}[b]{,1}\b',
+                                             r'\b(\d{1,}\.){,1}\d{1,}M[i]{,1}[b]{,1}\b', r'\b(\d{1,}\.){,1}\d{1,}K[i]{,1}[b]{,1}\b']
+        scheme_linux.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed), foreground="cyan"))
+        # ★ yes,true,all 前景色-绿 #7ffd01
+        match_pattern_yes_true = [r'\byes\b', r'\btrue\b', r'\ball\b']
+        scheme_linux.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_yes_true), foreground="#7ffd01"))
+        # ★ no,false,none,null 前景色-棕 #fcc560
+        match_pattern_no_false = [r'\bno\b', r'\bfalse\b', r'\bnone\b', r'\bnul\b', r'\bnull\b']
+        scheme_linux.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_no_false), foreground="#fcc560"))
         scheme_linux.save()
         self.custome_tag_config_scheme_obj_list.append(scheme_linux)
+
+    def create_builtin_custome_tag_config_scheme_huawei(self):
+        project_obj = self.get_project_by_name("default")
+        if project_obj is not None:
+            project_oid = project_obj.oid
+        else:
+            project_oid = "None"
+        scheme_huawei = CustomTagConfigScheme(name="huawei", description="system builtin scheme for huawei network device",
+                                              oid="7d285a2c-cf94-4012-9846-19ac7ac070e2",
+                                              project_oid=project_oid,
+                                              global_info=self)
+        # ★ ip-mac地址 前景色-紫色
+        match_pattern_ip_mac_addr = [r'(\d{1,3}\.){3}\d{1,3}', r'([0-9a-f]{2}:){5}[0-9a-f]{2}', r'[^:]([0-9a-f]{4}:){2}[0-9a-f]{4}[^:]',
+                                     r'([0-9a-f]{2}-){5}[0-9a-f]{2}', r'[^-]([0-9a-f]{4}-){2}[0-9a-f]{4}[^-]']  # ipv6暂未匹配
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_ip_mac_addr), foreground="#ff4dff"))
+        # ★ 错误，禁止，关闭等词语 前景色-红色
+        match_pattern_error_disable = [r'\bdown\b', r'\berror\b', r'\bdisable\b', r'\bdisabled\b']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_error_disable), foreground="red"))
+        # ★ 完成，成功，开启等词语 前景色-绿色
+        match_pattern_completed_enable = [r'\bcomplete\b', r'\bcompleted\b', r'\bdone\b', r'\bfinish\b', r'\bfinished\b',
+                                          r'\bsucceed\b', r'\bsuccess\b', r'\bsuccessful\b', r'\bsuccessfully\b',
+                                          r'\benable\b', r'\benabled\b', r'\bok\b', r'\bup\b']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_completed_enable), foreground="green"))
+        # ★ 默认，未知等词语 前景色-棕 #ba7131
+        match_pattern_default_unknown = [r'\bdefault\b', r'\bunknow\b', r'\bunknown\b']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_default_unknown), foreground="#ba7131"))
+        # ★ 数字+大小（G,M,K），表示磁盘大小，网络大小 前景色-青色
+        match_pattern_disk_size_net_speed = [r'\b(\d{1,}\.){,1}\d{1,}T[b]{,1}\b', r'\b(\d{1,}\.){,1}\d{1,}G[i]{,1}[b]{,1}\b',
+                                             r'\b(\d{1,}\.){,1}\d{1,}M[i]{,1}[b]{,1}\b', r'\b(\d{1,}\.){,1}\d{1,}K[i]{,1}[b]{,1}\b',
+                                             r'\b\d{1,}[" "]{,1}byte[s]{,1}']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed), foreground="cyan"))
+        # ★ yes,true,all 前景色-绿 #7ffd01
+        match_pattern_yes_true = [r'\byes\b', r'\btrue\b', r'\ball\b']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_yes_true), foreground="#7ffd01"))
+        # ★ no,false,none,null 前景色-棕 #fcc560
+        match_pattern_no_false = [r'\bno\b', r'\bfalse\b', r'\bnone\b', r'\bnul\b', r'\bnull\b', r'\buntagged\b',
+                                  r'\bunassigned\b']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_no_false), foreground="#fcc560"))
+        # ★ 匹配网口名称+序号 前景色-青色
+        match_pattern_interface_number = [r'\bmeth[" "]{,1}(\d{1,3}/){2,}\d{1,3}\b',
+                                          r'\bGigabitEthernet[" "]{,1}(\d{1,3}/){2,}\d{1,3}\b',
+                                          r'\bGe[" "]{,1}(\d{1,3}/){2,}\d{1,3}\b',
+                                          r'\bEthernet[" "]{,1}(\d{1,3}/){2,}\d{1,3}\b',
+                                          r'\bvlan(if){,1}[" "]{,1}\d{1,4}\b',
+                                          r'\bnull[" "]{,1}\d{1,4}\b',
+                                          r'\b(in){,1}loop(back){,1}[" "]{,1}\d{1,4}\b']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_interface_number), foreground="cyan"))
+        # ★ 匹配 关键字 前景色-青 #0095d3
+        match_pattern_key_words = [r'\binterface[^:]\b',
+                                   r'\baaa\b',
+                                   r'\breturn\b']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_key_words), foreground="#0095d3"))
+        # ★ 匹配 undo 前景色-红 下划线
+        match_pattern_undo = [r'\bundo\b']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_undo), foreground="red", underline=True,
+                              underlinefg="pink"))
+        # ★ 匹配 shutdown 前景色-棕 #a34826 粗体
+        match_pattern_shutdown = [r'\bshutdown\b', r'\bdrop\b']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_shutdown), foreground="#a34826",
+                              bold=True))
+        scheme_huawei.save()
+        self.custome_tag_config_scheme_obj_list.append(scheme_huawei)
 
     def load_project_from_dbfile(self):
         """
@@ -3742,7 +3841,7 @@ class CreateResourceInFrame:
         elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
             self.create_inspection_template()
         elif self.resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
-            self.create_custom_tag_config()
+            self.create_custom_tag_config_scheme()
         else:
             print("<class CreateResourceInFrame> resource_type is Unknown")
         self.update_top_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
@@ -4436,7 +4535,7 @@ class CreateResourceInFrame:
         list_scrollbar.config(command=self.resource_info_dict["listbox_inspection_code_block"].yview)
         frame.grid(row=12, column=1, padx=self.padx, pady=self.pady)
 
-    def create_custom_tag_config(self):
+    def create_custom_tag_config_scheme(self):
         self.resource_info_dict["pop_window"] = self.top_frame_widget_dict["pop_window"]
         # ★创建-custom_scheme
         label_create_custom_scheme = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 创建巡检模板 ★★")
@@ -4493,11 +4592,11 @@ class CreateResourceInFrame:
         self.resource_info_dict["custome_match_obj_frame_canvas"].create_window((0, 0), window=self.resource_info_dict[
             "custome_match_obj_frame_frame"], anchor='nw')
         add_custome_match_obj_button = tkinter.Button(self.top_frame_widget_dict["frame"], text="添加匹配对象",
-                                                      command=lambda: self.create_custom_tag_config__add_custome_match_object())
+                                                      command=lambda: self.create_custom_tag_config_scheme__add_custome_match_object())
         add_custome_match_obj_button.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         custome_match_obj_frame.grid(row=5, column=0, columnspan=2, padx=self.padx, pady=self.pady)
 
-    def create_custom_tag_config__add_custome_match_object(self):
+    def create_custom_tag_config_scheme__add_custome_match_object(self):
         add_match_obj_pop_window = tkinter.Toplevel(self.resource_info_dict["pop_window"])
         add_match_obj_pop_window.title("配色方案设置")
         screen_width = add_match_obj_pop_window.winfo_screenwidth()
@@ -4509,11 +4608,12 @@ class CreateResourceInFrame:
         self.resource_info_dict["pop_window"].attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         add_match_obj_pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
-        add_match_obj_pop_window.protocol("WM_DELETE_WINDOW", lambda: self.create_custom_tag_config__on_closing_add_match_obj_pop_window(
-            add_match_obj_pop_window))
+        add_match_obj_pop_window.protocol("WM_DELETE_WINDOW",
+                                          lambda: self.create_custom_tag_config_scheme__on_closing_add_match_obj_pop_window(
+                                              add_match_obj_pop_window))
         # 添加用于设置CustomMatchObject属性的控件
         match_obj_info_dict = {}
-        label_match_pattern_lines = tkinter.Label(add_match_obj_pop_window, text="添加需要匹配的单词或正则表达式，一行一个")
+        label_match_pattern_lines = tkinter.Label(add_match_obj_pop_window, text="添加需要匹配的字符串或正则表达式，一行一个")
         label_match_pattern_lines.grid(row=0, column=0, columnspan=4, padx=self.padx, pady=self.pady, sticky="w")
         match_obj_info_dict["text_match_pattern_lines"] = tkinter.Text(add_match_obj_pop_window, height=9)
         match_obj_info_dict["text_match_pattern_lines"].grid(row=1, column=0, columnspan=4, padx=self.padx, pady=self.pady)
@@ -4524,7 +4624,7 @@ class CreateResourceInFrame:
         entry_foreground = tkinter.Entry(add_match_obj_pop_window, textvariable=match_obj_info_dict["sv_foreground"])
         entry_foreground.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         color_button_foreground = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
-                                                 command=lambda: self.create_custom_tag_config__choose_color_of_custome_match_object(
+                                                 command=lambda: self.create_custom_tag_config_scheme__choose_color_of_custome_match_object(
                                                      entry_foreground, add_match_obj_pop_window))
         color_button_foreground.grid(row=2, column=2, padx=self.padx, pady=self.pady)
         # -- 匹配字符-背景色
@@ -4534,7 +4634,7 @@ class CreateResourceInFrame:
         entry_backgroun = tkinter.Entry(add_match_obj_pop_window, textvariable=match_obj_info_dict["sv_backgroun"])
         entry_backgroun.grid(row=3, column=1, padx=self.padx, pady=self.pady)
         color_button_backgroun = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
-                                                command=lambda: self.create_custom_tag_config__choose_color_of_custome_match_object(
+                                                command=lambda: self.create_custom_tag_config_scheme__choose_color_of_custome_match_object(
                                                     entry_backgroun, add_match_obj_pop_window))
         color_button_backgroun.grid(row=3, column=2, padx=self.padx, pady=self.pady)
         # -- 匹配字符-下划线
@@ -4548,7 +4648,7 @@ class CreateResourceInFrame:
         entry_underlinefg = tkinter.Entry(add_match_obj_pop_window, textvariable=match_obj_info_dict["sv_underlinefg"])
         entry_underlinefg.grid(row=4, column=2, padx=self.padx, pady=self.pady)
         color_button_underlinefg = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
-                                                  command=lambda: self.create_custom_tag_config__choose_color_of_custome_match_object(
+                                                  command=lambda: self.create_custom_tag_config_scheme__choose_color_of_custome_match_object(
                                                       entry_underlinefg, add_match_obj_pop_window))
         color_button_underlinefg.grid(row=4, column=3, padx=self.padx, pady=self.pady)
         # -- 匹配字符-删除线
@@ -4563,7 +4663,7 @@ class CreateResourceInFrame:
         entry_overstrikefg.configure()
         entry_overstrikefg.grid(row=5, column=2, padx=self.padx, pady=self.pady)
         color_button_overstrikefg = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
-                                                   command=lambda: self.create_custom_tag_config__choose_color_of_custome_match_object(
+                                                   command=lambda: self.create_custom_tag_config_scheme__choose_color_of_custome_match_object(
                                                        entry_overstrikefg, add_match_obj_pop_window))
         color_button_overstrikefg.grid(row=5, column=3, padx=self.padx, pady=self.pady)
         # -- 匹配字符-粗体
@@ -4577,17 +4677,17 @@ class CreateResourceInFrame:
         # 最下面添加一个显示效果 暂不添加
         # 添加确定按钮
         button_ok = tkinter.Button(add_match_obj_pop_window, text="确定",
-                                   command=lambda: self.create_custom_tag_config__add_custome_match_object__ok(match_obj_info_dict,
-                                                                                                               add_match_obj_pop_window))
+                                   command=lambda: self.create_custom_tag_config_scheme__add_custome_match_object__ok(match_obj_info_dict,
+                                                                                                                      add_match_obj_pop_window))
         button_ok.grid(row=7, column=0, padx=self.padx, pady=self.pady)
         # 添加取消按钮
         button_cancel = tkinter.Button(add_match_obj_pop_window, text="取消",
-                                       command=lambda: self.create_custom_tag_config__add_custome_match_object__cancel(
+                                       command=lambda: self.create_custom_tag_config_scheme__add_custome_match_object__cancel(
                                            add_match_obj_pop_window))
         button_cancel.grid(row=7, column=1, padx=self.padx, pady=self.pady)
 
-    def create_custom_tag_config__add_custome_match_object__ok(self, match_obj_info_dict,
-                                                               add_match_obj_pop_window):
+    def create_custom_tag_config_scheme__add_custome_match_object__ok(self, match_obj_info_dict,
+                                                                      add_match_obj_pop_window):
         # 先在 custome_match_obj_frame_frame 列出刚刚添加的match_obj
         match_obj = CustomMatchObject(match_pattern_lines=match_obj_info_dict["text_match_pattern_lines"].get("1.0", tkinter.END + "-1c"),
                                       foreground=match_obj_info_dict["sv_foreground"].get(),
@@ -4600,27 +4700,27 @@ class CreateResourceInFrame:
                                       italic=match_obj_info_dict["var_ck_italic"].get()
                                       )
         self.resource_info_dict["custome_match_obj_list"].append(match_obj)
-        self.create_custom_tag_config__list_custome_match_obj_in_frame_frame()
+        self.create_custom_tag_config_scheme__list_custome_match_obj_in_frame_frame()
         # 再返回到 创建配色方案 界面
         add_match_obj_pop_window.destroy()  # 关闭子窗口
         self.resource_info_dict["pop_window"].attributes("-disabled", 0)  # 使主窗口响应
         self.resource_info_dict["pop_window"].focus_force()  # 使主窗口获得焦点
 
-    def create_custom_tag_config__add_custome_match_object__cancel(self, add_match_obj_pop_window):
+    def create_custom_tag_config_scheme__add_custome_match_object__cancel(self, add_match_obj_pop_window):
         # 返回到 创建配色方案 界面
         add_match_obj_pop_window.destroy()  # 关闭子窗口
         self.resource_info_dict["pop_window"].attributes("-disabled", 0)  # 使主窗口响应
         self.resource_info_dict["pop_window"].focus_force()  # 使主窗口获得焦点
 
-    def create_custom_tag_config__list_custome_match_obj_in_frame_frame(self):
+    def create_custom_tag_config_scheme__list_custome_match_obj_in_frame_frame(self):
         for widget in self.resource_info_dict["custome_match_obj_frame_frame"].winfo_children():
             widget.destroy()
         row = 0
         for match_obj in self.resource_info_dict["custome_match_obj_list"]:
             label_index = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"], text=str(row))
             text_demo = tkinter.Text(self.resource_info_dict["custome_match_obj_frame_frame"], fg="white",
-                                     bg="black", width=12, height=3,
-                                     font=("", 14),
+                                     bg="black", width=18, height=3,
+                                     font=("", 12),
                                      wrap=tkinter.NONE, spacing1=0, spacing2=0, spacing3=0)
             text_demo.insert(tkinter.END, match_obj.match_pattern_lines)
             label_foreground = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
@@ -4639,7 +4739,7 @@ class CreateResourceInFrame:
                 is_overstrike = "No"
             label_overstrike = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
                                              text="删除线: " + is_overstrike + "\n" + match_obj.overstrikefg)
-            custom_match_font = font.Font(size=14, name="")
+            custom_match_font = font.Font(size=12, name="")
             if match_obj.bold:
                 is_bold = "Yes"
                 custom_match_font.configure(weight="bold")
@@ -4664,18 +4764,36 @@ class CreateResourceInFrame:
                                  overstrike=match_obj.overstrike,
                                  overstrikefg=match_obj.overstrikefg,
                                  font=custom_match_font)
-            button_edit = tkinter.Button(self.resource_info_dict["custome_match_obj_frame_frame"], text="编辑")
-            button_delete = tkinter.Button(self.resource_info_dict["custome_match_obj_frame_frame"], text="删除")
+            edit_match_obj_obj = EditCustomMatchObject(top_window=self.resource_info_dict["pop_window"],
+                                                       main_window=self.main_window, call_back_class_obj=self,
+                                                       match_obj=match_obj, global_info=self.global_info,
+                                                       call_back_class=CALL_BACK_CLASS_CREATE_RESOURCE)
+            button_edit = tkinter.Button(self.resource_info_dict["custome_match_obj_frame_frame"], text="编辑",
+                                         command=edit_match_obj_obj.edit_custome_match_object)
+            delete_match_obj_obj = DeleteCustomMatchObject(call_back_class_obj=self,
+                                                           match_obj=match_obj,
+                                                           call_back_class=CALL_BACK_CLASS_CREATE_RESOURCE)
+            button_delete = tkinter.Button(self.resource_info_dict["custome_match_obj_frame_frame"], text="删除",
+                                           command=delete_match_obj_obj.delete_custome_match_object)
             label_index.grid(row=row, column=0, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_index.bind("<MouseWheel>", self.create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame)
             text_demo.grid(row=row, column=1, padx=self.padx, pady=self.pady, sticky="nswe")
             label_foreground.grid(row=row, column=2, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_foreground.bind("<MouseWheel>", self.create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame)
             label_backgroun.grid(row=row, column=3, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_backgroun.bind("<MouseWheel>", self.create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame)
             label_underline.grid(row=row, column=4, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_underline.bind("<MouseWheel>", self.create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame)
             label_overstrike.grid(row=row, column=5, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_overstrike.bind("<MouseWheel>", self.create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame)
             label_bold.grid(row=row, column=6, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_bold.bind("<MouseWheel>", self.create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame)
             label_italic.grid(row=row, column=7, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_italic.bind("<MouseWheel>", self.create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame)
             button_edit.grid(row=row, column=8, padx=self.padx, pady=self.pady, sticky="nswe")
+            button_edit.bind("<MouseWheel>", self.create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame)
             button_delete.grid(row=row, column=9, padx=self.padx, pady=self.pady, sticky="nswe")
+            button_delete.bind("<MouseWheel>", self.create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame)
             row += 1
         # 还要更新frame和canvas才可滚动
         self.resource_info_dict["custome_match_obj_frame_frame"].update_idletasks()
@@ -4683,18 +4801,20 @@ class CreateResourceInFrame:
             scrollregion=(0, 0, self.resource_info_dict["custome_match_obj_frame_frame"].winfo_width(),
                           self.resource_info_dict["custome_match_obj_frame_frame"].winfo_height()))
         self.resource_info_dict["custome_match_obj_frame_canvas"].bind("<MouseWheel>",
-                                                                       self.create_custom_tag_config__proces_mouse_scroll__frame_frame)
+                                                                       self.create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame)
+        self.resource_info_dict["custome_match_obj_frame_frame"].bind("<MouseWheel>",
+                                                                      self.create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame)
         # 滚动条移到最开头
         self.resource_info_dict["custome_match_obj_frame_canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
 
-    def create_custom_tag_config__proces_mouse_scroll__frame_frame(self, event):
+    def create_custom_tag_config_scheme__proces_mouse_scroll__frame_frame(self, event):
         if event.delta > 0:
             self.resource_info_dict["custome_match_obj_frame_canvas"].yview_scroll(-1, 'units')  # 向上移动
         else:
             self.resource_info_dict["custome_match_obj_frame_canvas"].yview_scroll(1, 'units')  # 向下移动
 
     @staticmethod
-    def create_custom_tag_config__choose_color_of_custome_match_object(entry, add_match_obj_pop_window):
+    def create_custom_tag_config_scheme__choose_color_of_custome_match_object(entry, add_match_obj_pop_window):
         add_match_obj_pop_window.focus_force()
         color = tkinter.colorchooser.askcolor()
         if color[1] is not None:
@@ -4703,10 +4823,169 @@ class CreateResourceInFrame:
             entry.configure(bg=color[1])
         add_match_obj_pop_window.focus_force()
 
-    def create_custom_tag_config__on_closing_add_match_obj_pop_window(self, pop_window):
+    def create_custom_tag_config_scheme__on_closing_add_match_obj_pop_window(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
         self.resource_info_dict["pop_window"].attributes("-disabled", 0)  # 使主窗口响应
         self.resource_info_dict["pop_window"].focus_force()  # 使主窗口获得焦点
+
+
+class DeleteCustomMatchObject:
+    def __init__(self, call_back_class_obj=None, match_obj=None, call_back_class=CALL_BACK_CLASS_EDIT_RESOURCE):
+        self.call_back_class_obj = call_back_class_obj
+        self.match_obj = match_obj
+        self.call_back_class = call_back_class
+
+    def delete_custome_match_object(self):
+        if self.call_back_class == CALL_BACK_CLASS_CREATE_RESOURCE:
+            self.call_back_class_obj.resource_info_dict["custome_match_obj_list"].remove(self.match_obj)
+            self.call_back_class_obj.create_custom_tag_config_scheme__list_custome_match_obj_in_frame_frame()
+        elif self.call_back_class == CALL_BACK_CLASS_EDIT_RESOURCE:
+            self.call_back_class_obj.resource_obj.custom_match_object_list.remove(self.match_obj)
+            self.call_back_class_obj.edit_custome_tag_config_scheme__list_custome_match_obj_in_frame_frame()
+
+
+class EditCustomMatchObject:
+    def __init__(self, top_window=None, main_window=None, match_obj=None, call_back_class_obj=None,
+                 call_back_class=CALL_BACK_CLASS_EDIT_RESOURCE, global_info=None):
+        self.top_window = top_window
+        self.main_window = main_window
+        self.match_obj = match_obj
+        self.call_back_class_obj = call_back_class_obj
+        self.call_back_class = call_back_class  # <int>
+        self.global_info = global_info
+        self.padx = 2
+        self.pady = 2
+        self.match_obj_info_dict = {}
+        self.edit_match_obj_pop_window = None
+
+    def edit_custome_match_object(self):
+        self.edit_match_obj_pop_window = tkinter.Toplevel(self.top_window)
+        self.edit_match_obj_pop_window.title("配色方案设置")
+        screen_width = self.edit_match_obj_pop_window.winfo_screenwidth()
+        screen_height = self.edit_match_obj_pop_window.winfo_screenheight()
+        width = self.main_window.nav_frame_r_width - 50
+        height = self.main_window.height - 50
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        self.edit_match_obj_pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.top_window.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.edit_match_obj_pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        self.edit_match_obj_pop_window.protocol("WM_DELETE_WINDOW", self.edit_custome_match_object__cancel)
+        # 添加用于设置CustomMatchObject属性的控件
+        label_match_pattern_lines = tkinter.Label(self.edit_match_obj_pop_window, text="添加需要匹配的单词或正则表达式，一行一个")
+        label_match_pattern_lines.grid(row=0, column=0, columnspan=4, padx=self.padx, pady=self.pady, sticky="w")
+        self.match_obj_info_dict["text_match_pattern_lines"] = tkinter.Text(self.edit_match_obj_pop_window, height=9)
+        self.match_obj_info_dict["text_match_pattern_lines"].grid(row=1, column=0, columnspan=4, padx=self.padx, pady=self.pady)
+        self.match_obj_info_dict["text_match_pattern_lines"].insert("1.0", self.match_obj.match_pattern_lines)
+        # -- 匹配字符-前景色
+        label_foreground = tkinter.Label(self.edit_match_obj_pop_window, text="匹配字符-前景色")
+        label_foreground.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        self.match_obj_info_dict["sv_foreground"] = tkinter.StringVar()
+        entry_foreground = tkinter.Entry(self.edit_match_obj_pop_window, textvariable=self.match_obj_info_dict["sv_foreground"])
+        entry_foreground.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        entry_foreground.insert(0, self.match_obj.foreground)
+        color_button_foreground = tkinter.Button(self.edit_match_obj_pop_window, text="选择颜色",
+                                                 command=lambda: self.choose_color_of_custome_match_object(entry_foreground))
+        color_button_foreground.grid(row=2, column=2, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-背景色
+        label_backgroun = tkinter.Label(self.edit_match_obj_pop_window, text="匹配字符-背景色")
+        label_backgroun.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        self.match_obj_info_dict["sv_backgroun"] = tkinter.StringVar()
+        entry_backgroun = tkinter.Entry(self.edit_match_obj_pop_window, textvariable=self.match_obj_info_dict["sv_backgroun"])
+        entry_backgroun.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        entry_backgroun.insert(0, self.match_obj.backgroun)
+        color_button_backgroun = tkinter.Button(self.edit_match_obj_pop_window, text="选择颜色",
+                                                command=lambda: self.choose_color_of_custome_match_object(entry_backgroun))
+        color_button_backgroun.grid(row=3, column=2, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-下划线
+        self.match_obj_info_dict["var_ck_underline"] = tkinter.BooleanVar()
+        ck_underline = tkinter.Checkbutton(self.edit_match_obj_pop_window, text="添加下划线",
+                                           variable=self.match_obj_info_dict["var_ck_underline"])
+        ck_underline.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        self.match_obj_info_dict["var_ck_underline"].set(self.match_obj.underline)
+        # -- 匹配字符-下划线颜色
+        label_underlinefg = tkinter.Label(self.edit_match_obj_pop_window, text="下划线颜色")
+        label_underlinefg.grid(row=4, column=1, padx=self.padx, pady=self.pady, sticky="e")
+        self.match_obj_info_dict["sv_underlinefg"] = tkinter.StringVar()
+        entry_underlinefg = tkinter.Entry(self.edit_match_obj_pop_window, textvariable=self.match_obj_info_dict["sv_underlinefg"])
+        entry_underlinefg.grid(row=4, column=2, padx=self.padx, pady=self.pady)
+        entry_underlinefg.insert(0, self.match_obj.underlinefg)
+        color_button_underlinefg = tkinter.Button(self.edit_match_obj_pop_window, text="选择颜色",
+                                                  command=lambda: self.choose_color_of_custome_match_object(entry_underlinefg))
+        color_button_underlinefg.grid(row=4, column=3, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-删除线
+        self.match_obj_info_dict["var_ck_overstrike"] = tkinter.BooleanVar()
+        ck_overstrike = tkinter.Checkbutton(self.edit_match_obj_pop_window, text="添加删除线",
+                                            variable=self.match_obj_info_dict["var_ck_overstrike"])
+        ck_overstrike.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        self.match_obj_info_dict["var_ck_overstrike"].set(self.match_obj.overstrike)
+        # -- 匹配字符-删除线颜色
+        label_overstrikefg = tkinter.Label(self.edit_match_obj_pop_window, text="删除线颜色")
+        label_overstrikefg.grid(row=5, column=1, padx=self.padx, pady=self.pady, sticky="e")
+        self.match_obj_info_dict["sv_overstrikefg"] = tkinter.StringVar()
+        entry_overstrikefg = tkinter.Entry(self.edit_match_obj_pop_window, textvariable=self.match_obj_info_dict["sv_overstrikefg"])
+        entry_overstrikefg.grid(row=5, column=2, padx=self.padx, pady=self.pady)
+        entry_overstrikefg.insert(0, self.match_obj.overstrikefg)
+        color_button_overstrikefg = tkinter.Button(self.edit_match_obj_pop_window, text="选择颜色",
+                                                   command=lambda: self.choose_color_of_custome_match_object(entry_overstrikefg))
+        color_button_overstrikefg.grid(row=5, column=3, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-粗体
+        self.match_obj_info_dict["var_ck_bold"] = tkinter.BooleanVar()
+        ck_bold = tkinter.Checkbutton(self.edit_match_obj_pop_window, text="粗体", variable=self.match_obj_info_dict["var_ck_bold"])
+        ck_bold.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        self.match_obj_info_dict["var_ck_bold"].set(self.match_obj.bold)
+        # -- 匹配字符-斜体
+        self.match_obj_info_dict["var_ck_italic"] = tkinter.BooleanVar()
+        ck_italic = tkinter.Checkbutton(self.edit_match_obj_pop_window, text="斜体", variable=self.match_obj_info_dict["var_ck_italic"])
+        ck_italic.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        self.match_obj_info_dict["var_ck_italic"].set(self.match_obj.italic)
+        # 最下面添加一个显示效果 暂不添加
+        # 添加确定按钮
+        button_ok = tkinter.Button(self.edit_match_obj_pop_window, text="确定",
+                                   command=self.edit_custome_match_object__ok)
+        button_ok.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        # 添加取消按钮
+        button_cancel = tkinter.Button(self.edit_match_obj_pop_window, text="取消",
+                                       command=self.edit_custome_match_object__cancel)
+        button_cancel.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+
+    def edit_custome_match_object__cancel(self):
+        # 返回到 创建配色方案 界面
+        self.edit_match_obj_pop_window.destroy()  # 关闭子窗口
+        self.top_window.attributes("-disabled", 0)  # 使主窗口响应
+        self.top_window.focus_force()  # 使主窗口获得焦点
+
+    def edit_custome_match_object__ok(self):
+        # 先更新信息
+        self.match_obj.update(match_pattern_lines=self.match_obj_info_dict["text_match_pattern_lines"].get("1.0", tkinter.END + "-1c"),
+                              foreground=self.match_obj_info_dict["sv_foreground"].get(),
+                              backgroun=self.match_obj_info_dict["sv_backgroun"].get(),
+                              underline=self.match_obj_info_dict["var_ck_underline"].get(),
+                              underlinefg=self.match_obj_info_dict["sv_underlinefg"].get(),
+                              overstrike=self.match_obj_info_dict["var_ck_overstrike"].get(),
+                              overstrikefg=self.match_obj_info_dict["sv_overstrikefg"].get(),
+                              bold=self.match_obj_info_dict["var_ck_bold"].get(),
+                              italic=self.match_obj_info_dict["var_ck_italic"].get()
+                              )
+        if self.call_back_class == CALL_BACK_CLASS_EDIT_RESOURCE:
+            self.call_back_class_obj.edit_custome_tag_config_scheme__list_custome_match_obj_in_frame_frame()
+        elif self.call_back_class == CALL_BACK_CLASS_CREATE_RESOURCE:
+            self.call_back_class_obj.create_custom_tag_config_scheme__list_custome_match_obj_in_frame_frame()
+        else:
+            pass
+        # 返回到 创建配色方案 界面
+        self.edit_match_obj_pop_window.destroy()  # 关闭子窗口
+        self.top_window.attributes("-disabled", 0)  # 使主窗口响应
+        self.top_window.focus_force()  # 使主窗口获得焦点
+
+    def choose_color_of_custome_match_object(self, entry):
+        self.edit_match_obj_pop_window.focus_force()
+        color = tkinter.colorchooser.askcolor()
+        if color[1] is not None:
+            entry.delete(0, tkinter.END)
+            entry.insert(0, color[1])
+            entry.configure(bg=color[1])
+        self.edit_match_obj_pop_window.focus_force()
 
 
 class ListResourceInFrame:
@@ -4784,7 +5063,8 @@ class ListResourceInFrame:
             button_edit.grid(row=index + 1, column=3, padx=self.padx, pady=self.pady)
             # 删除对象
             delete_obj = DeleteResourceInFrame(self.main_window, self.top_frame_widget_dict, self.global_info, obj,
-                                               self.resource_type)
+                                               self.resource_type, call_back_class_obj=self,
+                                               call_back_class=CALL_BACK_CLASS_LIST_RESOURCE)
             button_delete = tkinter.Button(self.top_frame_widget_dict["frame"], text="删除", command=delete_obj.show)
             button_delete.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
             button_delete.grid(row=index + 1, column=4, padx=self.padx, pady=self.pady)
@@ -4825,6 +5105,7 @@ class ViewResourceInFrame:
         self.view_width = 20
         self.padx = 2
         self.pady = 2
+        self.resource_info_dict = {}
 
     def show(self):  # 入口函数
         for widget in self.top_frame_widget_dict["frame"].winfo_children():
@@ -5355,7 +5636,7 @@ class ViewResourceInFrame:
         # ★查看-scheme
         print("查看配色方案")
         print(self.resource_obj)
-        obj_info_text = tkinter.Text(master=self.top_frame_widget_dict["frame"])  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
+        obj_info_text = tkinter.Text(master=self.top_frame_widget_dict["frame"], height=9)  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
         obj_info_text.insert(tkinter.END, "★★ 查看配色方案 ★★\n")
         # ★配色方案-名称
         scheme_name = "名称".ljust(self.view_width - 2, " ") + ": " + self.resource_obj.name + "\n"
@@ -5390,10 +5671,119 @@ class ViewResourceInFrame:
         obj_info_text.insert(tkinter.END, credential_last_modify_timestamp)
         # 显示info Text文本框
         obj_info_text.pack()
+        # 添加custome_match_obj_frame用于列出匹配对象
+        custome_match_obj_frame_width = self.main_window.nav_frame_r_width - 25
+        custome_match_obj_frame_height = self.main_window.height - 220
+        custome_match_obj_frame = tkinter.Frame(self.top_frame_widget_dict["frame"], width=custome_match_obj_frame_width,
+                                                height=custome_match_obj_frame_height, bg="pink")
+        # 在custome_match_obj_frame中添加canvas-frame滚动框
+        self.resource_info_dict["custome_match_obj_frame_scrollbar"] = tkinter.Scrollbar(custome_match_obj_frame)
+        self.resource_info_dict["custome_match_obj_frame_scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        self.resource_info_dict["custome_match_obj_frame_canvas"] = tkinter.Canvas(custome_match_obj_frame, bg="black",
+                                                                                   width=custome_match_obj_frame_width - 25,
+                                                                                   height=custome_match_obj_frame_height,
+                                                                                   yscrollcommand=self.resource_info_dict[
+                                                                                       "custome_match_obj_frame_scrollbar"].set)
+        self.resource_info_dict["custome_match_obj_frame_canvas"].pack()
+        self.resource_info_dict["custome_match_obj_frame_scrollbar"].config(
+            command=self.resource_info_dict["custome_match_obj_frame_canvas"].yview)
+        self.resource_info_dict["custome_match_obj_frame_frame"] = tkinter.Frame(self.resource_info_dict["custome_match_obj_frame_canvas"],
+                                                                                 bg="black")
+        self.resource_info_dict["custome_match_obj_frame_frame"].pack()
+        self.resource_info_dict["custome_match_obj_frame_canvas"].create_window((0, 0), window=self.resource_info_dict[
+            "custome_match_obj_frame_frame"], anchor='nw')
+        custome_match_obj_frame.pack()
+        self.list_custome_match_obj_in_frame_frame()
         # ★★添加返回“配色方案列表”按钮★★
         button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回配色方案列表",
                                        command=self.back_to_custom_tag_config_pop_window)  # 返回“配色方案列表”
         button_return.pack()
+
+    def list_custome_match_obj_in_frame_frame(self):
+        for widget in self.resource_info_dict["custome_match_obj_frame_frame"].winfo_children():
+            widget.destroy()
+        row = 0
+        for match_obj in self.resource_obj.custom_match_object_list:
+            label_index = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"], text=str(row))
+            text_demo = tkinter.Text(self.resource_info_dict["custome_match_obj_frame_frame"], fg="white",
+                                     bg="black", width=26, height=3,
+                                     font=("", 12),
+                                     wrap=tkinter.NONE, spacing1=0, spacing2=0, spacing3=0)
+            text_demo.insert(tkinter.END, match_obj.match_pattern_lines)
+            label_foreground = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                             text="前景色: \n" + match_obj.foreground)
+            label_backgroun = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                            text="背景色: \n" + match_obj.backgroun)
+            if match_obj.underline:
+                is_underline = "Yes"
+            else:
+                is_underline = "No"
+            label_underline = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                            text="下划线: " + is_underline + "\n" + match_obj.underlinefg)
+            if match_obj.overstrike:
+                is_overstrike = "Yes"
+            else:
+                is_overstrike = "No"
+            label_overstrike = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                             text="删除线: " + is_overstrike + "\n" + match_obj.overstrikefg)
+            custom_match_font = font.Font(size=12, name="")
+            if match_obj.bold:
+                is_bold = "Yes"
+                custom_match_font.configure(weight="bold")
+            else:
+                is_bold = "No"
+            label_bold = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                       text="粗体: " + "\n" + is_bold)
+            if match_obj.italic:
+                is_italic = "Yes"
+                custom_match_font.configure(slant="italic")
+            else:
+                is_italic = "No"
+            label_italic = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                         text="斜体: " + "\n" + is_italic)
+            tag_config_name = uuid.uuid4().__str__()  # <str>
+            text_demo.tag_add(f"{tag_config_name}", "1.0", tkinter.END)
+            text_demo.tag_config(f"{tag_config_name}",
+                                 foreground=match_obj.foreground,
+                                 backgroun=match_obj.backgroun,
+                                 underline=match_obj.underline,
+                                 underlinefg=match_obj.underlinefg,
+                                 overstrike=match_obj.overstrike,
+                                 overstrikefg=match_obj.overstrikefg,
+                                 font=custom_match_font)
+            label_index.grid(row=row, column=0, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_index.bind("<MouseWheel>", self.view_custom_tag_config__proces_mouse_scroll__frame_frame)
+            text_demo.grid(row=row, column=1, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_foreground.grid(row=row, column=2, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_foreground.bind("<MouseWheel>", self.view_custom_tag_config__proces_mouse_scroll__frame_frame)
+            label_backgroun.grid(row=row, column=3, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_backgroun.bind("<MouseWheel>", self.view_custom_tag_config__proces_mouse_scroll__frame_frame)
+            label_underline.grid(row=row, column=4, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_underline.bind("<MouseWheel>", self.view_custom_tag_config__proces_mouse_scroll__frame_frame)
+            label_overstrike.grid(row=row, column=5, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_overstrike.bind("<MouseWheel>", self.view_custom_tag_config__proces_mouse_scroll__frame_frame)
+            label_bold.grid(row=row, column=6, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_bold.bind("<MouseWheel>", self.view_custom_tag_config__proces_mouse_scroll__frame_frame)
+            label_italic.grid(row=row, column=7, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_italic.bind("<MouseWheel>", self.view_custom_tag_config__proces_mouse_scroll__frame_frame)
+            row += 1
+        # 还要更新frame和canvas才可滚动
+        self.resource_info_dict["custome_match_obj_frame_frame"].update_idletasks()
+        self.resource_info_dict["custome_match_obj_frame_canvas"].configure(
+            scrollregion=(0, 0, self.resource_info_dict["custome_match_obj_frame_frame"].winfo_width(),
+                          self.resource_info_dict["custome_match_obj_frame_frame"].winfo_height()))
+        self.resource_info_dict["custome_match_obj_frame_canvas"].bind("<MouseWheel>",
+                                                                       self.view_custom_tag_config__proces_mouse_scroll__frame_frame)
+        self.resource_info_dict["custome_match_obj_frame_frame"].bind("<MouseWheel>",
+                                                                      self.view_custom_tag_config__proces_mouse_scroll__frame_frame)
+        # 滚动条移到最开头
+        self.resource_info_dict["custome_match_obj_frame_canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+
+    def view_custom_tag_config__proces_mouse_scroll__frame_frame(self, event):
+        if event.delta > 0:
+            self.resource_info_dict["custome_match_obj_frame_canvas"].yview_scroll(-1, 'units')  # 向上移动
+        else:
+            self.resource_info_dict["custome_match_obj_frame_canvas"].yview_scroll(1, 'units')  # 向下移动
 
     def back_to_custom_tag_config_pop_window(self):
         self.top_frame_widget_dict["pop_window"].destroy()
@@ -6315,8 +6705,132 @@ class EditResourceInFrame:
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # 添加custome_match_obj_frame用于列出匹配对象
+        custome_match_obj_frame_width = self.main_window.nav_frame_r_width - 25
+        custome_match_obj_frame_height = self.main_window.height - 220
+        custome_match_obj_frame = tkinter.Frame(self.top_frame_widget_dict["frame"], width=custome_match_obj_frame_width,
+                                                height=custome_match_obj_frame_height, bg="pink")
+        # 在custome_match_obj_frame中添加canvas-frame滚动框
+        self.resource_info_dict["custome_match_obj_frame_scrollbar"] = tkinter.Scrollbar(custome_match_obj_frame)
+        self.resource_info_dict["custome_match_obj_frame_scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        self.resource_info_dict["custome_match_obj_frame_canvas"] = tkinter.Canvas(custome_match_obj_frame, bg="black",
+                                                                                   width=custome_match_obj_frame_width - 25,
+                                                                                   height=custome_match_obj_frame_height,
+                                                                                   yscrollcommand=self.resource_info_dict[
+                                                                                       "custome_match_obj_frame_scrollbar"].set)
+        self.resource_info_dict["custome_match_obj_frame_canvas"].pack()
+        self.resource_info_dict["custome_match_obj_frame_scrollbar"].config(
+            command=self.resource_info_dict["custome_match_obj_frame_canvas"].yview)
+        self.resource_info_dict["custome_match_obj_frame_frame"] = tkinter.Frame(self.resource_info_dict["custome_match_obj_frame_canvas"],
+                                                                                 bg="black")
+        self.resource_info_dict["custome_match_obj_frame_frame"].pack()
+        self.resource_info_dict["custome_match_obj_frame_canvas"].create_window((0, 0), window=self.resource_info_dict[
+            "custome_match_obj_frame_frame"], anchor='nw')
+        custome_match_obj_frame.grid(row=4, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+        self.edit_custome_tag_config_scheme__list_custome_match_obj_in_frame_frame()
         # ★★更新row_index
         self.current_row_index = 12
+
+    def edit_custome_tag_config_scheme__list_custome_match_obj_in_frame_frame(self):
+        for widget in self.resource_info_dict["custome_match_obj_frame_frame"].winfo_children():
+            widget.destroy()
+        row = 0
+        for match_obj in self.resource_obj.custom_match_object_list:
+            label_index = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"], text=str(row))
+            text_demo = tkinter.Text(self.resource_info_dict["custome_match_obj_frame_frame"], fg="white",
+                                     bg="black", width=18, height=3,
+                                     font=("", 12),
+                                     wrap=tkinter.NONE, spacing1=0, spacing2=0, spacing3=0)
+            text_demo.insert(tkinter.END, match_obj.match_pattern_lines)
+            label_foreground = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                             text="前景色: \n" + match_obj.foreground)
+            label_backgroun = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                            text="背景色: \n" + match_obj.backgroun)
+            if match_obj.underline:
+                is_underline = "Yes"
+            else:
+                is_underline = "No"
+            label_underline = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                            text="下划线: " + is_underline + "\n" + match_obj.underlinefg)
+            if match_obj.overstrike:
+                is_overstrike = "Yes"
+            else:
+                is_overstrike = "No"
+            label_overstrike = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                             text="删除线: " + is_overstrike + "\n" + match_obj.overstrikefg)
+            custom_match_font = font.Font(size=12, name="")
+            if match_obj.bold:
+                is_bold = "Yes"
+                custom_match_font.configure(weight="bold")
+            else:
+                is_bold = "No"
+            label_bold = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                       text="粗体: " + "\n" + is_bold)
+            if match_obj.italic:
+                is_italic = "Yes"
+                custom_match_font.configure(slant="italic")
+            else:
+                is_italic = "No"
+            label_italic = tkinter.Label(self.resource_info_dict["custome_match_obj_frame_frame"],
+                                         text="斜体: " + "\n" + is_italic)
+            tag_config_name = uuid.uuid4().__str__()  # <str>
+            text_demo.tag_add(f"{tag_config_name}", "1.0", tkinter.END)
+            text_demo.tag_config(f"{tag_config_name}",
+                                 foreground=match_obj.foreground,
+                                 backgroun=match_obj.backgroun,
+                                 underline=match_obj.underline,
+                                 underlinefg=match_obj.underlinefg,
+                                 overstrike=match_obj.overstrike,
+                                 overstrikefg=match_obj.overstrikefg,
+                                 font=custom_match_font)
+            edit_match_obj_obj = EditCustomMatchObject(top_window=self.resource_info_dict["pop_window"],
+                                                       main_window=self.main_window, call_back_class_obj=self,
+                                                       match_obj=match_obj, global_info=self.global_info,
+                                                       call_back_class=CALL_BACK_CLASS_EDIT_RESOURCE)
+            button_edit = tkinter.Button(self.resource_info_dict["custome_match_obj_frame_frame"], text="编辑",
+                                         command=edit_match_obj_obj.edit_custome_match_object)
+            delete_match_obj_obj = DeleteCustomMatchObject(call_back_class_obj=self,
+                                                           match_obj=match_obj,
+                                                           call_back_class=CALL_BACK_CLASS_EDIT_RESOURCE)
+            button_delete = tkinter.Button(self.resource_info_dict["custome_match_obj_frame_frame"], text="删除",
+                                           command=delete_match_obj_obj.delete_custome_match_object)
+            label_index.grid(row=row, column=0, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_index.bind("<MouseWheel>", self.edit_custom_tag_config__proces_mouse_scroll__frame_frame)
+            text_demo.grid(row=row, column=1, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_foreground.grid(row=row, column=2, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_foreground.bind("<MouseWheel>", self.edit_custom_tag_config__proces_mouse_scroll__frame_frame)
+            label_backgroun.grid(row=row, column=3, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_backgroun.bind("<MouseWheel>", self.edit_custom_tag_config__proces_mouse_scroll__frame_frame)
+            label_underline.grid(row=row, column=4, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_underline.bind("<MouseWheel>", self.edit_custom_tag_config__proces_mouse_scroll__frame_frame)
+            label_overstrike.grid(row=row, column=5, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_overstrike.bind("<MouseWheel>", self.edit_custom_tag_config__proces_mouse_scroll__frame_frame)
+            label_bold.grid(row=row, column=6, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_bold.bind("<MouseWheel>", self.edit_custom_tag_config__proces_mouse_scroll__frame_frame)
+            label_italic.grid(row=row, column=7, padx=self.padx, pady=self.pady, sticky="nswe")
+            label_italic.bind("<MouseWheel>", self.edit_custom_tag_config__proces_mouse_scroll__frame_frame)
+            button_edit.grid(row=row, column=8, padx=self.padx, pady=self.pady, sticky="nswe")
+            button_edit.bind("<MouseWheel>", self.edit_custom_tag_config__proces_mouse_scroll__frame_frame)
+            button_delete.grid(row=row, column=9, padx=self.padx, pady=self.pady, sticky="nswe")
+            button_delete.bind("<MouseWheel>", self.edit_custom_tag_config__proces_mouse_scroll__frame_frame)
+            row += 1
+        # 还要更新frame和canvas才可滚动
+        self.resource_info_dict["custome_match_obj_frame_frame"].update_idletasks()
+        self.resource_info_dict["custome_match_obj_frame_canvas"].configure(
+            scrollregion=(0, 0, self.resource_info_dict["custome_match_obj_frame_frame"].winfo_width(),
+                          self.resource_info_dict["custome_match_obj_frame_frame"].winfo_height()))
+        self.resource_info_dict["custome_match_obj_frame_canvas"].bind("<MouseWheel>",
+                                                                       self.edit_custom_tag_config__proces_mouse_scroll__frame_frame)
+        self.resource_info_dict["custome_match_obj_frame_frame"].bind("<MouseWheel>",
+                                                                      self.edit_custom_tag_config__proces_mouse_scroll__frame_frame)
+        # 滚动条移到最开头
+        self.resource_info_dict["custome_match_obj_frame_canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+
+    def edit_custom_tag_config__proces_mouse_scroll__frame_frame(self, event):
+        if event.delta > 0:
+            self.resource_info_dict["custome_match_obj_frame_canvas"].yview_scroll(-1, 'units')  # 向上移动
+        else:
+            self.resource_info_dict["custome_match_obj_frame_canvas"].yview_scroll(1, 'units')  # 向下移动
 
 
 class UpdateResourceInFrame:
@@ -6640,12 +7154,14 @@ class DeleteResourceInFrame:
     """
 
     def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, resource_obj=None,
-                 resource_type=RESOURCE_TYPE_PROJECT):
+                 resource_type=RESOURCE_TYPE_PROJECT, call_back_class_obj=None, call_back_class=CALL_BACK_CLASS_LIST_RESOURCE):
         self.main_window = main_window
         self.top_frame_widget_dict = top_frame_widget_dict
         self.global_info = global_info
         self.resource_obj = resource_obj
         self.resource_type = resource_type
+        self.call_back_class_obj = call_back_class_obj
+        self.call_back_class = call_back_class
 
     def show(self):  # 入口函数
         result = messagebox.askyesno("删除资源", f"是否删除'{self.resource_obj.name}'资源对象？")
@@ -6673,7 +7189,10 @@ class DeleteResourceInFrame:
                 print("<class DeleteResourceInFrame> resource_type is Unknown")
         else:
             print("用户取消了删除操作")
-            self.top_frame_widget_dict["frame"].focus_force()
+            if self.call_back_class == CALL_BACK_CLASS_LIST_RESOURCE:
+                self.top_frame_widget_dict["pop_window"].focus_force()
+            else:
+                self.top_frame_widget_dict["frame"].focus_force()
 
     def delete_project(self):
         self.global_info.delete_project_obj(self.resource_obj)
@@ -6705,7 +7224,11 @@ class DeleteResourceInFrame:
 
     def delete_custome_tag_config_scheme(self):
         self.global_info.delete_custome_tag_config_scheme_obj(self.resource_obj)
-        self.main_window.click_menu_settings_scheme_of_menu_bar_init()
+        if self.call_back_class == CALL_BACK_CLASS_LIST_RESOURCE:
+            self.call_back_class_obj.show()
+            self.top_frame_widget_dict["pop_window"].focus_force()
+        else:
+            self.main_window.click_menu_settings_scheme_of_menu_bar_init()
 
 
 class SaveResourceInMainWindow:
@@ -7834,10 +8357,10 @@ class OpenSingleTerminalVt100:
         self.host_obj = host_obj
         self.pop_window = None
         self.shell_terminal_width = 100  # <int> vt100-width
-        self.shell_terminal_height = 30  # <int> vt100-height
-        self.font_scaling_factor = 1.3  # 字体随系统的缩放倍数
+        self.shell_terminal_height = 24  # <int> vt100-height
+        self.font_family = "JetBrains Mono"  # 程序自带内置字体
         self.font_name = ''  # <str>
-        self.font_size = 14  # <int>
+        self.font_size = 12  # <int>
         self.bg_color = "black"  # <str> color
         self.fg_color = "white"  # <str> color
         self.padx = 2  # <int>
@@ -7875,7 +8398,8 @@ class OpenSingleTerminalVt100:
         self.terminal_vt100_obj = TerminalVt100(terminal_frame=terminal_frame, global_info=self.global_info, host_obj=self.host_obj,
                                                 shell_terminal_width_pixel=int(pop_win_width - 25 - self.text_pad),
                                                 shell_terminal_height_pixel=int(pop_win_height - 35 - self.text_pad),
-                                                font_size=self.font_size, font_name=self.font_name, text_pad=self.text_pad)
+                                                font_family=self.font_family, font_size=self.font_size, font_name=self.font_name,
+                                                text_pad=self.text_pad)
         self.terminal_vt100_obj.show_terminal_on_terminal_frame()
 
     def on_closing_terminal_pop_window(self):
@@ -7891,6 +8415,22 @@ class OpenSingleTerminalVt100:
         self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
 
     def get_font_mapped_width(self):
+        if self.font_family == "":
+            return self.get_font_mapped_width_songti()
+        elif self.font_family == "JetBrains Mono":
+            return self.get_font_mapped_width_jetbrains_mono()
+        else:
+            return self.font_size  # 如果都没匹配上，则返回字体大小本身
+
+    def get_font_mapped_height(self):
+        if self.font_family == "":
+            return self.get_font_mapped_height_songti()
+        elif self.font_family == "JetBrains Mono":
+            return self.get_font_mapped_height_jetbrains_mono()
+        else:
+            return self.font_size  # 如果都没匹配上，则返回字体大小本身
+
+    def get_font_mapped_width_songti(self):
         font_size_map_list_songti = [(8, 6, 11),
                                      (9, 6, 12),
                                      (10, 7, 13),
@@ -7925,7 +8465,42 @@ class OpenSingleTerminalVt100:
                 return width
         return self.font_size  # 如果都没匹配上，则返回字体大小本身
 
-    def get_font_mapped_height(self):
+    def get_font_mapped_width_jetbrains_mono(self):
+        font_size_map_list_jetbrains_mono = [(8, 7, 14),
+                                             (9, 7, 16),
+                                             (10, 8, 17),
+                                             (11, 9, 19),
+                                             (12, 10, 21),
+                                             (13, 10, 22),
+                                             (14, 11, 25),
+                                             (15, 12, 26),
+                                             (16, 13, 27),
+                                             (17, 14, 30),
+                                             (18, 14, 31),
+                                             (19, 15, 32),
+                                             (20, 16, 36),
+                                             (21, 17, 37),
+                                             (22, 17, 39),
+                                             (23, 19, 41),
+                                             (24, 19, 43),
+                                             (25, 20, 44),
+                                             (26, 21, 47),
+                                             (27, 22, 48),
+                                             (28, 22, 49),
+                                             (29, 23, 52),
+                                             (30, 24, 53),
+                                             (31, 25, 54),
+                                             (32, 26, 57),
+                                             (33, 26, 58),
+                                             (34, 27, 59),
+                                             (35, 28, 62),
+                                             (36, 29, 63)]
+        for size, width, height in font_size_map_list_jetbrains_mono:
+            if size == self.font_size:
+                return width
+        return self.font_size  # 如果都没匹配上，则返回字体大小本身
+
+    def get_font_mapped_height_songti(self):
         font_size_map_list_songti = [(8, 6, 11),
                                      (9, 6, 12),
                                      (10, 7, 13),
@@ -7960,6 +8535,41 @@ class OpenSingleTerminalVt100:
                 return height
         return self.font_size  # 如果都没匹配上，则返回字体大小本身
 
+    def get_font_mapped_height_jetbrains_mono(self):
+        font_size_map_list_jetbrains_mono = [(8, 7, 14),
+                                             (9, 7, 16),
+                                             (10, 8, 17),
+                                             (11, 9, 19),
+                                             (12, 10, 21),
+                                             (13, 10, 22),
+                                             (14, 11, 25),
+                                             (15, 12, 26),
+                                             (16, 13, 27),
+                                             (17, 14, 30),
+                                             (18, 14, 31),
+                                             (19, 15, 32),
+                                             (20, 16, 36),
+                                             (21, 17, 37),
+                                             (22, 17, 39),
+                                             (23, 19, 41),
+                                             (24, 19, 43),
+                                             (25, 20, 44),
+                                             (26, 21, 47),
+                                             (27, 22, 48),
+                                             (28, 22, 49),
+                                             (29, 23, 52),
+                                             (30, 24, 53),
+                                             (31, 25, 54),
+                                             (32, 26, 57),
+                                             (33, 26, 58),
+                                             (34, 27, 59),
+                                             (35, 28, 62),
+                                             (36, 29, 63)]
+        for size, width, height in font_size_map_list_jetbrains_mono:
+            if size == self.font_size:
+                return height
+        return self.font_size  # 如果都没匹配上，则返回字体大小本身
+
 
 class TagConfigRecord:
     def __init__(self, tag_config_name='default', font_type=FONT_TYPE_NORMAL, terminal_text=None):
@@ -7985,11 +8595,12 @@ class TerminalVt100:
     """
 
     def __init__(self, terminal_frame=None, shell_terminal_width_pixel=1008, shell_terminal_height_pixel=560, global_info=None,
-                 host_obj=None, font_size=14, font_name='', bg_color="black", fg_color="white", text_pad=4):
+                 host_obj=None, font_size=14, font_family='', font_name='', bg_color="black", fg_color="white", text_pad=4):
         # self.shell_terminal_width = shell_terminal_width  # <int> vt100-width
         # self.shell_terminal_height = shell_terminal_height  # <int> vt100-height
         self.shell_terminal_width_pixel = shell_terminal_width_pixel  # <int> self.terminal_text-width
         self.shell_terminal_height_pixel = shell_terminal_height_pixel  # <int> self.terminal_text-height
+        self.font_family = font_family  # <str>
         self.font_name = font_name  # <str>
         self.font_size = font_size  # <int>
         self.bg_color = bg_color  # <str> color
@@ -8016,6 +8627,22 @@ class TerminalVt100:
         self.before_recv_text_index = tkinter.CURRENT  # <str>默认值为 current
 
     def get_font_mapped_width(self):
+        if self.font_family == "":
+            return self.get_font_mapped_width_songti()
+        elif self.font_family == "JetBrains Mono":
+            return self.get_font_mapped_width_jetbrains_mono()
+        else:
+            return self.font_size  # 如果都没匹配上，则返回字体大小本身
+
+    def get_font_mapped_height(self):
+        if self.font_family == "":
+            return self.get_font_mapped_height_songti()
+        elif self.font_family == "JetBrains Mono":
+            return self.get_font_mapped_height_jetbrains_mono()
+        else:
+            return self.font_size  # 如果都没匹配上，则返回字体大小本身
+
+    def get_font_mapped_width_songti(self):
         font_size_map_list_songti = [(8, 6, 11),
                                      (9, 6, 12),
                                      (10, 7, 13),
@@ -8050,7 +8677,42 @@ class TerminalVt100:
                 return width
         return self.font_size  # 如果都没匹配上，则返回字体大小本身
 
-    def get_font_mapped_height(self):
+    def get_font_mapped_width_jetbrains_mono(self):
+        font_size_map_list_jetbrains_mono = [(8, 7, 14),
+                                             (9, 7, 16),
+                                             (10, 8, 17),
+                                             (11, 9, 19),
+                                             (12, 10, 21),
+                                             (13, 10, 22),
+                                             (14, 11, 25),
+                                             (15, 12, 26),
+                                             (16, 13, 27),
+                                             (17, 14, 30),
+                                             (18, 14, 31),
+                                             (19, 15, 32),
+                                             (20, 16, 36),
+                                             (21, 17, 37),
+                                             (22, 17, 39),
+                                             (23, 19, 41),
+                                             (24, 19, 43),
+                                             (25, 20, 44),
+                                             (26, 21, 47),
+                                             (27, 22, 48),
+                                             (28, 22, 49),
+                                             (29, 23, 52),
+                                             (30, 24, 53),
+                                             (31, 25, 54),
+                                             (32, 26, 57),
+                                             (33, 26, 58),
+                                             (34, 27, 59),
+                                             (35, 28, 62),
+                                             (36, 29, 63)]
+        for size, width, height in font_size_map_list_jetbrains_mono:
+            if size == self.font_size:
+                return width
+        return self.font_size  # 如果都没匹配上，则返回字体大小本身
+
+    def get_font_mapped_height_songti(self):
         font_size_map_list_songti = [(8, 6, 11),
                                      (9, 6, 12),
                                      (10, 7, 13),
@@ -8081,6 +8743,41 @@ class TerminalVt100:
                                      (35, 24, 47),
                                      (36, 24, 48)]
         for size, width, height in font_size_map_list_songti:
+            if size == self.font_size:
+                return height
+        return self.font_size  # 如果都没匹配上，则返回字体大小本身
+
+    def get_font_mapped_height_jetbrains_mono(self):
+        font_size_map_list_jetbrains_mono = [(8, 7, 14),
+                                             (9, 7, 16),
+                                             (10, 8, 17),
+                                             (11, 9, 19),
+                                             (12, 10, 21),
+                                             (13, 10, 22),
+                                             (14, 11, 25),
+                                             (15, 12, 26),
+                                             (16, 13, 27),
+                                             (17, 14, 30),
+                                             (18, 14, 31),
+                                             (19, 15, 32),
+                                             (20, 16, 36),
+                                             (21, 17, 37),
+                                             (22, 17, 39),
+                                             (23, 19, 41),
+                                             (24, 19, 43),
+                                             (25, 20, 44),
+                                             (26, 21, 47),
+                                             (27, 22, 48),
+                                             (28, 22, 49),
+                                             (29, 23, 52),
+                                             (30, 24, 53),
+                                             (31, 25, 54),
+                                             (32, 26, 57),
+                                             (33, 26, 58),
+                                             (34, 27, 59),
+                                             (35, 28, 62),
+                                             (36, 29, 63)]
+        for size, width, height in font_size_map_list_jetbrains_mono:
             if size == self.font_size:
                 return height
         return self.font_size  # 如果都没匹配上，则返回字体大小本身
@@ -8140,13 +8837,14 @@ class TerminalVt100:
                         height=self.shell_terminal_height_pixel + self.text_pad)
         text_width = int(self.shell_terminal_width_pixel // self.get_font_mapped_width())
         text_height = int(self.shell_terminal_height_pixel // self.get_font_mapped_height())
+        output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
         self.terminal_normal_text = tkinter.Text(master=self.terminal_frame, yscrollcommand=scrollbar.set,
                                                  width=text_width, height=text_height, borderwidth=0,
-                                                 font=(self.font_name, self.font_size), bg=self.bg_color, fg=self.fg_color,
+                                                 font=output_block_font_normal, bg=self.bg_color, fg=self.fg_color,
                                                  wrap=tkinter.WORD, spacing1=0, spacing2=0, spacing3=0)
         self.terminal_application_text = tkinter.Text(master=self.terminal_frame,
                                                       width=text_width, height=text_height, borderwidth=0,
-                                                      font=(self.font_name, self.font_size), bg=self.bg_color, fg=self.fg_color,
+                                                      font=output_block_font_normal, bg=self.bg_color, fg=self.fg_color,
                                                       wrap=tkinter.WORD, spacing1=0, spacing2=0, spacing3=0)
         # self.terminal_normal_text.pack()  # 显示Text控件，self.terminal_application_text暂时不显示
         self.terminal_normal_text.place(x=0, y=0, width=self.shell_terminal_width_pixel + self.text_pad,
@@ -8201,8 +8899,8 @@ class TerminalVt100:
         self.terminal_normal_text.delete("1.0", tkinter.END)
         self.terminal_application_text.delete("1.0", tkinter.END)
         print("TerminalVt100.destroy_all: 开始清理 上面是 self.terminal_application_text.delete, tkinter.END)")
-        for widget in self.terminal_frame.winfo_children():
-            widget.destroy()
+        # for widget in self.terminal_frame.winfo_children():
+        #     widget.destroy()
         print("TerminalVt100.destroy_all: 清理完成")
 
     @staticmethod
@@ -8529,11 +9227,19 @@ class TerminalVt100:
     def reset_text_tag_config_font_size(self):
         for tag_config_record in self.tag_config_record_list:
             if tag_config_record.font_type == FONT_TYPE_NORMAL:
-                output_block_font_normal = font.Font(size=self.font_size, name=self.font_name)
+                output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
                 tag_config_record.terminal_text.tag_config(f"{tag_config_record.tag_config_name}", font=output_block_font_normal)
             elif tag_config_record.font_type == FONT_TYPE_BOLD:
-                output_block_font_bold = font.Font(weight='bold', size=self.font_size, name=self.font_name)
+                output_block_font_bold = font.Font(weight='bold', size=self.font_size, family=self.font_family)
                 tag_config_record.terminal_text.tag_config(f"{tag_config_record.tag_config_name}", font=output_block_font_bold)
+            elif tag_config_record.font_type == FONT_TYPE_ITALIC:
+                output_block_font_italic = font.Font(size=self.font_size, family=self.font_family, slant="italic")
+                tag_config_record.terminal_text.tag_config(f"{tag_config_record.tag_config_name}", font=output_block_font_italic)
+            elif tag_config_record.font_type == FONT_TYPE_BOLD_ITALIC:
+                output_block_font_bold_italic = font.Font(weight='bold', size=self.font_size, family=self.font_family, slant="italic")
+                tag_config_record.terminal_text.tag_config(f"{tag_config_record.tag_config_name}", font=output_block_font_bold_italic)
+            else:
+                pass
 
     def reset_ssh_shell_size(self):
         self.ssh_shell.resize_pty(width=int(self.shell_terminal_width_pixel // self.get_font_mapped_width()),
@@ -8565,7 +9271,7 @@ class TerminalVt100:
                 cred = self.find_ssh_credential(self.host_obj)
             except Exception as e:
                 print("TerminalVt100.back_end_thread_func: 查找可用的凭据错误，", e)
-                output_block_font_normal = font.Font(size=self.font_size, name=self.font_name)
+                output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
                 try:
                     self.terminal_normal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color, spacing1=0,
                                                          spacing2=0,
@@ -8580,7 +9286,7 @@ class TerminalVt100:
                 return
             if cred is None:
                 print("TerminalVt100.back_end_thread_func: Credential is None, Could not find correct credential")
-                output_block_font_normal = font.Font(size=self.font_size, name=self.font_name)
+                output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
                 try:
                     self.terminal_normal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color, spacing1=0,
                                                          spacing2=0,
@@ -8664,13 +9370,13 @@ class TerminalVt100:
         :return:
         """
         # 先创建一个默认的terminal_application_text显示属性tag
-        output_block_font_normal = font.Font(size=self.font_size, name=self.font_name)
+        output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
         self.terminal_application_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
                                                   font=output_block_font_normal,
                                                   spacing1=0, spacing2=0, spacing3=0)
         self.tag_config_record_list.append(TagConfigRecord("default", FONT_TYPE_NORMAL, self.terminal_application_text))
         # 先创建一个默认的terminal_normal_text显示属性tag
-        output_block_font_normal = font.Font(size=self.font_size, name=self.font_name)
+        output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
         self.terminal_normal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
                                              font=output_block_font_normal,
                                              spacing1=0, spacing2=0, spacing3=0)
@@ -8986,7 +9692,8 @@ class TerminalVt100:
         custom_tag_config_obj = CustomTagConfigSet(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
                                                    start_index=self.before_recv_text_index, host_obj=self.host_obj,
                                                    terminal_mode=VT100_TERMINAL_MODE_NORMAL, global_info=self.global_info)
-        custom_tag_config_obj.set_custom_tag()
+        set_custom_tag_thread = threading.Thread(target=custom_tag_config_obj.set_custom_tag)
+        set_custom_tag_thread.start()
         self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
         self.terminal_normal_text.focus_force()
 
@@ -9471,7 +10178,7 @@ class Vt100OutputBlock:
             # 字体设置
             elif int(ctrl_seq_seg) == 1:  # 粗体
                 output_block_font_bold = font.Font(weight='bold', size=self.terminal_vt100_obj.font_size,
-                                                   name=self.terminal_vt100_obj.font_name)
+                                                   family=self.terminal_vt100_obj.font_family)
                 self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", font=output_block_font_bold)
                 already_set_font = True
             elif int(ctrl_seq_seg) == 4:  # 下划线
@@ -9483,7 +10190,7 @@ class Vt100OutputBlock:
             else:
                 pass
         if not already_set_font:
-            output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, name=self.terminal_vt100_obj.font_name)
+            output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
             self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", font=output_block_font_normal)
             self.terminal_vt100_obj.tag_config_record_list.append(
                 TagConfigRecord(self.output_block_tag_config_name, FONT_TYPE_NORMAL, self.terminal_vt100_obj.terminal_normal_text))
@@ -9537,7 +10244,7 @@ class Vt100OutputBlock:
             # 字体设置
             elif int(ctrl_seq_seg) == 1:  # 粗体
                 output_block_font_bold = font.Font(weight='bold', size=self.terminal_vt100_obj.font_size,
-                                                   name=self.terminal_vt100_obj.font_name)
+                                                   family=self.terminal_vt100_obj.font_family)
                 self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
                                                                              font=output_block_font_bold)
                 already_set_font = True
@@ -9550,7 +10257,7 @@ class Vt100OutputBlock:
             else:
                 pass
         if not already_set_font:
-            output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, name=self.terminal_vt100_obj.font_name)
+            output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
             self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
                                                                          font=output_block_font_normal)
             self.terminal_vt100_obj.tag_config_record_list.append(
@@ -9562,8 +10269,7 @@ class Vt100OutputBlock:
 
 class CustomMatchObject:
     def __init__(self, match_pattern_lines='', foreground='', backgroun='', underline=False, underlinefg='', overstrike=False,
-                 overstrikefg='',
-                 bold=False, italic=False):
+                 overstrikefg='', bold=False, italic=False):
         self.match_pattern_lines = match_pattern_lines  # <str>
         if foreground == "":
             self.foreground = "white"
@@ -9585,6 +10291,27 @@ class CustomMatchObject:
             self.overstrikefg = overstrikefg  # <color_str> 如 '#ff00bb' 仅设置删除线时有效
         self.bold = bold  # <bool>字体是否加粗，默认不加粗
         self.italic = italic  # <bool>字体是否使用斜体，默认不使用斜体
+
+    def update(self, match_pattern_lines=None, foreground=None, backgroun=None, underline=None, underlinefg=None, overstrike=None,
+               overstrikefg=None, bold=None, italic=None):
+        if match_pattern_lines is not None:
+            self.match_pattern_lines = match_pattern_lines  # <str>
+        if foreground is not None:
+            self.foreground = foreground  # <color_str> 如 '#ff00bb'
+        if backgroun is not None:
+            self.backgroun = backgroun  # <color_str> 如 '#ff00bb'
+        if underline is not None:
+            self.underline = underline  # <bool> <int> 置True时表示使用下划线，置False时表示不使用下划线
+        if underlinefg is not None:
+            self.underlinefg = underlinefg  # <color_str> 如 '#ff00bb' 仅设置下划线时有效
+        if overstrike is not None:
+            self.overstrike = overstrike  # <bool> <int> 置True时表示使用删除线，置False时表示不使用删除线
+        if overstrikefg is not None:
+            self.overstrikefg = "pink"
+        if bold is not None:
+            self.bold = bold  # <bool>字体是否加粗，默认不加粗
+        if italic is not None:
+            self.italic = italic  # <bool>字体是否使用斜体，默认不使用斜体
 
 
 class CustomTagConfigScheme:
@@ -9743,12 +10470,16 @@ class CustomTagConfigSet:
             print("CustomTagConfigSet.set_custom_tag_normal: 未找到目标主机的配色方案，已退出此函数")
             return
         for custom_match_object in scheme_obj.custom_match_object_list:
-            custom_match_font = font.Font(size=self.terminal_vt100_obj.font_size,
-                                          name=self.terminal_vt100_obj.font_name)
+            # size=self.terminal_vt100_obj.font_size,
+            # name=self.terminal_vt100_obj.font_name
+            custom_match_font = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
+            font_type = FONT_TYPE_NORMAL
             if custom_match_object.bold:
                 custom_match_font.configure(weight="bold")
+                font_type += 1
             if custom_match_object.italic:
                 custom_match_font.configure(slant="italic")
+                font_type += 2
             for match_pattern in custom_match_object.match_pattern_lines.split("\n"):
                 if match_pattern == "":
                     continue
@@ -9759,11 +10490,11 @@ class CustomTagConfigSet:
                     start_index, end_index = ret_item.span()
                     start_index_count = "+" + str(start_index) + "c"
                     end_index_count = "+" + str(end_index) + "c"
-                    print("CustomTagConfigSet.set_custom_tag_normal:匹配内容",
-                          self.terminal_vt100_obj.terminal_normal_text.get(self.start_index + start_index_count,
-                                                                           self.start_index + end_index_count))
                     try:
                         # terminal_text.tag_delete("matched")
+                        print("CustomTagConfigSet.set_custom_tag_normal:匹配内容",
+                              self.terminal_vt100_obj.terminal_normal_text.get(self.start_index + start_index_count,
+                                                                               self.start_index + end_index_count))
 
                         self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{tag_config_name}", self.start_index + start_index_count,
                                                                              self.start_index + end_index_count)
@@ -9775,18 +10506,24 @@ class CustomTagConfigSet:
                                                                                 overstrike=custom_match_object.overstrike,
                                                                                 overstrikefg=custom_match_object.overstrikefg,
                                                                                 font=custom_match_font)
+                        self.terminal_vt100_obj.tag_config_record_list.append(
+                            TagConfigRecord(tag_config_name, font_type, self.terminal_vt100_obj.terminal_normal_text))
                     except tkinter.TclError as e:
                         print("CustomTagConfigSet.set_custom_tag_normal: 未选择文字", e)
                         return
 
 
 if __name__ == '__main__':
-    global_info_obj = GlobalInfo()  # 创建全局信息类，用于存储所有资源类的对象，（若未指定数据库文件名称，则默认为"cofable_default.db"）
+    # 创建全局信息类，用于存储所有资源类的对象，（若未指定数据库文件名称，则默认为"cofable_default.db"）
+    builtin_font_file_path1 = os.path.join(os.path.dirname(__file__), "builtin_resource", "JetBrainsMono-Regular.ttf")
+    global_info_obj = GlobalInfo(builtin_font_file_path=builtin_font_file_path1)
+    print("当前程序路径:", __file__)
     global_info_obj.project_obj_list = global_info_obj.load_project_from_dbfile()  # 首先加载数据库，加载项目资源
     if len(global_info_obj.project_obj_list) == 0:  # 如果项目为空，默认先自动创建一个名为default的项目
         project_default = Project(global_info=global_info_obj)
         global_info_obj.project_obj_list.append(project_default)
         project_default.save()
     global_info_obj.load_all_data_from_sqlite3()  # 项目加载完成后，再加载其他资源
+    global_info_obj.load_builtin_font_file()  # 加载程序内置字体文件 family="JetBrains Mono"
     main_window_obj = MainWindow(width=800, height=480, title='CofAble', global_info=global_info_obj)  # 创建程序主界面
     main_window_obj.show()  # 显示主界面，一切从这里开始
