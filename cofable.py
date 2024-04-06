@@ -4674,7 +4674,6 @@ class CreateResourceInFrame:
         match_obj_info_dict["var_ck_italic"] = tkinter.BooleanVar()
         ck_italic = tkinter.Checkbutton(add_match_obj_pop_window, text="斜体", variable=match_obj_info_dict["var_ck_italic"])
         ck_italic.grid(row=6, column=1, padx=self.padx, pady=self.pady)
-        # 最下面添加一个显示效果 暂不添加
         # 添加确定按钮
         button_ok = tkinter.Button(add_match_obj_pop_window, text="确定",
                                    command=lambda: self.create_custom_tag_config_scheme__add_custome_match_object__ok(match_obj_info_dict,
@@ -4860,11 +4859,11 @@ class EditCustomMatchObject:
 
     def edit_custome_match_object(self):
         self.edit_match_obj_pop_window = tkinter.Toplevel(self.top_window)
-        self.edit_match_obj_pop_window.title("配色方案设置")
+        self.edit_match_obj_pop_window.title("编辑匹配对象")
         screen_width = self.edit_match_obj_pop_window.winfo_screenwidth()
         screen_height = self.edit_match_obj_pop_window.winfo_screenheight()
         width = self.main_window.nav_frame_r_width - 50
-        height = self.main_window.height - 50
+        height = self.main_window.height - 25
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         self.edit_match_obj_pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.top_window.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
@@ -4884,6 +4883,7 @@ class EditCustomMatchObject:
         entry_foreground = tkinter.Entry(self.edit_match_obj_pop_window, textvariable=self.match_obj_info_dict["sv_foreground"])
         entry_foreground.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         entry_foreground.insert(0, self.match_obj.foreground)
+        entry_foreground.configure(bg=self.match_obj.foreground)
         color_button_foreground = tkinter.Button(self.edit_match_obj_pop_window, text="选择颜色",
                                                  command=lambda: self.choose_color_of_custome_match_object(entry_foreground))
         color_button_foreground.grid(row=2, column=2, padx=self.padx, pady=self.pady)
@@ -4894,6 +4894,7 @@ class EditCustomMatchObject:
         entry_backgroun = tkinter.Entry(self.edit_match_obj_pop_window, textvariable=self.match_obj_info_dict["sv_backgroun"])
         entry_backgroun.grid(row=3, column=1, padx=self.padx, pady=self.pady)
         entry_backgroun.insert(0, self.match_obj.backgroun)
+        entry_backgroun.configure(bg=self.match_obj.backgroun)
         color_button_backgroun = tkinter.Button(self.edit_match_obj_pop_window, text="选择颜色",
                                                 command=lambda: self.choose_color_of_custome_match_object(entry_backgroun))
         color_button_backgroun.grid(row=3, column=2, padx=self.padx, pady=self.pady)
@@ -4910,6 +4911,7 @@ class EditCustomMatchObject:
         entry_underlinefg = tkinter.Entry(self.edit_match_obj_pop_window, textvariable=self.match_obj_info_dict["sv_underlinefg"])
         entry_underlinefg.grid(row=4, column=2, padx=self.padx, pady=self.pady)
         entry_underlinefg.insert(0, self.match_obj.underlinefg)
+        entry_underlinefg.configure(bg=self.match_obj.underlinefg)
         color_button_underlinefg = tkinter.Button(self.edit_match_obj_pop_window, text="选择颜色",
                                                   command=lambda: self.choose_color_of_custome_match_object(entry_underlinefg))
         color_button_underlinefg.grid(row=4, column=3, padx=self.padx, pady=self.pady)
@@ -4926,6 +4928,7 @@ class EditCustomMatchObject:
         entry_overstrikefg = tkinter.Entry(self.edit_match_obj_pop_window, textvariable=self.match_obj_info_dict["sv_overstrikefg"])
         entry_overstrikefg.grid(row=5, column=2, padx=self.padx, pady=self.pady)
         entry_overstrikefg.insert(0, self.match_obj.overstrikefg)
+        entry_overstrikefg.configure(bg=self.match_obj.overstrikefg)
         color_button_overstrikefg = tkinter.Button(self.edit_match_obj_pop_window, text="选择颜色",
                                                    command=lambda: self.choose_color_of_custome_match_object(entry_overstrikefg))
         color_button_overstrikefg.grid(row=5, column=3, padx=self.padx, pady=self.pady)
@@ -4939,7 +4942,6 @@ class EditCustomMatchObject:
         ck_italic = tkinter.Checkbutton(self.edit_match_obj_pop_window, text="斜体", variable=self.match_obj_info_dict["var_ck_italic"])
         ck_italic.grid(row=6, column=1, padx=self.padx, pady=self.pady)
         self.match_obj_info_dict["var_ck_italic"].set(self.match_obj.italic)
-        # 最下面添加一个显示效果 暂不添加
         # 添加确定按钮
         button_ok = tkinter.Button(self.edit_match_obj_pop_window, text="确定",
                                    command=self.edit_custome_match_object__ok)
@@ -6706,6 +6708,9 @@ class EditResourceInFrame:
         self.resource_info_dict["combobox_project"].current(project_obj_index)  # 显示初始值，可重新选择
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # 添加custome_match_obj_frame用于列出匹配对象
+        add_custome_match_obj_button = tkinter.Button(self.top_frame_widget_dict["frame"], text="添加匹配对象",
+                                                      command=lambda: self.edit_custom_tag_config_scheme__add_custome_match_object())
+        add_custome_match_obj_button.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         custome_match_obj_frame_width = self.main_window.nav_frame_r_width - 25
         custome_match_obj_frame_height = self.main_window.height - 220
         custome_match_obj_frame = tkinter.Frame(self.top_frame_widget_dict["frame"], width=custome_match_obj_frame_width,
@@ -6726,10 +6731,135 @@ class EditResourceInFrame:
         self.resource_info_dict["custome_match_obj_frame_frame"].pack()
         self.resource_info_dict["custome_match_obj_frame_canvas"].create_window((0, 0), window=self.resource_info_dict[
             "custome_match_obj_frame_frame"], anchor='nw')
-        custome_match_obj_frame.grid(row=4, column=0, columnspan=2, padx=self.padx, pady=self.pady)
+        custome_match_obj_frame.grid(row=5, column=0, columnspan=2, padx=self.padx, pady=self.pady)
         self.edit_custome_tag_config_scheme__list_custome_match_obj_in_frame_frame()
         # ★★更新row_index
-        self.current_row_index = 12
+        self.current_row_index = 5
+
+    def edit_custom_tag_config_scheme__add_custome_match_object(self):
+        add_match_obj_pop_window = tkinter.Toplevel(self.resource_info_dict["pop_window"])
+        add_match_obj_pop_window.title("配色方案设置")
+        screen_width = add_match_obj_pop_window.winfo_screenwidth()
+        screen_height = add_match_obj_pop_window.winfo_screenheight()
+        width = self.main_window.nav_frame_r_width - 50
+        height = self.main_window.height - 50
+        win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
+        add_match_obj_pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
+        self.resource_info_dict["pop_window"].attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        add_match_obj_pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        add_match_obj_pop_window.protocol("WM_DELETE_WINDOW",
+                                          lambda: self.edit_custom_tag_config_scheme__add_custome_match_object__cancel(
+                                              add_match_obj_pop_window))
+        # 添加用于设置CustomMatchObject属性的控件
+        match_obj_info_dict = {}
+        label_match_pattern_lines = tkinter.Label(add_match_obj_pop_window, text="添加需要匹配的字符串或正则表达式，一行一个")
+        label_match_pattern_lines.grid(row=0, column=0, columnspan=4, padx=self.padx, pady=self.pady, sticky="w")
+        match_obj_info_dict["text_match_pattern_lines"] = tkinter.Text(add_match_obj_pop_window, height=9)
+        match_obj_info_dict["text_match_pattern_lines"].grid(row=1, column=0, columnspan=4, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-前景色
+        label_foreground = tkinter.Label(add_match_obj_pop_window, text="匹配字符-前景色")
+        label_foreground.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        match_obj_info_dict["sv_foreground"] = tkinter.StringVar()
+        entry_foreground = tkinter.Entry(add_match_obj_pop_window, textvariable=match_obj_info_dict["sv_foreground"])
+        entry_foreground.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        color_button_foreground = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
+                                                 command=lambda: self.edit_custom_tag_config_scheme__choose_color_of_custome_match_object(
+                                                     entry_foreground, add_match_obj_pop_window))
+        color_button_foreground.grid(row=2, column=2, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-背景色
+        label_backgroun = tkinter.Label(add_match_obj_pop_window, text="匹配字符-背景色")
+        label_backgroun.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        match_obj_info_dict["sv_backgroun"] = tkinter.StringVar()
+        entry_backgroun = tkinter.Entry(add_match_obj_pop_window, textvariable=match_obj_info_dict["sv_backgroun"])
+        entry_backgroun.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        color_button_backgroun = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
+                                                command=lambda: self.edit_custom_tag_config_scheme__choose_color_of_custome_match_object(
+                                                    entry_backgroun, add_match_obj_pop_window))
+        color_button_backgroun.grid(row=3, column=2, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-下划线
+        match_obj_info_dict["var_ck_underline"] = tkinter.BooleanVar()
+        ck_underline = tkinter.Checkbutton(add_match_obj_pop_window, text="添加下划线", variable=match_obj_info_dict["var_ck_underline"])
+        ck_underline.grid(row=4, column=0, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-下划线颜色
+        label_underlinefg = tkinter.Label(add_match_obj_pop_window, text="下划线颜色")
+        label_underlinefg.grid(row=4, column=1, padx=self.padx, pady=self.pady, sticky="e")
+        match_obj_info_dict["sv_underlinefg"] = tkinter.StringVar()
+        entry_underlinefg = tkinter.Entry(add_match_obj_pop_window, textvariable=match_obj_info_dict["sv_underlinefg"])
+        entry_underlinefg.grid(row=4, column=2, padx=self.padx, pady=self.pady)
+        color_button_underlinefg = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
+                                                  command=lambda: self.edit_custom_tag_config_scheme__choose_color_of_custome_match_object(
+                                                      entry_underlinefg, add_match_obj_pop_window))
+        color_button_underlinefg.grid(row=4, column=3, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-删除线
+        match_obj_info_dict["var_ck_overstrike"] = tkinter.BooleanVar()
+        ck_overstrike = tkinter.Checkbutton(add_match_obj_pop_window, text="添加删除线", variable=match_obj_info_dict["var_ck_overstrike"])
+        ck_overstrike.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-删除线颜色
+        label_overstrikefg = tkinter.Label(add_match_obj_pop_window, text="删除线颜色")
+        label_overstrikefg.grid(row=5, column=1, padx=self.padx, pady=self.pady, sticky="e")
+        match_obj_info_dict["sv_overstrikefg"] = tkinter.StringVar()
+        entry_overstrikefg = tkinter.Entry(add_match_obj_pop_window, textvariable=match_obj_info_dict["sv_overstrikefg"])
+        entry_overstrikefg.configure()
+        entry_overstrikefg.grid(row=5, column=2, padx=self.padx, pady=self.pady)
+        color_button_overstrikefg = tkinter.Button(add_match_obj_pop_window, text="选择颜色",
+                                                   command=lambda: self.edit_custom_tag_config_scheme__choose_color_of_custome_match_object(
+                                                       entry_overstrikefg, add_match_obj_pop_window))
+        color_button_overstrikefg.grid(row=5, column=3, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-粗体
+        match_obj_info_dict["var_ck_bold"] = tkinter.BooleanVar()
+        ck_bold = tkinter.Checkbutton(add_match_obj_pop_window, text="粗体", variable=match_obj_info_dict["var_ck_bold"])
+        ck_bold.grid(row=6, column=0, padx=self.padx, pady=self.pady)
+        # -- 匹配字符-斜体
+        match_obj_info_dict["var_ck_italic"] = tkinter.BooleanVar()
+        ck_italic = tkinter.Checkbutton(add_match_obj_pop_window, text="斜体", variable=match_obj_info_dict["var_ck_italic"])
+        ck_italic.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # 添加确定按钮
+        button_ok = tkinter.Button(add_match_obj_pop_window, text="确定",
+                                   command=lambda: self.edit_custom_tag_config_scheme__add_custome_match_object__ok(match_obj_info_dict,
+                                                                                                                    add_match_obj_pop_window))
+        button_ok.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        # 添加取消按钮
+        button_cancel = tkinter.Button(add_match_obj_pop_window, text="取消",
+                                       command=lambda: self.edit_custom_tag_config_scheme__add_custome_match_object__cancel(
+                                           add_match_obj_pop_window))
+        button_cancel.grid(row=7, column=1, padx=self.padx, pady=self.pady)
+
+    def edit_custom_tag_config_scheme__add_custome_match_object__ok(self, match_obj_info_dict,
+                                                                    add_match_obj_pop_window):
+        # 先在 custome_match_obj_frame_frame 列出刚刚添加的match_obj
+        match_obj = CustomMatchObject(match_pattern_lines=match_obj_info_dict["text_match_pattern_lines"].get("1.0", tkinter.END + "-1c"),
+                                      foreground=match_obj_info_dict["sv_foreground"].get(),
+                                      backgroun=match_obj_info_dict["sv_backgroun"].get(),
+                                      underline=match_obj_info_dict["var_ck_underline"].get(),
+                                      underlinefg=match_obj_info_dict["sv_underlinefg"].get(),
+                                      overstrike=match_obj_info_dict["var_ck_overstrike"].get(),
+                                      overstrikefg=match_obj_info_dict["sv_overstrikefg"].get(),
+                                      bold=match_obj_info_dict["var_ck_bold"].get(),
+                                      italic=match_obj_info_dict["var_ck_italic"].get()
+                                      )
+        self.resource_obj.custom_match_object_list.append(match_obj)
+        self.edit_custome_tag_config_scheme__list_custome_match_obj_in_frame_frame()
+        # 再返回到 编辑配色方案 界面
+        add_match_obj_pop_window.destroy()  # 关闭子窗口
+        self.resource_info_dict["pop_window"].attributes("-disabled", 0)  # 使主窗口响应
+        self.resource_info_dict["pop_window"].focus_force()  # 使主窗口获得焦点
+
+    def edit_custom_tag_config_scheme__add_custome_match_object__cancel(self, add_match_obj_pop_window):
+        # 返回到 创建配色方案 界面
+        add_match_obj_pop_window.destroy()  # 关闭子窗口
+        self.resource_info_dict["pop_window"].attributes("-disabled", 0)  # 使主窗口响应
+        self.resource_info_dict["pop_window"].focus_force()  # 使主窗口获得焦点
+
+    @staticmethod
+    def edit_custom_tag_config_scheme__choose_color_of_custome_match_object(entry, add_match_obj_pop_window):
+        add_match_obj_pop_window.focus_force()
+        color = tkinter.colorchooser.askcolor()
+        if color[1] is not None:
+            entry.delete(0, tkinter.END)
+            entry.insert(0, color[1])
+            entry.configure(bg=color[1])
+        add_match_obj_pop_window.focus_force()
 
     def edit_custome_tag_config_scheme__list_custome_match_obj_in_frame_frame(self):
         for widget in self.resource_info_dict["custome_match_obj_frame_frame"].winfo_children():
