@@ -9153,6 +9153,8 @@ class TerminalVt100:
         self.terminal_frame = None
         self.global_info = None
         self.host_obj = None
+        self.vt100_cursor_normal = None
+        self.vt100_cursor_app = None
         print("TerminalVt100.destroy_all: 开始清理 上面是 self.terminal_application_text.delete, tkinter.END)")
         # for widget in self.terminal_frame.winfo_children():
         #     widget.destroy()
@@ -9701,11 +9703,15 @@ class TerminalVt100:
                 vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
                                                           output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
                                                           terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_NORMAL)
-                vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
+                # vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
                 # 在self.terminal_text里输出解析后的内容
-                self.normal_mode_print_lines(block_str[ret.end():], vt100_output_block_obj.output_block_tag_config_name)
-                del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
-                gc.collect()
+                # start_index = self.vt100_cursor_normal.index
+                vt100_output_block_obj.start_index = self.vt100_cursor_normal.index
+                self.normal_mode_print_lines(block_str[ret.end():], "default")
+                vt100_output_block_obj.end_index = self.vt100_cursor_normal.index
+                # 处理vt100输出自带有的颜色风格
+                set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color)
+                set_vt100_tag_thread.start()
                 continue
             # ★匹配 [C  [8C  -->[数字C  向右移动vt100_cursor（text_cursor光标在本轮for循环结束后，一次recv处理完成后，再显示）
             match_pattern = r'^\[[0-9]*C'
@@ -9877,11 +9883,12 @@ class TerminalVt100:
                                                           terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
                 vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
                 # 在self.terminal_text里输出解析后的内容
+                vt100_output_block_obj.start_index = self.vt100_cursor_app.index
                 self.app_mode_print_chars(output_block_content, vt100_output_block_obj.output_block_tag_config_name)
-                del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
-                gc.collect()
-                # self.terminal_application_text.insert(self.vt100_cursor_app, vt100_output_block_obj.output_block_content,
-                #                                       vt100_output_block_obj.output_block_tag_config_name)
+                vt100_output_block_obj.end_index = self.vt100_cursor_app.index
+                # 处理vt100输出自带有的颜色风格
+                set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color)
+                set_vt100_tag_thread.start()
                 continue
             # ★匹配 [C  [8C  -->[数字C  向右移动vt100_cursor（Text_cursor在本轮for循环结束后（一次recv处理完成后）再显示光标
             match_pattern = r'^\[[0-9]*C'
@@ -9970,122 +9977,10 @@ class TerminalVt100:
             # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
             # print("TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
             # block_str_filter = block_str.replace('\0', '').replace(chr(0x0f), '')
-            # self.app_mode_print_chars(block_str, "default")
             self.app_mode_print_lines(block_str, "default")
         # ★★★★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★★★★
         self.terminal_application_text.see(tkinter.END)
         self.terminal_application_text.focus_force()
-
-    def match_backspace_x08_normal(self, block_bytes):
-        # ★匹配  b'\x08'  -->回退符，向左移动光标，可有多个，匹配上后，返回True，不匹配则返回False
-        if len(block_bytes) == 0:
-            print("TerminalVt100.match_backspace_x08: block_bytes为空")
-            return False
-        else:
-            print("TerminalVt100.match_backspace_x08: block_bytes不为空", block_bytes)
-        match_pattern = b'\x08'
-        ret = re.search(match_pattern, block_bytes)
-        ret2 = re.findall(match_pattern, block_bytes)
-        left_move_column = 0
-        for _ in ret2:
-            left_move_column += 1
-        if ret is not None:
-            print(f"TerminalVt100.match_backspace_x08: 匹配到了 {match_pattern}")
-            block_bytes_no_nul = block_bytes.replace(b'\x00', b'')
-            block_bytes_no_nul_no_backspace = block_bytes_no_nul.replace(b'\x08', b'')
-            len_insert_content = len(block_bytes_no_nul_no_backspace.decode("utf8"))
-            if ret.start() == 0:
-                print(f"TerminalVt100.match_backspace_x08: 开头就先左移，左移完成后再插入普通字符", self.vt100_cursor_normal)
-                self.vt100_cursor_normal += "-" + str(left_move_column) + "c"
-                # 移动self.vt100_cursor_normal后，先删除右边需要覆盖的字符
-                current_line_right_content = self.terminal_normal_text.get(self.vt100_cursor_normal, self.vt100_cursor_normal + " lineend")
-                if len_insert_content >= len(current_line_right_content):  # 要插入的字符长度大于右侧剩余的字符长度
-                    self.terminal_normal_text.delete(self.vt100_cursor_normal, self.vt100_cursor_normal + " lineend")
-                    self.vt100_cursor_normal += "+" + str(len(current_line_right_content)) + "c"
-                elif len_insert_content > 0:  # 要插入的字符长度 小于右侧剩余的字符长度，且不为空
-                    delete_column_str = "+" + str(len_insert_content) + "c"
-                    self.terminal_normal_text.delete(self.vt100_cursor_normal, self.vt100_cursor_normal + delete_column_str)
-                    self.vt100_cursor_normal += delete_column_str
-                # 再插入
-                # for char in block_bytes_no_nul_no_backspace.decode("utf8").replace("\r\n", "\n"):  # 不含b'\x00'的内容
-                chars = block_bytes_no_nul_no_backspace.decode("utf8").replace("\r\n", "\n")
-                self.terminal_normal_text.insert(self.vt100_cursor_normal, chars, 'default')
-                print(f"TerminalVt100.match_backspace_x08: 开头就先左移，左移完成后再插入普通字符，完成后", self.vt100_cursor_normal)
-                return True
-            print("TerminalVt100.match_backspace_x08: 未匹配到if len_insert_content > 0 and ret.start() == 0:")
-            for char in block_bytes_no_nul.decode("utf8").replace("\r\n", "\n"):  # 不含b'\x00'的内容，先有插入字符，后有左移操作
-                if char == chr(0x08):  # 回退索引
-                    print(f"TerminalVt100.match_backspace_x08: {self.vt100_cursor_normal}")
-                    print("TerminalVt100.match_backspace_x08: 未匹配到if len_insert_content > 0 and ret.start() == 0: 当前索引左移1格")
-                    self.vt100_cursor_normal += "-1c"  # 当前索引左移1格
-                else:
-                    current_line_right_content = self.terminal_normal_text.get(self.vt100_cursor_normal,
-                                                                               self.vt100_cursor_normal + " lineend")
-                    if len(current_line_right_content) >= 1:
-                        delete_column_str = "+1c"
-                        self.terminal_normal_text.replace(self.vt100_cursor_normal,
-                                                          self.vt100_cursor_normal + delete_column_str, char,
-                                                          'default')  # 每插入一个字符前，先向右删除一个字符（覆盖）
-                        # self.vt100_cursor_normal += delete_column_str
-                    else:
-                        self.terminal_normal_text.insert(self.vt100_cursor_normal, char, 'default')
-            return True
-        else:
-            return False
-
-    def match_backspace_x08_app(self, block_bytes):
-        # ★匹配  b'\x08'  -->回退符，向左移动光标，可有多个，匹配上后，返回True，不匹配则返回False
-        if len(block_bytes) == 0:
-            print("TerminalVt100.match_backspace_x08: block_bytes为空")
-            return False
-        else:
-            print("TerminalVt100.match_backspace_x08: block_bytes不为空", block_bytes)
-        match_pattern = b'\x08'
-        ret = re.search(match_pattern, block_bytes)
-        ret2 = re.findall(match_pattern, block_bytes)
-        left_move_column = 0
-        for _ in ret2:
-            left_move_column += 1
-        if ret is not None:
-            print(f"TerminalVt100.match_backspace_x08: 匹配到了 {match_pattern}")
-            block_bytes_no_nul = block_bytes.replace(b'\x00', b'')
-            block_bytes_no_nul_no_backspace = block_bytes_no_nul.replace(b'\x08', b'')
-            len_insert_content = len(block_bytes_no_nul_no_backspace.decode("utf8"))
-            if ret.start() == 0:
-                print(f"TerminalVt100.match_backspace_x08: 开头就先左移，左移完成后再插入普通字符", self.vt100_cursor_app)
-                self.vt100_cursor_app += "-" + str(left_move_column) + "c"
-                # 移动self.vt100_cursor_app后，先删除右边需要覆盖的字符
-                current_line_right_content = self.terminal_application_text.get(self.vt100_cursor_app, self.vt100_cursor_app + " lineend")
-                if len_insert_content >= len(current_line_right_content):  # 要插入的字符长度大于右侧剩余的字符长度
-                    self.terminal_application_text.delete(self.vt100_cursor_app, self.vt100_cursor_app + " lineend")
-                    self.vt100_cursor_app += "+" + str(len(current_line_right_content)) + "c"
-                elif len_insert_content > 0:  # 要插入的字符长度 小于右侧剩余的字符长度，且不为空
-                    delete_column_str = "+" + str(len_insert_content) + "c"
-                    self.terminal_application_text.delete(self.vt100_cursor_app, self.vt100_cursor_app + delete_column_str)
-                    self.vt100_cursor_app += delete_column_str
-                # 再插入
-                for char in block_bytes_no_nul_no_backspace.decode("utf8").replace("\r\n", "\n"):  # 不含b'\x00'的内容
-                    self.terminal_application_text.insert(self.vt100_cursor_app, char, 'default')
-                print(f"TerminalVt100.match_backspace_x08: 开头就先左移，左移完成后再插入普通字符，完成后", self.vt100_cursor_app)
-                return True
-            print("TerminalVt100.match_backspace_x08: 未匹配到if len_insert_content > 0 and ret.start() == 0:")
-            for char in block_bytes_no_nul.decode("utf8").replace("\r\n", "\n"):  # 不含b'\x00'的内容，先有插入字符，后有左移操作
-                if char == chr(0x08):  # 回退索引
-                    print(f"TerminalVt100.match_backspace_x08: {self.vt100_cursor_app}")
-                    print("TerminalVt100.match_backspace_x08: 未匹配到if len_insert_content > 0 and ret.start() == 0: 当前索引左移1格")
-                    self.vt100_cursor_app += "-1c"  # 当前索引左移1格
-                else:
-                    current_line_right_content = self.terminal_application_text.get(self.vt100_cursor_app,
-                                                                                    self.vt100_cursor_app + " lineend")
-                    if len(current_line_right_content) >= 1:
-                        delete_column_str = "+1c"
-                        self.terminal_application_text.delete(self.vt100_cursor_app,
-                                                              self.vt100_cursor_app + delete_column_str)  # 每插入一个字符前，先向右删除一个字符（覆盖）
-                        self.vt100_cursor_app += delete_column_str
-                    self.terminal_application_text.insert(self.vt100_cursor_app, char, 'default')
-            return True
-        else:
-            return False
 
     def app_mode_print_chars(self, content_str, tag_config_name):
         """
@@ -10216,13 +10111,15 @@ class TerminalVt100:
 
 class Vt100OutputBlock:
     def __init__(self, output_block_content='', output_block_tag_config_name='', output_block_control_seq='',
-                 terminal_vt100_obj=None, terminal_mode=VT100_TERMINAL_MODE_NORMAL):
+                 terminal_vt100_obj=None, terminal_mode=VT100_TERMINAL_MODE_NORMAL, start_index="1.0", end_index="1.0"):
         self.output_block_content = output_block_content  # <str> 匹配上的普通字符（不含最前面的控制序列字符）
         self.output_block_tag_config_name = output_block_tag_config_name  # <str> 根据匹配上的控制序列，而设置的文字颜色风格名称
         self.output_block_control_seq = output_block_control_seq  # <str> 匹配上的控制序列字符，如 [0m
         # [01;34m 这种在output_block_control_seq里不带最前面的[及最后面的m，只剩下 02  01;34  01;34;42 这种
         self.terminal_vt100_obj = terminal_vt100_obj
         self.terminal_mode = terminal_mode
+        self.start_index = start_index  # 这段需要修饰的字符串所处位置 起始坐标
+        self.end_index = end_index  # 这段需要修饰的字符串所处位置 结束坐标
 
     def move_cursor_left(self, count):
         count_str = "-" + str(count) + "c"
@@ -10336,6 +10233,9 @@ class Vt100OutputBlock:
         else:
             self.terminal_vt100_obj.tag_config_record_list.append(
                 TagConfigRecord(self.output_block_tag_config_name, FONT_TYPE_BOLD, self.terminal_vt100_obj.terminal_normal_text))
+        self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{self.output_block_tag_config_name}",
+                                                             self.start_index,
+                                                             self.end_index)
 
     def set_tag_config_font_and_color_app(self):
         self.output_block_tag_config_name = uuid.uuid4().__str__()  # <str>
@@ -10404,6 +10304,9 @@ class Vt100OutputBlock:
         else:
             self.terminal_vt100_obj.tag_config_record_list.append(
                 TagConfigRecord(self.output_block_tag_config_name, FONT_TYPE_BOLD, self.terminal_vt100_obj.terminal_application_text))
+        self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{self.output_block_tag_config_name}",
+                                                             self.start_index,
+                                                             self.end_index)
 
 
 class CustomMatchObject:
@@ -10597,6 +10500,7 @@ class CustomTagConfigSet:
         self.global_info = global_info
 
     def disconnect(self):
+        self.terminal_vt100_obj.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
         self.terminal_vt100_obj = None
         self.host_obj = None
         self.global_info = None
@@ -10636,7 +10540,6 @@ class CustomTagConfigSet:
                         print("CustomTagConfigSet.set_custom_tag_normal:匹配内容",
                               self.terminal_vt100_obj.terminal_normal_text.get(self.start_index + start_index_count,
                                                                                self.start_index + end_index_count))
-
                         self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{tag_config_name}", self.start_index + start_index_count,
                                                                              self.start_index + end_index_count)
                         self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
