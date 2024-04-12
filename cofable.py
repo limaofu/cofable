@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-09
+# update: 2024-04-12
 
 """
 开发日志：
@@ -45,6 +45,8 @@
 ★. 支持设置主机的字符集，如utf8,gbk等  默认使用utf8
 ★. 在向Terminal终端会话粘贴内容时，如果内容有多行，需要弹出确认框，用户确认才发送要粘贴的内容    2024年4月3日 完成
 ★. 支持用户自定义高亮字符设置（着色方案），支持正则表达式匹配并设置显示样式，每台主机可单独设置着色方案    2024年4月6日 完成
+★. 优化了vt100输出显示逻辑，先输出内容，后上色（系统自带的颜色属性）                        2024年4月9日 完成
+★. 修复了tkinter.Text组件的索引操作错误导致的闪退问题，以及引入结束线程机制，防止内存泄露      2024年4月12日 完成
 
 资源操作逻辑：
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -81,6 +83,7 @@ import queue
 import struct
 import pyperclip
 import gc
+import ctypes
 import tkinter
 from tkinter import messagebox
 from tkinter import filedialog
@@ -174,6 +177,25 @@ VT100_TERMINAL_MODE_APP = 1
 CALL_BACK_CLASS_CREATE_RESOURCE = 0
 CALL_BACK_CLASS_EDIT_RESOURCE = 1
 CALL_BACK_CLASS_LIST_RESOURCE = 2
+
+
+def cofable_stop_thread(thread):
+    """
+    结束线程，如果线程里有time.sleep(n)之类的操作，则需要等待这个时长之后，才会结束此线程
+    即此方法无法立即结束sleep及其他阻塞函数导致的休眼线程，得等线程获得响应时才结束它
+    raises the exception, performs cleanup if needed
+    """
+    thread_id = ctypes.c_long(thread.ident)
+    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, ctypes.py_object(SystemExit))
+    # 正常结束线程时会返回数值1
+    if res == 0:
+        raise ValueError("async_raise: invalid thread id")
+    elif res != 1:
+        # 如果返回的值不为0，也不为1，则 you're in trouble
+        # if it returns a number greater than one, you're in trouble,
+        # and you should call it again with exc=NULL to revert the effect
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, None)
+        raise SystemError("PyThreadState_SetAsyncExc failed")
 
 
 class Project:
@@ -2057,6 +2079,108 @@ class GlobalInfo:
         self.current_project_obj = None  # 需要在项目界面将某个项目设置为当前项目，才会赋值
         self.lock_sqlite3_db = threading.Lock()  # 操作本地sqlite3数据库文件的锁，同一时间段内只能有一个线程操作此数据库
         self.builtin_font_file_path = builtin_font_file_path
+        self.main_window = None  # 程序的主窗口，全局只有一个主窗口对象
+        self.single_terminal_window = None  # 主机的terminal终端子窗口
+        self.multi_terminal_window = None  # 主机组的terminal终端子窗口，终端窗口组
+        self.font_size_map_list_jetbrains_mono = [(8, 7, 14),
+                                                  (9, 7, 16),
+                                                  (10, 8, 17),
+                                                  (11, 9, 19),
+                                                  (12, 10, 21),
+                                                  (13, 10, 22),
+                                                  (14, 11, 25),
+                                                  (15, 12, 26),
+                                                  (16, 13, 27),
+                                                  (17, 14, 30),
+                                                  (18, 14, 31),
+                                                  (19, 15, 32),
+                                                  (20, 16, 36),
+                                                  (21, 17, 37),
+                                                  (22, 17, 39),
+                                                  (23, 19, 41),
+                                                  (24, 19, 43),
+                                                  (25, 20, 44),
+                                                  (26, 21, 47),
+                                                  (27, 22, 48),
+                                                  (28, 22, 49),
+                                                  (29, 23, 52),
+                                                  (30, 24, 53),
+                                                  (31, 25, 54),
+                                                  (32, 26, 57),
+                                                  (33, 26, 58),
+                                                  (34, 27, 59),
+                                                  (35, 28, 62),
+                                                  (36, 29, 63)]
+
+        self.font_size_map_list_songti = [(8, 6, 11),
+                                          (9, 6, 12),
+                                          (10, 7, 13),
+                                          (11, 8, 15),
+                                          (12, 8, 16),
+                                          (13, 9, 17),
+                                          (14, 10, 19),
+                                          (15, 10, 20),
+                                          (16, 11, 21),
+                                          (17, 12, 23),
+                                          (18, 12, 24),
+                                          (19, 13, 25),
+                                          (20, 14, 27),
+                                          (21, 14, 28),
+                                          (22, 15, 29),
+                                          (23, 16, 31),
+                                          (24, 16, 33),
+                                          (25, 17, 33),
+                                          (26, 18, 35),
+                                          (27, 18, 36),
+                                          (28, 19, 37),
+                                          (29, 20, 39),
+                                          (30, 20, 40),
+                                          (31, 21, 41),
+                                          (32, 22, 43),
+                                          (33, 22, 44),
+                                          (34, 23, 45),
+                                          (35, 24, 47),
+                                          (36, 24, 48)]
+
+    def get_font_mapped_width(self, font_size=12, font_family_or_name=""):
+        if font_family_or_name == "":
+            return self.get_font_mapped_width_songti(font_size)
+        elif font_family_or_name == "JetBrains Mono":
+            return self.get_font_mapped_width_jetbrains_mono(font_size)
+        else:
+            return 8  # 如果都没匹配上，则返回默认字体大小
+
+    def get_font_mapped_height(self, font_size=12, font_family_or_name=""):
+        if font_family_or_name == "":
+            return self.get_font_mapped_height_songti(font_size)
+        elif font_family_or_name == "JetBrains Mono":
+            return self.get_font_mapped_height_jetbrains_mono(font_size)
+        else:
+            return 16  # 如果都没匹配上，则返回默认字体大小
+
+    def get_font_mapped_width_songti(self, font_size=12):
+        for size, width, height in self.font_size_map_list_songti:
+            if size == font_size:
+                return width
+        return 8  # 如果都没匹配上，则返回默认字体大小
+
+    def get_font_mapped_height_songti(self, font_size=12):
+        for size, width, height in self.font_size_map_list_songti:
+            if size == font_size:
+                return height
+        return 16  # 如果都没匹配上，则返回默认字体大小
+
+    def get_font_mapped_width_jetbrains_mono(self, font_size=12):
+        for size, width, height in self.font_size_map_list_jetbrains_mono:
+            if size == font_size:
+                return width
+        return 10  # 如果都没匹配上，则返回默认字体大小
+
+    def get_font_mapped_height_jetbrains_mono(self, font_size=12):
+        for size, width, height in self.font_size_map_list_jetbrains_mono:
+            if size == font_size:
+                return height
+        return 21  # 如果都没匹配上，则返回默认字体大小
 
     def load_builtin_font_file(self):
         pyglet.options['win32_gdi_font'] = True
@@ -2064,6 +2188,11 @@ class GlobalInfo:
 
     def set_sqlite3_dbfile_name(self, file_name):
         self.sqlite3_dbfile_name = file_name
+
+    def open_session_in_division_terminal_window(self, host_oid):
+        host_obj = self.get_host_by_oid(host_oid)
+        print(f"GlobalInfo.open_session_in_division_terminal_window: {host_obj.name}")
+        pass
 
     def load_all_data_from_sqlite3(self):  # 初始化global_info，从数据库加载所有数据到实例
         if self.sqlite3_dbfile_name is None:
@@ -2119,12 +2248,12 @@ class GlobalInfo:
         match_pattern_error_disable = [r'\bdown\b', r'\berror\b', r'\bdisable\b', r'\bdisabled\b']
         scheme_linux.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_error_disable), foreground="red"))
-        # ★ 完成，成功，开启等词语 前景色-绿色
+        # ★ 完成，成功，开启等词语 前景色-绿色 #18ed92
         match_pattern_completed_enable = [r'\bcomplete\b', r'\bcompleted\b', r'\bdone\b', r'\bfinish\b', r'\bfinished\b',
                                           r'\bsucceed\b', r'\bsuccess\b', r'\bsuccessful\b', r'\bsuccessfully\b',
                                           r'\benable\b', r'\benabled\b', r'\bok\b', r'\bup\b']
         scheme_linux.custom_match_object_list.append(
-            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_completed_enable), foreground="green"))
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_completed_enable), foreground="#18ed92"))
         # ★ 默认，未知等词语 前景色-棕 #ba7131
         match_pattern_default_unknown = [r'\bdefault\b', r'\bunknow\b', r'\bunknown\b']
         scheme_linux.custom_match_object_list.append(
@@ -2164,12 +2293,12 @@ class GlobalInfo:
         match_pattern_error_disable = [r'\bdown\b', r'\berror\b', r'\bdisable\b', r'\bdisabled\b']
         scheme_huawei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_error_disable), foreground="red"))
-        # ★ 完成，成功，开启等词语 前景色-绿色
+        # ★ 完成，成功，开启等词语 前景色-绿色 #18ed92
         match_pattern_completed_enable = [r'\bcomplete\b', r'\bcompleted\b', r'\bdone\b', r'\bfinish\b', r'\bfinished\b',
                                           r'\bsucceed\b', r'\bsuccess\b', r'\bsuccessful\b', r'\bsuccessfully\b',
                                           r'\benable\b', r'\benabled\b', r'\bok\b', r'\bup\b']
         scheme_huawei.custom_match_object_list.append(
-            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_completed_enable), foreground="green"))
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_completed_enable), foreground="#18ed92"))
         # ★ 默认，未知等词语 前景色-棕 #ba7131
         match_pattern_default_unknown = [r'\bdefault\b', r'\bunknow\b', r'\bunknown\b']
         scheme_huawei.custom_match_object_list.append(
@@ -3549,16 +3678,16 @@ class MainWindow:
         # 在bottom_frame创建滚动Frame，用于列出配色方案列表
         bottom_frame_widget_dict = {"pop_window": pop_window}
         self.clear_tkinter_widget(bottom_frame)
-        bottom_frame_widget_dict["scrollbar"] = tkinter.Scrollbar(bottom_frame)
-        bottom_frame_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        bottom_frame_widget_dict["canvas"] = tkinter.Canvas(bottom_frame, yscrollcommand=bottom_frame_widget_dict["scrollbar"].set)
+        bottom_frame_widget_dict["scrollbar_normal"] = tkinter.Scrollbar(bottom_frame)
+        bottom_frame_widget_dict["scrollbar_normal"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        bottom_frame_widget_dict["canvas"] = tkinter.Canvas(bottom_frame, yscrollcommand=bottom_frame_widget_dict["scrollbar_normal"].set)
         bottom_frame_widget_dict["canvas"].place(x=0, y=0, width=width - 20, height=height - 35)
-        bottom_frame_widget_dict["scrollbar"].config(command=bottom_frame_widget_dict["canvas"].yview)
+        bottom_frame_widget_dict["scrollbar_normal"].config(command=bottom_frame_widget_dict["canvas"].yview)
         bottom_frame_widget_dict["frame"] = tkinter.Frame(bottom_frame_widget_dict["canvas"])
         bottom_frame_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
         bottom_frame_widget_dict["canvas"].create_window((0, 0), window=bottom_frame_widget_dict["frame"], anchor='nw')
         # 在canvas-frame滚动框内添加资源列表控件
-        list_obj = ListResourceInFrame(self, bottom_frame_widget_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
+        list_obj = ListResourceInFrame(bottom_frame_widget_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
         list_obj.show()
 
     def on_closing_settings_scheme_pop_window(self, pop_window):
@@ -3570,20 +3699,20 @@ class MainWindow:
         for widget in pop_window.winfo_children():
             widget.destroy()
         # 在配色方案设置pop_window中添加canvas-frame滚动框
-        pop_window_widget_dict = {"scrollbar": tkinter.Scrollbar(pop_window)}
-        pop_window_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        pop_window_widget_dict["canvas"] = tkinter.Canvas(pop_window, yscrollcommand=pop_window_widget_dict["scrollbar"].set)
+        pop_window_widget_dict = {"scrollbar_normal": tkinter.Scrollbar(pop_window)}
+        pop_window_widget_dict["scrollbar_normal"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        pop_window_widget_dict["canvas"] = tkinter.Canvas(pop_window, yscrollcommand=pop_window_widget_dict["scrollbar_normal"].set)
         pop_window_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
-        pop_window_widget_dict["scrollbar"].config(command=pop_window_widget_dict["canvas"].yview)
+        pop_window_widget_dict["scrollbar_normal"].config(command=pop_window_widget_dict["canvas"].yview)
         pop_window_widget_dict["frame"] = tkinter.Frame(pop_window_widget_dict["canvas"])
         pop_window_widget_dict["frame"].pack()
         pop_window_widget_dict["canvas"].create_window((0, 0), window=pop_window_widget_dict["frame"], anchor='nw')
         pop_window_widget_dict["pop_window"] = pop_window
         # ★在canvas-frame滚动框内添加创建资源控件
-        create_obj = CreateResourceInFrame(self, pop_window_widget_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
+        create_obj = CreateResourceInFrame(pop_window_widget_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
         create_obj.show()
         # ★创建“保存”按钮
-        save_obj = SaveResourceInMainWindow(self, create_obj.resource_info_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
+        save_obj = SaveResourceInMainWindow(create_obj.resource_info_dict, self.global_info, RESOURCE_TYPE_CUSTOM_SCHEME)
         button_save = tkinter.Button(pop_window, text="保存", command=save_obj.save)
         button_save.place(x=10, y=self.height - 40, width=50, height=25)
         # ★创建“取消”按钮
@@ -3637,19 +3766,19 @@ class MainWindow:
         nav_frame_r_widget_dict = {}
         # 在框架2中添加canvas-frame滚动框
         self.clear_tkinter_widget(self.nav_frame_r)
-        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(self.nav_frame_r)
-        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(self.nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
+        nav_frame_r_widget_dict["scrollbar_normal"] = tkinter.Scrollbar(self.nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar_normal"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(self.nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar_normal"].set)
         nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
-        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
+        nav_frame_r_widget_dict["scrollbar_normal"].config(command=nav_frame_r_widget_dict["canvas"].yview)
         nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
         nav_frame_r_widget_dict["frame"].pack()
         nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
         # ★在canvas - frame滚动框内添加创建资源控件
-        create_obj = CreateResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, resource_type)
+        create_obj = CreateResourceInFrame(nav_frame_r_widget_dict, self.global_info, resource_type)
         create_obj.show()
         # ★创建“保存”按钮
-        save_obj = SaveResourceInMainWindow(self, create_obj.resource_info_dict, self.global_info, resource_type)
+        save_obj = SaveResourceInMainWindow(create_obj.resource_info_dict, self.global_info, resource_type)
         button_save = tkinter.Button(self.nav_frame_r, text="保存", command=save_obj.save)
         button_save.place(x=10, y=self.height - 40, width=50, height=25)
         # ★创建“取消”按钮
@@ -3668,17 +3797,17 @@ class MainWindow:
         nav_frame_r_widget_dict = {}
         # 在框架2的bottom_frame中添加canvas-frame滚动框
         self.clear_tkinter_widget(bottom_frame)
-        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(bottom_frame)
-        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(bottom_frame, yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
+        nav_frame_r_widget_dict["scrollbar_normal"] = tkinter.Scrollbar(bottom_frame)
+        nav_frame_r_widget_dict["scrollbar_normal"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(bottom_frame, yscrollcommand=nav_frame_r_widget_dict["scrollbar_normal"].set)
         nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=int(self.nav_frame_r_width - 25),
                                                 height=self.nav_frame_r_bottom_height)
-        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
+        nav_frame_r_widget_dict["scrollbar_normal"].config(command=nav_frame_r_widget_dict["canvas"].yview)
         nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
         nav_frame_r_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
         nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
         # 在canvas-frame滚动框内添加资源列表控件
-        list_obj = ListResourceInFrame(self, nav_frame_r_widget_dict, self.global_info, resource_type)
+        list_obj = ListResourceInFrame(nav_frame_r_widget_dict, self.global_info, resource_type)
         list_obj.show()
 
     def nav_frame_r_resource_top_page_display(self, resource_type):
@@ -3759,17 +3888,17 @@ class MainWindow:
         # 在框架2中添加canvas-frame滚动框
         self.clear_tkinter_widget(self.nav_frame_r)
         # 没有将self.nav_frame_r分为多个frame，就一个frame用于显示作业列表
-        nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(self.nav_frame_r)
-        nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        nav_frame_r_widget_dict["scrollbar_normal"] = tkinter.Scrollbar(self.nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar_normal"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
         nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(self.nav_frame_r,
-                                                           yscrollcommand=nav_frame_r_widget_dict["scrollbar"].set)
+                                                           yscrollcommand=nav_frame_r_widget_dict["scrollbar_normal"].set)
         nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
-        nav_frame_r_widget_dict["scrollbar"].config(command=nav_frame_r_widget_dict["canvas"].yview)
+        nav_frame_r_widget_dict["scrollbar_normal"].config(command=nav_frame_r_widget_dict["canvas"].yview)
         nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
         nav_frame_r_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
         nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
         # 在canvas-frame滚动框内添加资源列表控件
-        list_obj = ListInspectionJobInFrame(self, nav_frame_r_widget_dict, self.global_info)
+        list_obj = ListInspectionJobInFrame(nav_frame_r_widget_dict, self.global_info)
         list_obj.show()
 
     def show(self):
@@ -3800,8 +3929,7 @@ class CreateResourceInFrame:
     在主窗口的创建资源界面，添加用于输入资源信息的控件
     """
 
-    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
-        self.main_window = main_window
+    def __init__(self, top_frame_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
         self.top_frame_widget_dict = top_frame_widget_dict  # 在 top_frame_widget_dict["frame"]里添加组件，用于设置要创建的资源的属性
         self.global_info = global_info
         self.resource_type = resource_type
@@ -4213,15 +4341,15 @@ class CreateResourceInFrame:
 
     def create_inspection_code_block__click_button_add_code_list(self, treeview_code_content):
         self.resource_info_dict["one_line_code_obj_list"] = []
-        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)
         pop_window.title("添加巡检代码内容")
-        screen_width = self.main_window.window_obj.winfo_screenwidth()
-        screen_height = self.main_window.window_obj.winfo_screenheight()
+        screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
         width = 420
         height = 300
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
-        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.global_info.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
         pop_window.protocol("WM_DELETE_WINDOW", lambda: self.create_inspection_code_block__edit_or_add_treeview_code_content_on_closing(
@@ -4242,8 +4370,8 @@ class CreateResourceInFrame:
 
     def create_inspection_code_block__click_button_add_code_list_cancel(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def create_inspection_code_block__click_button_add_code_list_ok(self, treeview_code_content, text_code_content, pop_window):
         code_content_str = text_code_content.get("1.0", tkinter.END).strip()
@@ -4257,8 +4385,8 @@ class CreateResourceInFrame:
         print("CreateResourceInFrame.click_button_add_code_list_ok: 添加代码行数:",
               len(self.resource_info_dict["one_line_code_obj_list"]))
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
         # 刷新一次treeview
         treeview_code_content.delete(*treeview_code_content.get_children())
         index = 0
@@ -4276,15 +4404,15 @@ class CreateResourceInFrame:
         one_line_code_index, _, _ = treeview_code_content.item(item_index, "values")
         print("one_line_code_index", one_line_code_index)
         one_line_code_obj = self.resource_info_dict["one_line_code_obj_list"][int(one_line_code_index)]  # 获取选中的命令对象
-        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)
         pop_window.title("设置巡检代码")
-        screen_width = self.main_window.window_obj.winfo_screenwidth()
-        screen_height = self.main_window.window_obj.winfo_screenheight()
+        screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
         width = 420
         height = 300
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
-        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.global_info.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
         pop_window.protocol("WM_DELETE_WINDOW", lambda: self.create_inspection_code_block__edit_or_add_treeview_code_content_on_closing(
@@ -4362,8 +4490,8 @@ class CreateResourceInFrame:
 
     def create_inspection_code_block__edit_treeview_code_content_item_cancel(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def create_inspection_code_block__edit_treeview_code_content_item_save(self, one_line_code_info_dict, one_line_code_obj, pop_window,
                                                                            treeview_code_content):
@@ -4381,8 +4509,8 @@ class CreateResourceInFrame:
             one_line_code_obj.interactive_process_method = one_line_code_info_dict["combobox_interactive_process_method"].current()
         one_line_code_obj.description = one_line_code_info_dict["sv_description"].get()
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
         # ★刷新一次treeview
         item_id_list = treeview_code_content.get_children()
         index = 0
@@ -4394,8 +4522,8 @@ class CreateResourceInFrame:
 
     def create_inspection_code_block__edit_or_add_treeview_code_content_on_closing(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def create_inspection_template(self):
         # ★创建-inspection_template
@@ -4572,8 +4700,8 @@ class CreateResourceInFrame:
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★添加匹配对象 CustomMatchObject
         self.resource_info_dict["custome_match_obj_list"] = []
-        custome_match_obj_frame_width = self.main_window.nav_frame_r_width - 25
-        custome_match_obj_frame_height = self.main_window.height - 220
+        custome_match_obj_frame_width = self.global_info.main_window.nav_frame_r_width - 25
+        custome_match_obj_frame_height = self.global_info.main_window.height - 220
         custome_match_obj_frame = tkinter.Frame(self.top_frame_widget_dict["frame"], width=custome_match_obj_frame_width,
                                                 height=custome_match_obj_frame_height, bg="pink")
         # 在custome_match_obj_frame中添加canvas-frame滚动框
@@ -4602,8 +4730,8 @@ class CreateResourceInFrame:
         add_match_obj_pop_window.title("配色方案设置")
         screen_width = add_match_obj_pop_window.winfo_screenwidth()
         screen_height = add_match_obj_pop_window.winfo_screenheight()
-        width = self.main_window.nav_frame_r_width - 50
-        height = self.main_window.height - 50
+        width = self.global_info.main_window.nav_frame_r_width - 50
+        height = self.global_info.main_window.height - 50
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         add_match_obj_pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.resource_info_dict["pop_window"].attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
@@ -4765,7 +4893,7 @@ class CreateResourceInFrame:
                                  overstrikefg=match_obj.overstrikefg,
                                  font=custom_match_font)
             edit_match_obj_obj = EditCustomMatchObject(top_window=self.resource_info_dict["pop_window"],
-                                                       main_window=self.main_window, call_back_class_obj=self,
+                                                       call_back_class_obj=self,
                                                        match_obj=match_obj, global_info=self.global_info,
                                                        call_back_class=CALL_BACK_CLASS_CREATE_RESOURCE)
             button_edit = tkinter.Button(self.resource_info_dict["custome_match_obj_frame_frame"], text="编辑",
@@ -4845,10 +4973,9 @@ class DeleteCustomMatchObject:
 
 
 class EditCustomMatchObject:
-    def __init__(self, top_window=None, main_window=None, match_obj=None, call_back_class_obj=None,
+    def __init__(self, top_window=None, match_obj=None, call_back_class_obj=None,
                  call_back_class=CALL_BACK_CLASS_EDIT_RESOURCE, global_info=None):
         self.top_window = top_window
-        self.main_window = main_window
         self.match_obj = match_obj
         self.call_back_class_obj = call_back_class_obj
         self.call_back_class = call_back_class  # <int>
@@ -4863,8 +4990,8 @@ class EditCustomMatchObject:
         self.edit_match_obj_pop_window.title("编辑匹配对象")
         screen_width = self.edit_match_obj_pop_window.winfo_screenwidth()
         screen_height = self.edit_match_obj_pop_window.winfo_screenheight()
-        width = self.main_window.nav_frame_r_width - 50
-        height = self.main_window.height - 25
+        width = self.global_info.main_window.nav_frame_r_width - 50
+        height = self.global_info.main_window.height - 25
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         self.edit_match_obj_pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.top_window.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
@@ -4996,8 +5123,7 @@ class ListResourceInFrame:
     在主窗口的查看资源界面，添加用于显示资源信息的控件
     """
 
-    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
-        self.main_window = main_window
+    def __init__(self, top_frame_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
         self.top_frame_widget_dict = top_frame_widget_dict  # 在 top_frame_widget_dict["frame"]里添加组件，用于列出资源列表
         self.global_info = global_info
         self.resource_type = resource_type
@@ -5053,19 +5179,19 @@ class ListResourceInFrame:
             label_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
             label_name.grid(row=index + 1, column=1, padx=self.padx, pady=self.pady)
             # 查看对象信息
-            view_obj = ViewResourceInFrame(self.main_window, self.top_frame_widget_dict, self.global_info, obj,
+            view_obj = ViewResourceInFrame(self.top_frame_widget_dict, self.global_info, obj,
                                            self.resource_type)
             button_view = tkinter.Button(self.top_frame_widget_dict["frame"], text="查看", command=view_obj.show)
             button_view.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
             button_view.grid(row=index + 1, column=2, padx=self.padx, pady=self.pady)
             # 编辑对象信息
-            edit_obj = EditResourceInFrame(self.main_window, self.top_frame_widget_dict, self.global_info, obj,
+            edit_obj = EditResourceInFrame(self.top_frame_widget_dict, self.global_info, obj,
                                            self.resource_type)
             button_edit = tkinter.Button(self.top_frame_widget_dict["frame"], text="编辑", command=edit_obj.show)
             button_edit.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
             button_edit.grid(row=index + 1, column=3, padx=self.padx, pady=self.pady)
             # 删除对象
-            delete_obj = DeleteResourceInFrame(self.main_window, self.top_frame_widget_dict, self.global_info, obj,
+            delete_obj = DeleteResourceInFrame(self.top_frame_widget_dict, self.global_info, obj,
                                                self.resource_type, call_back_class_obj=self,
                                                call_back_class=CALL_BACK_CLASS_LIST_RESOURCE)
             button_delete = tkinter.Button(self.top_frame_widget_dict["frame"], text="删除", command=delete_obj.show)
@@ -5073,17 +5199,23 @@ class ListResourceInFrame:
             button_delete.grid(row=index + 1, column=4, padx=self.padx, pady=self.pady)
             # ★巡检模板-start
             if self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
-                start_obj = StartInspectionTemplateInFrame(self.main_window, self.global_info, obj)
+                start_obj = StartInspectionTemplateInFrame(self.global_info, obj)
                 button_start = tkinter.Button(self.top_frame_widget_dict["frame"], text="Start", command=start_obj.start)
                 button_start.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
                 button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
             # ★Host-open_terminal
             if self.resource_type == RESOURCE_TYPE_HOST:
-                open_single_terminal_obj = OpenSingleTerminalVt100(main_window=self.main_window, global_info=self.global_info, host_obj=obj)
-                button_start = tkinter.Button(self.top_frame_widget_dict["frame"], text="打开终端",
-                                              command=open_single_terminal_obj.show)
-                button_start.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-                button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
+                open_single_terminal_obj = OpenSingleTerminalVt100(global_info=self.global_info, host_oid=obj.oid)
+                button_open_terminal = tkinter.Button(self.top_frame_widget_dict["frame"], text="打开终端",
+                                                      command=open_single_terminal_obj.show)
+                button_open_terminal.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+                button_open_terminal.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
+                # 打开单独式终端
+                open_division_terminal_obj = OpenDivisionTerminalVt100(global_info=self.global_info, host_oid=obj.oid)
+                button_open_terminal2 = tkinter.Button(self.top_frame_widget_dict["frame"], text="打开终端2",
+                                                       command=open_division_terminal_obj.open_session_in_division_terminal_window)
+                button_open_terminal2.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+                button_open_terminal2.grid(row=index + 1, column=6, padx=self.padx, pady=self.pady)
             index += 1
         # 信息控件添加完毕
         self.top_frame_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
@@ -5098,9 +5230,8 @@ class ViewResourceInFrame:
     在主窗口的查看资源界面，添加用于显示资源信息的控件
     """
 
-    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, resource_obj=None,
+    def __init__(self, top_frame_widget_dict=None, global_info=None, resource_obj=None,
                  resource_type=RESOURCE_TYPE_PROJECT):
-        self.main_window = main_window
         self.top_frame_widget_dict = top_frame_widget_dict
         self.global_info = global_info
         self.resource_obj = resource_obj
@@ -5178,7 +5309,7 @@ class ViewResourceInFrame:
         obj_info_text.pack()
         # ★★添加返回“项目列表”按钮★★
         button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回项目列表",
-                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
+                                       command=lambda: self.global_info.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_PROJECT))  # 返回“项目列表”
         button_return.pack()
 
@@ -5253,7 +5384,7 @@ class ViewResourceInFrame:
         obj_info_text.pack()
         # ★★添加“返回项目列表”按钮★★
         button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回项目列表",
-                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
+                                       command=lambda: self.global_info.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_CREDENTIAL))  # 返回凭据列表
         button_return.pack()
 
@@ -5330,7 +5461,7 @@ class ViewResourceInFrame:
         obj_info_text.pack()
         # ★★添加“返回主机列表”按钮★★
         button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回主机列表",
-                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
+                                       command=lambda: self.global_info.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_HOST))  # 返回主机列表
         button_return.pack()
 
@@ -5388,7 +5519,7 @@ class ViewResourceInFrame:
         obj_info_text.pack()
         # ★★添加“返回主机组列表”按钮★★
         button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回主机组列表",
-                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
+                                       command=lambda: self.global_info.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_HOST_GROUP))  # 返回主机组列表
         button_return.pack()
 
@@ -5455,7 +5586,7 @@ class ViewResourceInFrame:
         treeview_code_content.bind("<<TreeviewSelect>>", lambda event: self.view_treeview_code_content_item(event, treeview_code_content))
         # ★★添加“返回主机组列表”按钮★★
         button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回巡检代码块列表",
-                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
+                                       command=lambda: self.global_info.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_INSPECTION_CODE_BLOCK))  # 返回巡检代码块列表
         button_return.pack()
 
@@ -5464,10 +5595,10 @@ class ViewResourceInFrame:
         one_line_code_index = treeview_code_content.item(item_index, "values")[0]
         print("one_line_code_index", one_line_code_index)
         one_line_code_obj = self.resource_obj.code_list[int(one_line_code_index)]  # 获取选中的命令对象
-        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)
         pop_window.title("设置巡检代码")
-        screen_width = self.main_window.window_obj.winfo_screenwidth()
-        screen_height = self.main_window.window_obj.winfo_screenheight()
+        screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
         width = 420
         height = 300
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
@@ -5631,7 +5762,7 @@ class ViewResourceInFrame:
         obj_info_text.pack()
         # ★★添加“返回巡检代码块列表”按钮★★
         button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回巡检模板列表",
-                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
+                                       command=lambda: self.global_info.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_INSPECTION_TEMPLATE))  # 返回巡检模板列表
         button_return.pack()
 
@@ -5675,8 +5806,8 @@ class ViewResourceInFrame:
         # 显示info Text文本框
         obj_info_text.pack()
         # 添加custome_match_obj_frame用于列出匹配对象
-        custome_match_obj_frame_width = self.main_window.nav_frame_r_width - 25
-        custome_match_obj_frame_height = self.main_window.height - 220
+        custome_match_obj_frame_width = self.global_info.main_window.nav_frame_r_width - 25
+        custome_match_obj_frame_height = self.global_info.main_window.height - 220
         custome_match_obj_frame = tkinter.Frame(self.top_frame_widget_dict["frame"], width=custome_match_obj_frame_width,
                                                 height=custome_match_obj_frame_height, bg="pink")
         # 在custome_match_obj_frame中添加canvas-frame滚动框
@@ -5790,8 +5921,8 @@ class ViewResourceInFrame:
 
     def back_to_custom_tag_config_pop_window(self):
         self.top_frame_widget_dict["pop_window"].destroy()
-        self.main_window.window_obj.focus_force()
-        self.main_window.click_menu_settings_scheme_of_menu_bar_init()
+        self.global_info.main_window.window_obj.focus_force()
+        self.global_info.main_window.click_menu_settings_scheme_of_menu_bar_init()
 
 
 class EditResourceInFrame:
@@ -5799,9 +5930,8 @@ class EditResourceInFrame:
     在主窗口的查看资源界面，添加用于编辑资源信息的控件
     """
 
-    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, resource_obj=None,
+    def __init__(self, top_frame_widget_dict=None, global_info=None, resource_obj=None,
                  resource_type=RESOURCE_TYPE_PROJECT):
-        self.main_window = main_window
         self.top_frame_widget_dict = top_frame_widget_dict
         self.global_info = global_info
         self.resource_obj = resource_obj
@@ -5835,7 +5965,7 @@ class EditResourceInFrame:
 
     def add_save_and_return_button_in_top_frame(self):
         # ★创建“保存更新”按钮
-        save_obj = UpdateResourceInFrame(self.main_window, self.resource_info_dict, self.global_info, self.resource_obj,
+        save_obj = UpdateResourceInFrame(self.resource_info_dict, self.global_info, self.resource_obj,
                                          self.resource_type)
         button_save = tkinter.Button(self.top_frame_widget_dict["frame"], text="保存更新", command=save_obj.update)
         button_save.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
@@ -5846,14 +5976,15 @@ class EditResourceInFrame:
                                            command=self.back_to_custom_tag_config_pop_window)
         else:
             button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="取消编辑",
-                                           command=lambda: self.main_window.nav_frame_r_resource_top_page_display(self.resource_type))
+                                           command=lambda: self.global_info.main_window.nav_frame_r_resource_top_page_display(
+                                               self.resource_type))
         button_return.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
 
     def back_to_custom_tag_config_pop_window(self):
         self.top_frame_widget_dict["pop_window"].destroy()
-        self.main_window.window_obj.focus_force()
-        self.main_window.click_menu_settings_scheme_of_menu_bar_init()
+        self.global_info.main_window.window_obj.focus_force()
+        self.global_info.main_window.click_menu_settings_scheme_of_menu_bar_init()
 
     def proces_mouse_scroll_of_top_frame(self, event):
         if event.delta > 0:
@@ -6321,15 +6452,15 @@ class EditResourceInFrame:
         self.current_row_index = 5
 
     def click_button_add_code_list(self, treeview_code_content):
-        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)
         pop_window.title("添加巡检代码内容")
-        screen_width = self.main_window.window_obj.winfo_screenwidth()
-        screen_height = self.main_window.window_obj.winfo_screenheight()
+        screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
         width = 420
         height = 300
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
-        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.global_info.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
         pop_window.protocol("WM_DELETE_WINDOW", lambda: self.edit_or_add_treeview_code_content_on_closing(pop_window))
@@ -6345,8 +6476,8 @@ class EditResourceInFrame:
 
     def click_button_add_code_list_cancel(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def click_button_add_code_list_ok(self, treeview_code_content, text_code_content, pop_window):
         self.resource_obj.code_list = []
@@ -6361,8 +6492,8 @@ class EditResourceInFrame:
         print("CreateResourceInFrame.click_button_add_code_list_ok: 添加代码行数:",
               len(self.resource_obj.code_list))
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
         # 刷新一次treeview
         treeview_code_content.delete(*treeview_code_content.get_children())
         index = 0
@@ -6380,15 +6511,15 @@ class EditResourceInFrame:
         one_line_code_index, _, _ = treeview_code_content.item(item_index, "values")
         print("one_line_code_index", one_line_code_index)
         one_line_code_obj = self.resource_obj.code_list[int(one_line_code_index)]  # 获取选中的命令对象
-        pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)
         pop_window.title("设置巡检代码")
-        screen_width = self.main_window.window_obj.winfo_screenwidth()
-        screen_height = self.main_window.window_obj.winfo_screenheight()
+        screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
         width = 420
         height = 300
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
-        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.global_info.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
         pop_window.protocol("WM_DELETE_WINDOW", lambda: self.edit_or_add_treeview_code_content_on_closing(pop_window))
@@ -6464,8 +6595,8 @@ class EditResourceInFrame:
 
     def edit_treeview_code_content_item_cancel(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def edit_treeview_code_content_item_save(self, one_line_code_info_dict, one_line_code_obj, pop_window, treeview_code_content):
         one_line_code_obj.code_content = one_line_code_info_dict["sv_code_content"].get()
@@ -6482,8 +6613,8 @@ class EditResourceInFrame:
             one_line_code_obj.interactive_process_method = one_line_code_info_dict["combobox_interactive_process_method"].current()
         one_line_code_obj.description = one_line_code_info_dict["sv_description"].get()
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
         # ★刷新一次treeview
         item_id_list = treeview_code_content.get_children()
         index = 0
@@ -6495,8 +6626,8 @@ class EditResourceInFrame:
 
     def edit_or_add_treeview_code_content_on_closing(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def edit_inspection_template(self):
         # ★创建-inspection_template
@@ -6712,8 +6843,8 @@ class EditResourceInFrame:
         add_custome_match_obj_button = tkinter.Button(self.top_frame_widget_dict["frame"], text="添加匹配对象",
                                                       command=lambda: self.edit_custom_tag_config_scheme__add_custome_match_object())
         add_custome_match_obj_button.grid(row=4, column=0, padx=self.padx, pady=self.pady)
-        custome_match_obj_frame_width = self.main_window.nav_frame_r_width - 25
-        custome_match_obj_frame_height = self.main_window.height - 220
+        custome_match_obj_frame_width = self.global_info.main_window.nav_frame_r_width - 25
+        custome_match_obj_frame_height = self.global_info.main_window.height - 220
         custome_match_obj_frame = tkinter.Frame(self.top_frame_widget_dict["frame"], width=custome_match_obj_frame_width,
                                                 height=custome_match_obj_frame_height, bg="pink")
         # 在custome_match_obj_frame中添加canvas-frame滚动框
@@ -6742,8 +6873,8 @@ class EditResourceInFrame:
         add_match_obj_pop_window.title("配色方案设置")
         screen_width = add_match_obj_pop_window.winfo_screenwidth()
         screen_height = add_match_obj_pop_window.winfo_screenheight()
-        width = self.main_window.nav_frame_r_width - 50
-        height = self.main_window.height - 50
+        width = self.global_info.main_window.nav_frame_r_width - 50
+        height = self.global_info.main_window.height - 50
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         add_match_obj_pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
         self.resource_info_dict["pop_window"].attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
@@ -6915,7 +7046,7 @@ class EditResourceInFrame:
                                  overstrikefg=match_obj.overstrikefg,
                                  font=custom_match_font)
             edit_match_obj_obj = EditCustomMatchObject(top_window=self.resource_info_dict["pop_window"],
-                                                       main_window=self.main_window, call_back_class_obj=self,
+                                                       call_back_class_obj=self,
                                                        match_obj=match_obj, global_info=self.global_info,
                                                        call_back_class=CALL_BACK_CLASS_EDIT_RESOURCE)
             button_edit = tkinter.Button(self.resource_info_dict["custome_match_obj_frame_frame"], text="编辑",
@@ -6969,9 +7100,8 @@ class UpdateResourceInFrame:
     在主窗口的创建资源界面，点击“保存更新”按钮时，更新并保存资源信息
     """
 
-    def __init__(self, main_window=None, resource_info_dict=None, global_info=None, resource_obj=None,
+    def __init__(self, resource_info_dict=None, global_info=None, resource_obj=None,
                  resource_type=None):
-        self.main_window = main_window
         self.resource_info_dict = resource_info_dict  # 由<EditResourceInFrame>对象返回的被编辑资源的信息
         self.global_info = global_info
         self.resource_obj = resource_obj
@@ -7010,7 +7140,7 @@ class UpdateResourceInFrame:
             messagebox.showinfo("更新项目-Error", f"项目名称已存在")
         else:
             self.resource_obj.update(name=project_name, description=project_description, global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_PROJECT)  # 更新项目信息后，返回项目展示页面
+            self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_PROJECT)  # 更新项目信息后，返回项目展示页面
 
     def update_credential(self):
         credential_name = self.resource_info_dict["sv_name"].get()
@@ -7061,7 +7191,8 @@ class UpdateResourceInFrame:
                                      auth_url=credential_auth_url,
                                      ssl_verify=credential_ssl_verify,
                                      global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_CREDENTIAL, )  # 更新credential信息后，返回“显示credential列表”页面
+            self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(
+                RESOURCE_TYPE_CREDENTIAL, )  # 更新credential信息后，返回“显示credential列表”页面
 
     def update_host(self):
         host_name = self.resource_info_dict["sv_name"].get()
@@ -7122,7 +7253,7 @@ class UpdateResourceInFrame:
                                      first_auth_method=host_first_auth_method,
                                      custome_tag_config_scheme_oid=host_custom_scheme.oid,
                                      global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST, )  # 更新host信息后，返回“显示host列表”页面
+            self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST, )  # 更新host信息后，返回“显示host列表”页面
 
     def update_host_group(self):
         host_group_name = self.resource_info_dict["sv_name"].get()
@@ -7153,7 +7284,8 @@ class UpdateResourceInFrame:
         else:
             self.resource_obj.update(name=host_group_name, description=host_group_description, project_oid=project_oid,
                                      global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST_GROUP, )  # 更新host_group信息后，返回“显示host_group列表”页面
+            self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(
+                RESOURCE_TYPE_HOST_GROUP, )  # 更新host_group信息后，返回“显示host_group列表”页面
 
     def update_inspection_code_block(self):
         inspection_code_block_name = self.resource_info_dict["sv_name"].get()
@@ -7178,7 +7310,7 @@ class UpdateResourceInFrame:
             self.resource_obj.update(name=inspection_code_block_name, description=inspection_code_block_description,
                                      project_oid=project_oid,
                                      global_info=self.global_info)
-            self.main_window.list_resource_of_nav_frame_r_bottom_page(
+            self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(
                 RESOURCE_TYPE_INSPECTION_CODE_BLOCK, )  # 更新inspection_code_block信息后，返回
 
     def update_inspection_template(self):
@@ -7249,7 +7381,7 @@ class UpdateResourceInFrame:
                     self.resource_obj.launch_template_trigger_oid)
                 print("xxxxxxxxxxxxxxyyyyyyyyyyyy update update update")
                 launch_template_trigger_obj.update()
-            self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_TEMPLATE, )  # 更新信息后，返回“显示资源列表”页面
+            self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_TEMPLATE, )  # 更新信息后，返回“显示资源列表”页面
 
     def update_custome_tag_config_scheme(self):
         scheme_name = self.resource_info_dict["sv_name"].get()
@@ -7275,8 +7407,8 @@ class UpdateResourceInFrame:
                                      global_info=self.global_info)
             # 更新信息后，返回“显示资源列表”页面
             self.resource_info_dict["pop_window"].destroy()
-            self.main_window.window_obj.focus_force()
-            self.main_window.click_menu_settings_scheme_of_menu_bar_init()
+            self.global_info.main_window.window_obj.focus_force()
+            self.global_info.main_window.click_menu_settings_scheme_of_menu_bar_init()
 
 
 class DeleteResourceInFrame:
@@ -7284,9 +7416,8 @@ class DeleteResourceInFrame:
     在主窗口的查看资源界面，删除选中的资源对象
     """
 
-    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, resource_obj=None,
+    def __init__(self, top_frame_widget_dict=None, global_info=None, resource_obj=None,
                  resource_type=RESOURCE_TYPE_PROJECT, call_back_class_obj=None, call_back_class=CALL_BACK_CLASS_LIST_RESOURCE):
-        self.main_window = main_window
         self.top_frame_widget_dict = top_frame_widget_dict
         self.global_info = global_info
         self.resource_obj = resource_obj
@@ -7327,31 +7458,31 @@ class DeleteResourceInFrame:
 
     def delete_project(self):
         self.global_info.delete_project_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_PROJECT)
+        self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_PROJECT)
 
     def delete_credential(self):
         self.global_info.delete_credential_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_CREDENTIAL)
+        self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_CREDENTIAL)
 
     def delete_host(self):
         self.global_info.delete_host_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
+        self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
 
     def delete_host_group(self):
         self.global_info.delete_host_group_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST_GROUP)
+        self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST_GROUP)
 
     def delete_inspection_code_block(self):
         self.global_info.delete_inspection_code_block_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_CODE_BLOCK)
+        self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_CODE_BLOCK)
 
     def delete_inspection_template(self):
         self.global_info.delete_inspection_template_obj(self.resource_obj)
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_TEMPLATE)
+        self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_INSPECTION_TEMPLATE)
 
     def delete_inspection_job_record(self):
         self.global_info.delete_inspection_job_record_obj(self.resource_obj)
-        self.main_window.list_inspection_job_of_nav_frame_r_page()
+        self.global_info.main_window.list_inspection_job_of_nav_frame_r_page()
 
     def delete_custome_tag_config_scheme(self):
         self.global_info.delete_custome_tag_config_scheme_obj(self.resource_obj)
@@ -7359,7 +7490,7 @@ class DeleteResourceInFrame:
             self.call_back_class_obj.show()
             self.top_frame_widget_dict["pop_window"].focus_force()
         else:
-            self.main_window.click_menu_settings_scheme_of_menu_bar_init()
+            self.global_info.main_window.click_menu_settings_scheme_of_menu_bar_init()
 
 
 class SaveResourceInMainWindow:
@@ -7367,8 +7498,7 @@ class SaveResourceInMainWindow:
     在主窗口的创建资源界面，点击“保存”按钮时，保存资源信息
     """
 
-    def __init__(self, main_window=None, resource_info_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
-        self.main_window = main_window
+    def __init__(self, resource_info_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
         self.resource_info_dict = resource_info_dict  # 由<CreateResourceInFrame>对象返回的被创建资源的信息
         self.global_info = global_info
         self.resource_type = resource_type
@@ -7408,7 +7538,7 @@ class SaveResourceInMainWindow:
             project = Project(name=project_name, description=project_description, global_info=self.global_info)
             project.save()
             self.global_info.project_obj_list.append(project)
-            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_PROJECT)  # 保存项目信息后，返回项目展示页面
+            self.global_info.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_PROJECT)  # 保存项目信息后，返回项目展示页面
 
     def save_credential(self):
         credential_name = self.resource_info_dict["sv_name"].get()
@@ -7459,7 +7589,7 @@ class SaveResourceInMainWindow:
                                     global_info=self.global_info)
             credential.save()
             self.global_info.credential_obj_list.append(credential)
-            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_CREDENTIAL)  # 保存credential信息后，返回credential展示页面
+            self.global_info.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_CREDENTIAL)  # 保存credential信息后，返回credential展示页面
 
     def save_host(self):
         host_name = self.resource_info_dict["sv_name"].get()
@@ -7520,7 +7650,7 @@ class SaveResourceInMainWindow:
                 host.add_credential(self.global_info.credential_obj_list[selected_credential_index])
             host.save()  # 保存资源对象
             self.global_info.host_obj_list.append(host)
-            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST)  # 保存host信息后，返回host展示页面
+            self.global_info.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST)  # 保存host信息后，返回host展示页面
 
     def save_host_group(self):
         host_group_name = self.resource_info_dict["sv_name"].get()
@@ -7549,7 +7679,7 @@ class SaveResourceInMainWindow:
                 host_group.add_host_group(self.global_info.host_group_obj_list[selected_host_group_index])
             host_group.save()  # 保存资源对象
             self.global_info.host_group_obj_list.append(host_group)
-            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST_GROUP)  # 保存host_group信息后，返回host_group展示页面
+            self.global_info.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST_GROUP)  # 保存host_group信息后，返回host_group展示页面
 
     def save_inspection_code_block(self):
         inspection_code_block_name = self.resource_info_dict["sv_name"].get()
@@ -7576,7 +7706,7 @@ class SaveResourceInMainWindow:
             inspection_code_block.code_list = self.resource_info_dict["one_line_code_obj_list"]  # inspection_code_block对象添加code_line列表
             inspection_code_block.save()  # 保存资源对象
             self.global_info.inspection_code_block_obj_list.append(inspection_code_block)
-            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_INSPECTION_CODE_BLOCK)  # 保存后，返回展示页面
+            self.global_info.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_INSPECTION_CODE_BLOCK)  # 保存后，返回展示页面
 
     def save_inspection_template(self):
         inspection_template_name = self.resource_info_dict["sv_name"].get()
@@ -7652,7 +7782,7 @@ class SaveResourceInMainWindow:
                 cron_trigger1.start_crond_job()
             else:
                 pass
-            self.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_INSPECTION_TEMPLATE)  # 返回顶级展示页面
+            self.global_info.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_INSPECTION_TEMPLATE)  # 返回顶级展示页面
 
     def save_custom_tag_config(self):
         custom_scheme_name = self.resource_info_dict["sv_name"].get()
@@ -7682,8 +7812,8 @@ class SaveResourceInMainWindow:
             self.global_info.custome_tag_config_scheme_obj_list.append(custom_scheme)
             # 返回配色方案设置页面
             self.resource_info_dict["pop_window"].destroy()
-            self.main_window.window_obj.focus_force()
-            self.main_window.click_menu_settings_scheme_of_menu_bar_init()
+            self.global_info.main_window.window_obj.focus_force()
+            self.global_info.main_window.click_menu_settings_scheme_of_menu_bar_init()
             return
         self.resource_info_dict["pop_window"].focus_force()
 
@@ -7693,8 +7823,7 @@ class StartInspectionTemplateInFrame:
     在主窗口的查看资源界面，启动目标巡检模板作业，并添加用于显示巡检模板执行情况的控件
     """
 
-    def __init__(self, main_window=None, global_info=None, inspection_template_obj=None):
-        self.main_window = main_window
+    def __init__(self, global_info=None, inspection_template_obj=None):
         self.nav_frame_r_widget_dict = {}
         self.global_info = global_info
         self.inspection_template_obj = inspection_template_obj
@@ -7725,7 +7854,7 @@ class StartInspectionTemplateInFrame:
             launch_job_thread = threading.Thread(target=self.current_inspection_job_obj.start_job)
             launch_job_thread.start()  # 线程start后，不要join()，主界面才不会卡住
             # ★进入作业详情页面★
-            for widget in self.main_window.nav_frame_r.winfo_children():
+            for widget in self.global_info.main_window.nav_frame_r.winfo_children():
                 widget.destroy()
             self.create_frame_with_scrollbar()
             self.show_inspection_job_status()
@@ -7735,15 +7864,15 @@ class StartInspectionTemplateInFrame:
             print("StartInspectionTemplateInFrame.start: 取消启动巡检作业")
 
     def create_frame_with_scrollbar(self):
-        self.main_window.nav_frame_r.__setitem__("bg", "pink")
+        self.global_info.main_window.nav_frame_r.__setitem__("bg", "pink")
         # 在框架2中添加canvas-frame滚动框
-        self.nav_frame_r_widget_dict["scrollbar"] = tkinter.Scrollbar(self.main_window.nav_frame_r)
-        self.nav_frame_r_widget_dict["scrollbar"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        self.nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(self.main_window.nav_frame_r,
-                                                                yscrollcommand=self.nav_frame_r_widget_dict["scrollbar"].set)
-        self.nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=int(self.main_window.nav_frame_r_width - 25),
-                                                     height=self.main_window.height)
-        self.nav_frame_r_widget_dict["scrollbar"].config(command=self.nav_frame_r_widget_dict["canvas"].yview)
+        self.nav_frame_r_widget_dict["scrollbar_normal"] = tkinter.Scrollbar(self.global_info.main_window.nav_frame_r)
+        self.nav_frame_r_widget_dict["scrollbar_normal"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        self.nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(self.global_info.main_window.nav_frame_r,
+                                                                yscrollcommand=self.nav_frame_r_widget_dict["scrollbar_normal"].set)
+        self.nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=int(self.global_info.main_window.nav_frame_r_width - 25),
+                                                     height=self.global_info.main_window.height)
+        self.nav_frame_r_widget_dict["scrollbar_normal"].config(command=self.nav_frame_r_widget_dict["canvas"].yview)
         self.nav_frame_r_widget_dict["frame"] = tkinter.Frame(self.nav_frame_r_widget_dict["canvas"])
         self.nav_frame_r_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
         self.nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=self.nav_frame_r_widget_dict["frame"], anchor='nw')
@@ -7768,7 +7897,7 @@ class StartInspectionTemplateInFrame:
     def add_return_button(self):
         # ★★添加“返回资源列表”按钮★★
         button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回资源列表",
-                                       command=lambda: self.main_window.nav_frame_r_resource_top_page_display(
+                                       command=lambda: self.global_info.main_window.nav_frame_r_resource_top_page_display(
                                            RESOURCE_TYPE_INSPECTION_TEMPLATE))
         button_return.bind("<MouseWheel>", self.proces_mouse_scroll)
         button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
@@ -7911,15 +8040,15 @@ class StartInspectionTemplateInFrame:
         host_job_status_obj_index = inspection_host_treeview.item(item_index, "values")[0]
         # 获取选中的命令对象
         host_job_status_obj = self.current_inspection_job_obj.unduplicated_host_job_status_obj_list[int(host_job_status_obj_index)]
-        pop_window = tkinter.Toplevel(self.main_window.window_obj)  # 创建子窗口★
+        pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)  # 创建子窗口★
         pop_window.title("主机巡检详情")
-        screen_width = self.main_window.window_obj.winfo_screenwidth()
-        screen_height = self.main_window.window_obj.winfo_screenheight()
-        width = self.main_window.width - 20
-        height = self.main_window.height
+        screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
+        width = self.global_info.main_window.width - 20
+        height = self.global_info.main_window.height
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
-        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.global_info.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
         pop_window.protocol("WM_DELETE_WINDOW", lambda: self.on_closing_view_inspection_host_item(pop_window))
@@ -8065,13 +8194,13 @@ class StartInspectionTemplateInFrame:
 
     def exit_view_inspection_host_item(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def on_closing_view_inspection_host_item(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
 
 class ListInspectionJobInFrame:
@@ -8079,8 +8208,7 @@ class ListInspectionJobInFrame:
     在主窗口的查看巡检作业界面，添加用于显示巡检作业信息的控件
     """
 
-    def __init__(self, main_window=None, nav_frame_r_widget_dict=None, global_info=None):
-        self.main_window = main_window
+    def __init__(self, nav_frame_r_widget_dict=None, global_info=None):
         self.nav_frame_r_widget_dict = nav_frame_r_widget_dict
         self.global_info = global_info
         self.padx = 2
@@ -8110,12 +8238,12 @@ class ListInspectionJobInFrame:
             label_name.bind("<MouseWheel>", self.proces_mouse_scroll)
             label_name.grid(row=index + 1, column=1, padx=self.padx, pady=self.pady)
             # 查看对象信息
-            view_obj = ViewInspectionJobInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj)
+            view_obj = ViewInspectionJobInFrame(self.nav_frame_r_widget_dict, self.global_info, obj)
             button_view = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="查看", command=view_obj.show)
             button_view.bind("<MouseWheel>", self.proces_mouse_scroll)
             button_view.grid(row=index + 1, column=2, padx=self.padx, pady=self.pady)
             # 删除对象-->未完善
-            delete_obj = DeleteResourceInFrame(self.main_window, self.nav_frame_r_widget_dict, self.global_info, obj,
+            delete_obj = DeleteResourceInFrame(self.nav_frame_r_widget_dict, self.global_info, obj,
                                                resource_type=RESOURCE_TYPE_INSPECTION_JOB)
             button_delete = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="删除", command=delete_obj.show)
             button_delete.bind("<MouseWheel>", self.proces_mouse_scroll)
@@ -8134,8 +8262,7 @@ class ViewInspectionJobInFrame:
     在主窗口的查看资源界面，显示巡检模板执行作业的详情
     """
 
-    def __init__(self, main_window=None, top_frame_widget_dict=None, global_info=None, inspection_job_record_obj=None):
-        self.main_window = main_window
+    def __init__(self, top_frame_widget_dict=None, global_info=None, inspection_job_record_obj=None):
         self.top_frame_widget_dict = top_frame_widget_dict
         self.global_info = global_info
         self.inspection_job_record_obj = inspection_job_record_obj
@@ -8172,7 +8299,7 @@ class ViewInspectionJobInFrame:
     def add_return_button_in_top_frame(self):
         # ★★添加“返回资源列表”按钮★★
         button_return = tkinter.Button(self.top_frame_widget_dict["frame"], text="返回巡检作业列表",
-                                       command=lambda: self.main_window.list_inspection_job_of_nav_frame_r_page())
+                                       command=lambda: self.global_info.main_window.list_inspection_job_of_nav_frame_r_page())
         button_return.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
 
@@ -8313,15 +8440,15 @@ class ViewInspectionJobInFrame:
         host_job_status_obj_index = inspection_host_treeview.item(item_index, "values")[0]
         # 获取选中的命令对象
         host_job_status_obj = self.inspection_job_record_obj.unduplicated_host_job_status_obj_list[int(host_job_status_obj_index)]
-        pop_window = tkinter.Toplevel(self.main_window.window_obj)  # 创建子窗口★
+        pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)  # 创建子窗口★
         pop_window.title("主机巡检详情")
-        screen_width = self.main_window.window_obj.winfo_screenwidth()
-        screen_height = self.main_window.window_obj.winfo_screenheight()
-        width = self.main_window.width - 20
-        height = self.main_window.height
+        screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
+        width = self.global_info.main_window.width - 20
+        height = self.global_info.main_window.height
         win_pos = f"{width}x{height}+{screen_width // 2 - width // 2}+{screen_height // 2 - height // 2}"
         pop_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
-        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.global_info.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
         pop_window.protocol("WM_DELETE_WINDOW", lambda: self.on_closing_view_inspection_host_item(pop_window))
@@ -8468,13 +8595,22 @@ class ViewInspectionJobInFrame:
 
     def exit_view_inspection_host_item(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
 
     def on_closing_view_inspection_host_item(self, pop_window):
         pop_window.destroy()  # 关闭子窗口
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+
+
+class OpenDivisionTerminalVt100:
+    def __init__(self, global_info=None, host_oid=""):
+        self.global_info = global_info
+        self.host_oid = host_oid
+
+    def open_session_in_division_terminal_window(self):
+        self.global_info.open_session_in_division_terminal_window(self.host_oid)
 
 
 class OpenSingleTerminalVt100:
@@ -8482,10 +8618,9 @@ class OpenSingleTerminalVt100:
     打开单台主机的 在线终端，会创建一个PopWindow，在popwindow里创建一个用于显示终端输入及输出信息的Frame
     """
 
-    def __init__(self, main_window=None, global_info=None, host_obj=None):
-        self.main_window = main_window
+    def __init__(self, global_info=None, host_oid=""):
         self.global_info = global_info
-        self.host_obj = host_obj
+        self.host_oid = host_oid
         self.pop_window = None
         self.shell_terminal_width = 100  # <int> vt100-width
         self.shell_terminal_height = 24  # <int> vt100-height
@@ -8498,19 +8633,24 @@ class OpenSingleTerminalVt100:
         self.pady = 2  # <int>
         self.terminal_vt100_obj = None  # <TerminalVt100>对象
         self.text_pad = 4
+        self.host_obj = global_info.get_host_by_oid(host_oid)
 
     def show(self):
         # ★★创建子窗口★★
-        self.pop_window = tkinter.Toplevel(self.main_window.window_obj)
+        self.pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)
         self.pop_window.title("Terminal")
-        screen_width = self.main_window.window_obj.winfo_screenwidth()
-        screen_height = self.main_window.window_obj.winfo_screenheight()
-        pop_win_width = int(self.shell_terminal_width * self.get_font_mapped_width()) + self.text_pad + 25  # scrollbar_width==25
-        pop_win_height = int(self.shell_terminal_height * self.get_font_mapped_height()) + self.text_pad + 35  # func_frame_height==35
+        screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
+        # scrollbar_width==25
+        pop_win_width = int(self.shell_terminal_width * self.global_info.get_font_mapped_width(self.font_size,
+                                                                                               self.font_family)) + self.text_pad + 25
+        # func_frame_height==35
+        pop_win_height = int(self.shell_terminal_height * self.global_info.get_font_mapped_height(self.font_size,
+                                                                                                  self.font_family)) + self.text_pad + 35
         win_pos_1 = f"{pop_win_width}x{pop_win_height}+"
         win_pos_2 = f"{screen_width // 2 - int(pop_win_width // 2)}+{screen_height // 2 - pop_win_height // 2}"
         self.pop_window.geometry(win_pos_1 + win_pos_2)  # 设置子窗口大小及位置，居中
-        self.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.global_info.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
         self.pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
         self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
@@ -8526,7 +8666,7 @@ class OpenSingleTerminalVt100:
         func_frame.grid(row=0, column=0)
         terminal_frame.grid(row=1, column=0)
         # 创建TerminalVt100终端实例，1台主机一个实例，放在Frame里显示
-        self.terminal_vt100_obj = TerminalVt100(terminal_frame=terminal_frame, global_info=self.global_info, host_obj=self.host_obj,
+        self.terminal_vt100_obj = TerminalVt100(terminal_frame=terminal_frame, global_info=self.global_info, host_oid=self.host_oid,
                                                 shell_terminal_width_pixel=int(pop_win_width - 25 - self.text_pad),
                                                 shell_terminal_height_pixel=int(pop_win_height - 35 - self.text_pad),
                                                 font_family=self.font_family, font_size=self.font_size, font_name=self.font_name,
@@ -8541,189 +8681,88 @@ class OpenSingleTerminalVt100:
         self.terminal_vt100_obj.destroy_all()
         self.pop_window.destroy()  # 关闭子窗口
         print("OpenSingleTerminalVt100.on_closing_terminal_pop_window: 本函数已结束了，子窗口已已已关闭")
-        self.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.main_window.window_obj.focus_force()  # 使主窗口获得焦点
-        self.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
-        self.main_window = None
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
         self.host_obj = None
         self.global_info = None
         self.terminal_vt100_obj = None
 
-    def get_font_mapped_width(self):
-        if self.font_family == "":
-            return self.get_font_mapped_width_songti()
-        elif self.font_family == "JetBrains Mono":
-            return self.get_font_mapped_width_jetbrains_mono()
-        else:
-            return self.font_size  # 如果都没匹配上，则返回字体大小本身
 
-    def get_font_mapped_height(self):
-        if self.font_family == "":
-            return self.get_font_mapped_height_songti()
-        elif self.font_family == "JetBrains Mono":
-            return self.get_font_mapped_height_jetbrains_mono()
-        else:
-            return self.font_size  # 如果都没匹配上，则返回字体大小本身
+class DivisionTerminalWindow:
+    """
+    打开终端窗口，里面的主机是单独的会话，会创建一个PopWindow，在popwindow里创建一个用于显示终端输入及输出信息的Frame
+    """
 
-    def get_font_mapped_width_songti(self):
-        font_size_map_list_songti = [(8, 6, 11),
-                                     (9, 6, 12),
-                                     (10, 7, 13),
-                                     (11, 8, 15),
-                                     (12, 8, 16),
-                                     (13, 9, 17),
-                                     (14, 10, 19),
-                                     (15, 10, 20),
-                                     (16, 11, 21),
-                                     (17, 12, 23),
-                                     (18, 12, 24),
-                                     (19, 13, 25),
-                                     (20, 14, 27),
-                                     (21, 14, 28),
-                                     (22, 15, 29),
-                                     (23, 16, 31),
-                                     (24, 16, 33),
-                                     (25, 17, 33),
-                                     (26, 18, 35),
-                                     (27, 18, 36),
-                                     (28, 19, 37),
-                                     (29, 20, 39),
-                                     (30, 20, 40),
-                                     (31, 21, 41),
-                                     (32, 22, 43),
-                                     (33, 22, 44),
-                                     (34, 23, 45),
-                                     (35, 24, 47),
-                                     (36, 24, 48)]
-        for size, width, height in font_size_map_list_songti:
-            if size == self.font_size:
-                return width
-        return self.font_size  # 如果都没匹配上，则返回字体大小本身
+    def __init__(self, global_info=None):
+        self.global_info = global_info
+        self.pop_window = None  # DivisionTerminalWindow 的主窗口，全局只有一个，在 self.create_init_top_level_window()创建
+        self.screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        self.screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
+        self.pop_win_width = self.screen_width - 100
+        self.pop_win_height = self.screen_height - 100
+        self.font_family = "JetBrains Mono"  # 程序自带内置字体
+        self.font_name = ''  # <str>
+        self.font_size = 12  # <int>
+        self.bg_color = "black"  # <str> color
+        self.fg_color = "white"  # <str> color
+        self.padx = 2  # <int>
+        self.pady = 2  # <int>
+        self.terminal_backend_obj = None  # <TerminalVt100>对象
+        self.text_pad = 4
+        self.create_init_top_level_window()
 
-    def get_font_mapped_width_jetbrains_mono(self):
-        font_size_map_list_jetbrains_mono = [(8, 7, 14),
-                                             (9, 7, 16),
-                                             (10, 8, 17),
-                                             (11, 9, 19),
-                                             (12, 10, 21),
-                                             (13, 10, 22),
-                                             (14, 11, 25),
-                                             (15, 12, 26),
-                                             (16, 13, 27),
-                                             (17, 14, 30),
-                                             (18, 14, 31),
-                                             (19, 15, 32),
-                                             (20, 16, 36),
-                                             (21, 17, 37),
-                                             (22, 17, 39),
-                                             (23, 19, 41),
-                                             (24, 19, 43),
-                                             (25, 20, 44),
-                                             (26, 21, 47),
-                                             (27, 22, 48),
-                                             (28, 22, 49),
-                                             (29, 23, 52),
-                                             (30, 24, 53),
-                                             (31, 25, 54),
-                                             (32, 26, 57),
-                                             (33, 26, 58),
-                                             (34, 27, 59),
-                                             (35, 28, 62),
-                                             (36, 29, 63)]
-        for size, width, height in font_size_map_list_jetbrains_mono:
-            if size == self.font_size:
-                return width
-        return self.font_size  # 如果都没匹配上，则返回字体大小本身
+    def create_init_top_level_window(self):
+        # ★★创建DivisionTerminalWindow窗口★★
+        self.pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)
+        self.pop_window.title("Terminal")
+        win_pos_1 = f"{self.pop_win_width}x{self.pop_win_height}+"
+        win_pos_2 = f"{self.screen_width // 2 - int(self.pop_win_width // 2)}+{self.screen_height // 2 - self.pop_win_height // 2}"
+        self.pop_window.geometry(win_pos_1 + win_pos_2)  # 设置子窗口大小及位置，居中
+        self.global_info.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
+        # 创建功能按钮Frame
+        func_frame = tkinter.Frame(self.pop_window, bg="pink", width=self.pop_win_width, height=35)
+        label_host_name = tkinter.Label(func_frame, text="xx", bd=1)
+        label_host_name.pack(side=tkinter.LEFT, padx=self.padx)
+        button_exit = tkinter.Button(func_frame, text="退出", command=self.on_closing_terminal_pop_window)
+        button_exit.pack(side=tkinter.LEFT, padx=self.padx)
+        terminal_frame = tkinter.Frame(self.pop_window, bg="green", width=self.pop_win_width, height=self.pop_win_height - 35)
+        func_frame.grid_propagate(False)
+        terminal_frame.pack_propagate(False)
+        func_frame.grid(row=0, column=0)
+        terminal_frame.grid(row=1, column=0)
 
-    def get_font_mapped_height_songti(self):
-        font_size_map_list_songti = [(8, 6, 11),
-                                     (9, 6, 12),
-                                     (10, 7, 13),
-                                     (11, 8, 15),
-                                     (12, 8, 16),
-                                     (13, 9, 17),
-                                     (14, 10, 19),
-                                     (15, 10, 20),
-                                     (16, 11, 21),
-                                     (17, 12, 23),
-                                     (18, 12, 24),
-                                     (19, 13, 25),
-                                     (20, 14, 27),
-                                     (21, 14, 28),
-                                     (22, 15, 29),
-                                     (23, 16, 31),
-                                     (24, 16, 33),
-                                     (25, 17, 33),
-                                     (26, 18, 35),
-                                     (27, 18, 36),
-                                     (28, 19, 37),
-                                     (29, 20, 39),
-                                     (30, 20, 40),
-                                     (31, 21, 41),
-                                     (32, 22, 43),
-                                     (33, 22, 44),
-                                     (34, 23, 45),
-                                     (35, 24, 47),
-                                     (36, 24, 48)]
-        for size, width, height in font_size_map_list_songti:
-            if size == self.font_size:
-                return height
-        return self.font_size  # 如果都没匹配上，则返回字体大小本身
-
-    def get_font_mapped_height_jetbrains_mono(self):
-        font_size_map_list_jetbrains_mono = [(8, 7, 14),
-                                             (9, 7, 16),
-                                             (10, 8, 17),
-                                             (11, 9, 19),
-                                             (12, 10, 21),
-                                             (13, 10, 22),
-                                             (14, 11, 25),
-                                             (15, 12, 26),
-                                             (16, 13, 27),
-                                             (17, 14, 30),
-                                             (18, 14, 31),
-                                             (19, 15, 32),
-                                             (20, 16, 36),
-                                             (21, 17, 37),
-                                             (22, 17, 39),
-                                             (23, 19, 41),
-                                             (24, 19, 43),
-                                             (25, 20, 44),
-                                             (26, 21, 47),
-                                             (27, 22, 48),
-                                             (28, 22, 49),
-                                             (29, 23, 52),
-                                             (30, 24, 53),
-                                             (31, 25, 54),
-                                             (32, 26, 57),
-                                             (33, 26, 58),
-                                             (34, 27, 59),
-                                             (35, 28, 62),
-                                             (36, 29, 63)]
-        for size, width, height in font_size_map_list_jetbrains_mono:
-            if size == self.font_size:
-                return height
-        return self.font_size  # 如果都没匹配上，则返回字体大小本身
-
-
-class TagConfigRecord:
-    def __init__(self, tag_config_name='default', font_type=FONT_TYPE_NORMAL, terminal_text=None):
-        self.tag_config_name = tag_config_name  # <str>
-        self.font_type = font_type  # <int>
-        self.terminal_text = terminal_text  # <tkinter.Text> tag_config所设置的目标Text控件
+    def on_closing_terminal_pop_window(self):
+        print("OpenSingleTerminalVt100.on_closing_terminal_pop_window: 本函数快结束了，子窗口还未关闭",
+              "self.vt100_obj.is_closed置True")
+        # self.vt100_obj.back_end_thread.join() # 等待terminal_vt100_obj结束它的子线程
+        print("OpenSingleTerminalVt100.on_closing_terminal_pop_window: 本函数快结束了，子窗口未未未关闭")
+        self.pop_window.destroy()  # 关闭子窗口
+        print("OpenSingleTerminalVt100.on_closing_terminal_pop_window: 本函数已结束了，子窗口已已已关闭")
+        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+        self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
 
 
 class Vt100Cursor:
     def __init__(self, index='1.0', text_obj=None):
         self.index = index  # <str> tkinter.Text组件的索引，需要实时手动更新此值
         self.text_obj = text_obj  # tkinter.Text对象
-        self.line = int(self.index.split(".")[0])  # <int> 索引的行号，从1开始
-        self.column = int(self.index.split(".")[1])  # <int> 索引的列号，从0开始
+        self.line = int(index.split(".")[0])  # <int> 索引的行号，从1开始
+        self.column = int(index.split(".")[1])  # <int> 索引的列号，从0开始
 
     def set_index(self, index):
         self.index = index
-        self.line = int(self.index.split(".")[0])  # <int> 索引的行号，从1开始
-        self.column = int(self.index.split(".")[1])  # <int> 索引的列号，从0开始
+        self.line = int(index.split(".")[0])  # <int> 索引的行号，从1开始
+        self.column = int(index.split(".")[1])  # <int> 索引的列号，从0开始
+
+    def set_line_column(self, line, column):
+        self.line = line
+        self.column = column
+        self.index = str(line) + "." + str(column)
 
     def move_to_linestart(self):
         self.column = 0
@@ -8735,19 +8774,23 @@ class Vt100Cursor:
         :param count:
         :return:
         """
-        end_line = int(self.text_obj.index(tkinter.END + "-1c").split(".")[0])
-        if self.line < end_line:
-            diff = end_line - self.line
-            if diff < count:
-                for _ in range(count - diff):
+        try:
+            end_line = int(self.text_obj.index(tkinter.END + "-1c").split(".")[0])
+            if self.line < end_line:
+                diff = end_line - self.line
+                if diff < count:
+                    for _ in range(count - diff):
+                        self.text_obj.insert(tkinter.END, "\n")
+                self.line += count
+            else:
+                for _ in range(count):
                     self.text_obj.insert(tkinter.END, "\n")
-            self.line += count
-        else:
-            for _ in range(count):
-                self.text_obj.insert(tkinter.END, "\n")
-            self.line += count
-        self.column = 0
-        self.index = str(self.line) + ".0"
+                self.line += count
+            self.column = 0
+            self.index = str(self.line) + ".0"
+        except tkinter.TclError as e:
+            print("except:", e)
+            return
 
     def line_move_up(self, count):
         """
@@ -8767,7 +8810,11 @@ class Vt100Cursor:
         :param count:
         :return:
         """
-        current_line_end_column = int(self.text_obj.index(str(self.line) + ".end").split(".")[1])
+        try:
+            current_line_end_column = int(self.text_obj.index(str(self.line) + ".end").split(".")[1])
+        except tkinter.TclError as e:
+            print("except:", e)
+            return
         if self.column < current_line_end_column:
             diff = current_line_end_column - self.column
             if diff >= count:
@@ -8784,16 +8831,22 @@ class Vt100Cursor:
         :param count:
         :return:
         """
-        current_line_end_column = int(self.text_obj.index(str(self.line) + ".end").split(".")[1])
+        try:
+            current_line_end_column = int(self.text_obj.index(str(self.line) + ".end").split(".")[1])
+        except tkinter.TclError as e:
+            print("except:", e)
+            return self.index
         if self.column < current_line_end_column:
             diff = current_line_end_column - self.column
             if diff >= count:
                 new_column = self.column + count
             else:
                 new_column = current_line_end_column
-            return str(self.line) + "." + str(new_column)
+            new_index = str(self.line) + "." + str(new_column)
+            return new_index
         else:
-            return self.index
+            new_index = self.index
+            return new_index
 
     def column_move_left(self, count):
         """
@@ -8822,7 +8875,12 @@ class Vt100Cursor:
         返回当前索引位置到当前行行尾的字符数量，即self.line到self.line.end之间的字符数量
         :return:
         """
-        return int(self.text_obj.index(str(self.line) + ".end").split(".")[1]) - self.column
+        try:
+            current_right_counts = int(self.text_obj.index(str(self.line) + ".end").split(".")[1]) - self.column
+        except tkinter.TclError as e:
+            print("except:", e)
+            return 0
+        return current_right_counts
 
 
 class TerminalVt100:
@@ -8845,7 +8903,7 @@ class TerminalVt100:
     """
 
     def __init__(self, terminal_frame=None, shell_terminal_width_pixel=1008, shell_terminal_height_pixel=560, global_info=None,
-                 host_obj=None, font_size=14, font_family='', font_name='', bg_color="black", fg_color="white", text_pad=4):
+                 host_oid="", font_size=14, font_family='', font_name='', bg_color="black", fg_color="white", text_pad=4):
         # self.shell_terminal_width = shell_terminal_width  # <int> vt100-width
         # self.shell_terminal_height = shell_terminal_height  # <int> vt100-height
         self.shell_terminal_width_pixel = shell_terminal_width_pixel  # <int> self.terminal_text-width
@@ -8856,14 +8914,16 @@ class TerminalVt100:
         self.bg_color = bg_color  # <str> color
         self.fg_color = fg_color  # <str> color
         self.global_info = global_info
-        self.host_obj = host_obj  # <Host>
+        self.host_oid = host_oid  # <str>
         self.terminal_frame = terminal_frame  # 在Frame里展示一台主机的终端，在Frame里创建相应的Text及Scrollbar
+        self.scrollbar_normal = None  # 在 show_terminal_on_terminal_frame()里赋值
         self.terminal_normal_text = None  # 在 show_terminal_on_terminal_frame()里赋值，tkinter.Text()，普通模式下显示
         self.terminal_application_text = None  # 在 show_terminal_on_terminal_frame()里赋值，tkinter.Text()，退出应用模式后，就隐藏了
         self.padx = 2  # <int>
         self.pady = 2  # <int>
         self.is_closed = False  # 置为True时结束shell会话
-        self.tag_config_record_list = []  # 一次ssh会话的所有输出的tag_config属性记录列表，元素为<TagConfigRecord>对象
+        # self.normal_tag_config_record_list = []  # 一次ssh会话的所有输出的tag_config属性记录列表，元素为<TagConfigRecord>对象
+        # self.app_tag_config_record_list = []  # 一次ssh会话的所有输出的tag_config属性记录列表，元素为<TagConfigRecord>对象
         self.ssh_shell = None
         self.ctrl_pressed = False  # 仅当Ctrl键按下时，此参数置为True，否则置False
         self.need_reset_ssh_shell_size = False
@@ -8872,165 +8932,18 @@ class TerminalVt100:
         self.user_input_byte_queue = None  # 存储的是用户输入的按键（含组合键）对应的ASCII码，元素为bytes(1到N个字节）
         self.back_end_thread = None
         self.text_pad = text_pad
-        self.vt100_cursor_normal = None  # <str>默认值为 current , self.terminal_normal_text的vt100光标索引
-        self.vt100_cursor_app = None  # <Vt100Cursor> , self.terminal_application_text的vt100光标索引
+        # self.vt100_cursor_normal = None  # <str>默认值为 current , self.terminal_normal_text的vt100光标索引
+        # self.vt100_cursor_app = None  # <Vt100Cursor> , self.terminal_application_text的vt100光标索引
         self.before_recv_text_index = "1.0"  # <str>
-
-    def get_font_mapped_width(self):
-        if self.font_family == "":
-            return self.get_font_mapped_width_songti()
-        elif self.font_family == "JetBrains Mono":
-            return self.get_font_mapped_width_jetbrains_mono()
-        else:
-            return self.font_size  # 如果都没匹配上，则返回字体大小本身
-
-    def get_font_mapped_height(self):
-        if self.font_family == "":
-            return self.get_font_mapped_height_songti()
-        elif self.font_family == "JetBrains Mono":
-            return self.get_font_mapped_height_jetbrains_mono()
-        else:
-            return self.font_size  # 如果都没匹配上，则返回字体大小本身
-
-    def get_font_mapped_width_songti(self):
-        font_size_map_list_songti = [(8, 6, 11),
-                                     (9, 6, 12),
-                                     (10, 7, 13),
-                                     (11, 8, 15),
-                                     (12, 8, 16),
-                                     (13, 9, 17),
-                                     (14, 10, 19),
-                                     (15, 10, 20),
-                                     (16, 11, 21),
-                                     (17, 12, 23),
-                                     (18, 12, 24),
-                                     (19, 13, 25),
-                                     (20, 14, 27),
-                                     (21, 14, 28),
-                                     (22, 15, 29),
-                                     (23, 16, 31),
-                                     (24, 16, 33),
-                                     (25, 17, 33),
-                                     (26, 18, 35),
-                                     (27, 18, 36),
-                                     (28, 19, 37),
-                                     (29, 20, 39),
-                                     (30, 20, 40),
-                                     (31, 21, 41),
-                                     (32, 22, 43),
-                                     (33, 22, 44),
-                                     (34, 23, 45),
-                                     (35, 24, 47),
-                                     (36, 24, 48)]
-        for size, width, height in font_size_map_list_songti:
-            if size == self.font_size:
-                return width
-        return self.font_size  # 如果都没匹配上，则返回字体大小本身
-
-    def get_font_mapped_width_jetbrains_mono(self):
-        font_size_map_list_jetbrains_mono = [(8, 7, 14),
-                                             (9, 7, 16),
-                                             (10, 8, 17),
-                                             (11, 9, 19),
-                                             (12, 10, 21),
-                                             (13, 10, 22),
-                                             (14, 11, 25),
-                                             (15, 12, 26),
-                                             (16, 13, 27),
-                                             (17, 14, 30),
-                                             (18, 14, 31),
-                                             (19, 15, 32),
-                                             (20, 16, 36),
-                                             (21, 17, 37),
-                                             (22, 17, 39),
-                                             (23, 19, 41),
-                                             (24, 19, 43),
-                                             (25, 20, 44),
-                                             (26, 21, 47),
-                                             (27, 22, 48),
-                                             (28, 22, 49),
-                                             (29, 23, 52),
-                                             (30, 24, 53),
-                                             (31, 25, 54),
-                                             (32, 26, 57),
-                                             (33, 26, 58),
-                                             (34, 27, 59),
-                                             (35, 28, 62),
-                                             (36, 29, 63)]
-        for size, width, height in font_size_map_list_jetbrains_mono:
-            if size == self.font_size:
-                return width
-        return self.font_size  # 如果都没匹配上，则返回字体大小本身
-
-    def get_font_mapped_height_songti(self):
-        font_size_map_list_songti = [(8, 6, 11),
-                                     (9, 6, 12),
-                                     (10, 7, 13),
-                                     (11, 8, 15),
-                                     (12, 8, 16),
-                                     (13, 9, 17),
-                                     (14, 10, 19),
-                                     (15, 10, 20),
-                                     (16, 11, 21),
-                                     (17, 12, 23),
-                                     (18, 12, 24),
-                                     (19, 13, 25),
-                                     (20, 14, 27),
-                                     (21, 14, 28),
-                                     (22, 15, 29),
-                                     (23, 16, 31),
-                                     (24, 16, 33),
-                                     (25, 17, 33),
-                                     (26, 18, 35),
-                                     (27, 18, 36),
-                                     (28, 19, 37),
-                                     (29, 20, 39),
-                                     (30, 20, 40),
-                                     (31, 21, 41),
-                                     (32, 22, 43),
-                                     (33, 22, 44),
-                                     (34, 23, 45),
-                                     (35, 24, 47),
-                                     (36, 24, 48)]
-        for size, width, height in font_size_map_list_songti:
-            if size == self.font_size:
-                return height
-        return self.font_size  # 如果都没匹配上，则返回字体大小本身
-
-    def get_font_mapped_height_jetbrains_mono(self):
-        font_size_map_list_jetbrains_mono = [(8, 7, 14),
-                                             (9, 7, 16),
-                                             (10, 8, 17),
-                                             (11, 9, 19),
-                                             (12, 10, 21),
-                                             (13, 10, 22),
-                                             (14, 11, 25),
-                                             (15, 12, 26),
-                                             (16, 13, 27),
-                                             (17, 14, 30),
-                                             (18, 14, 31),
-                                             (19, 15, 32),
-                                             (20, 16, 36),
-                                             (21, 17, 37),
-                                             (22, 17, 39),
-                                             (23, 19, 41),
-                                             (24, 19, 43),
-                                             (25, 20, 44),
-                                             (26, 21, 47),
-                                             (27, 22, 48),
-                                             (28, 22, 49),
-                                             (29, 23, 52),
-                                             (30, 24, 53),
-                                             (31, 25, 54),
-                                             (32, 26, 57),
-                                             (33, 26, 58),
-                                             (34, 27, 59),
-                                             (35, 28, 62),
-                                             (36, 29, 63)]
-        for size, width, height in font_size_map_list_jetbrains_mono:
-            if size == self.font_size:
-                return height
-        return self.font_size  # 如果都没匹配上，则返回字体大小本身
+        self.host_obj = global_info.get_host_by_oid(host_oid)
+        # 整个类的实例只使用以下4个字体对象
+        self.terminal_font_normal = font.Font(size=self.font_size, family=self.font_family)
+        self.terminal_font_bold = font.Font(size=self.font_size, family=self.font_family,
+                                            weight="bold")
+        self.terminal_font_italic = font.Font(size=self.font_size, family=self.font_family,
+                                              slant="italic")
+        self.terminal_font_bold_italic = font.Font(size=self.font_size, family=self.font_family,
+                                                   weight="bold", slant="italic")
 
     def find_ssh_credential(self, host_obj):
         """
@@ -9081,30 +8994,30 @@ class TerminalVt100:
         :return:
         """
         # ★★创建Text文本框及滚动条★★
-        scrollbar = tkinter.Scrollbar(self.terminal_frame)
-        # scrollbar.pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        scrollbar.place(x=self.shell_terminal_width_pixel + self.text_pad, y=0, width=25,
-                        height=self.shell_terminal_height_pixel + self.text_pad)
-        text_width = int(self.shell_terminal_width_pixel // self.get_font_mapped_width())
-        text_height = int(self.shell_terminal_height_pixel // self.get_font_mapped_height())
-        output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
-        self.terminal_normal_text = tkinter.Text(master=self.terminal_frame, yscrollcommand=scrollbar.set,
+        self.scrollbar_normal = tkinter.Scrollbar(self.terminal_frame)
+        # scrollbar_normal.pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        self.scrollbar_normal.place(x=self.shell_terminal_width_pixel + self.text_pad, y=0, width=25,
+                                    height=self.shell_terminal_height_pixel + self.text_pad)
+        text_width = int(self.shell_terminal_width_pixel // self.global_info.get_font_mapped_width(self.font_size, self.font_family))
+        text_height = int(self.shell_terminal_height_pixel // self.global_info.get_font_mapped_height(self.font_size, self.font_family))
+        # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
+        self.terminal_normal_text = tkinter.Text(master=self.terminal_frame, yscrollcommand=self.scrollbar_normal.set,
                                                  width=text_width, height=text_height, borderwidth=0,
-                                                 font=output_block_font_normal, bg=self.bg_color, fg=self.fg_color,
-                                                 wrap=tkinter.WORD, spacing1=0, spacing2=0, spacing3=0)
+                                                 font=self.terminal_font_normal, bg=self.bg_color, fg=self.fg_color,
+                                                 wrap=tkinter.CHAR, spacing1=0, spacing2=0, spacing3=0)
         self.terminal_application_text = tkinter.Text(master=self.terminal_frame,
                                                       width=text_width, height=text_height, borderwidth=0,
-                                                      font=output_block_font_normal, bg=self.bg_color, fg=self.fg_color,
-                                                      wrap=tkinter.WORD, spacing1=0, spacing2=0, spacing3=0)
-        self.vt100_cursor_normal = Vt100Cursor(index="1.0", text_obj=self.terminal_normal_text)
-        self.vt100_cursor_app = Vt100Cursor(index="1.0", text_obj=self.terminal_application_text)
+                                                      font=self.terminal_font_normal, bg=self.bg_color, fg=self.fg_color,
+                                                      wrap=tkinter.NONE, spacing1=0, spacing2=0, spacing3=0)
+        # self.vt100_cursor_normal = Vt100Cursor(index="1.0", text_obj=self.terminal_normal_text)
+        # self.vt100_cursor_app = Vt100Cursor(index="1.0", text_obj=self.terminal_application_text)
         # self.terminal_normal_text.pack()  # 显示Text控件，self.terminal_application_text暂时不显示
         self.terminal_normal_text.place(x=0, y=0, width=self.shell_terminal_width_pixel + self.text_pad,
                                         height=self.shell_terminal_height_pixel + self.text_pad)
         # spacing1为当前行与上一行之间距离，像素
         # spacing2为当前行内如果有折行，则折行之间的距离，像素
         # spacing3为当前行与下一行之间距离，像素
-        scrollbar.config(command=self.terminal_normal_text.yview)
+        self.scrollbar_normal.config(command=self.terminal_normal_text.yview)
         self.terminal_normal_text.configure(insertbackground='green')  # Text设置光标颜色
         self.terminal_application_text.configure(insertbackground='green')  # Text设置光标颜色
         # ★★★创建先进先出队列-实时存放用户输入字符★★★
@@ -9147,17 +9060,13 @@ class TerminalVt100:
         self.is_closed = True
         time.sleep(0.1)
         print("TerminalVt100.destroy_all: 开始清理 上面是self.is_closed")
-        # self.back_end_thread.join()  # 这个会一直阻塞导致程序卡死，原因未知
-        # self.terminal_normal_text.delete("1.0", tkinter.END)
-        # self.terminal_application_text.delete("1.0", tkinter.END)
-        self.terminal_frame = None
-        self.global_info = None
-        self.host_obj = None
-        self.vt100_cursor_normal = None
-        self.vt100_cursor_app = None
+        try:
+            cofable_stop_thread(self.back_end_thread)
+        except ValueError as err:
+            print("TerminalVt100.destroy_all:", err)
+        except SystemError as err:
+            print("TerminalVt100.destroy_all:", err)
         print("TerminalVt100.destroy_all: 开始清理 上面是 self.terminal_application_text.delete, tkinter.END)")
-        # for widget in self.terminal_frame.winfo_children():
-        #     widget.destroy()
         print("TerminalVt100.destroy_all: 清理完成")
 
     @staticmethod
@@ -9177,6 +9086,7 @@ class TerminalVt100:
     def pop_menu_on_terminal_text(self, event, terminal_text):
         print("点击了右键")
         pop_menu_bar = tkinter.Menu(terminal_text, tearoff=0)
+        pop_menu_bar.add_command(label="全选", command=lambda: self.selecte_all_text_on_terminal_text(terminal_text))
         pop_menu_bar.add_command(label="复制", command=lambda: self.copy_selected_text_on_terminal_text(terminal_text))
         # pop_menu_bar.add_command(label="复制为RTF", command=lambda: self.copy_selected_text_on_terminal_text_rtf(terminal_text))
         pop_menu_bar.add_command(label="粘贴", command=lambda: self.paste_text_on_terminal_text(terminal_text))
@@ -9184,6 +9094,17 @@ class TerminalVt100:
         pop_menu_bar.add_command(label="保存会话内容", command=lambda: self.save_all_text_on_terminal_text(terminal_text))
         pop_menu_bar.add_command(label="清空会话内容★", command=lambda: self.clear_all_text_on_terminal_text(terminal_text))
         pop_menu_bar.post(event.x_root, event.y_root)
+
+    @staticmethod
+    def selecte_all_text_on_terminal_text(terminal_text):
+        terminal_text.tag_delete("selected")
+        try:
+            terminal_text.tag_add(tkinter.SEL, "1.0", tkinter.END + "-1c")
+            terminal_text.tag_add("selected", tkinter.SEL_FIRST, tkinter.SEL_LAST)
+            terminal_text.tag_config("selected", foreground="white", backgroun="gray")  # 将选中的文本设置属性
+        except tkinter.TclError as e:
+            print("TerminalVt100.set_selected_text_color: 未选择任何文字", e)
+            return
 
     @staticmethod
     def copy_selected_text_on_terminal_text(terminal_text):
@@ -9392,6 +9313,7 @@ class TerminalVt100:
     def clear_all_text_on_terminal_text(terminal_text):
         try:
             terminal_text.delete("1.0", tkinter.END)
+            # terminal_text.mark_set(tkinter.INSERT,"1.0")  # 可不设置，默认自动回到"1.0"
         except tkinter.TclError as e:
             print("TerminalVt100.save_all_text_on_terminal_text: 获取Text内容失败", e)
             terminal_text.focus_force()
@@ -9468,7 +9390,7 @@ class TerminalVt100:
                 self.font_size += 1
                 self.reset_text_tag_config_font_size()  # 实时设置Text字体大小
                 if self.ssh_shell is not None:
-                    self.need_reset_ssh_shell_size = True
+                    self.need_reset_ssh_shell_size = True  # self.front_end_ctrl_key_release()
             return "break"
         elif self.ctrl_pressed and direction < 0:
             print("按下了Ctrl且滚轮向下滚动", direction)
@@ -9476,35 +9398,25 @@ class TerminalVt100:
                 self.font_size -= 1
                 self.reset_text_tag_config_font_size()  # 实时设置Text字体大小
                 if self.ssh_shell is not None:
-                    self.need_reset_ssh_shell_size = True
+                    self.need_reset_ssh_shell_size = True  # self.front_end_ctrl_key_release()
             return "break"
         else:
             pass
 
     def reset_text_tag_config_font_size(self):
-        text_width = int(self.shell_terminal_width_pixel // self.get_font_mapped_width())
-        text_height = int(self.shell_terminal_height_pixel // self.get_font_mapped_height())
+        text_width = int(self.shell_terminal_width_pixel // self.global_info.get_font_mapped_width(self.font_size, self.font_family))
+        text_height = int(self.shell_terminal_height_pixel // self.global_info.get_font_mapped_height(self.font_size, self.font_family))
         self.terminal_normal_text.configure(width=text_width, height=text_height, borderwidth=0, spacing1=0, spacing2=0, spacing3=0)
         self.terminal_application_text.configure(width=text_width, height=text_height, borderwidth=0, spacing1=0, spacing2=0, spacing3=0)
-        for tag_config_record in self.tag_config_record_list:
-            if tag_config_record.font_type == FONT_TYPE_NORMAL:
-                output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
-                tag_config_record.terminal_text.tag_config(f"{tag_config_record.tag_config_name}", font=output_block_font_normal)
-            elif tag_config_record.font_type == FONT_TYPE_BOLD:
-                output_block_font_bold = font.Font(weight='bold', size=self.font_size, family=self.font_family)
-                tag_config_record.terminal_text.tag_config(f"{tag_config_record.tag_config_name}", font=output_block_font_bold)
-            elif tag_config_record.font_type == FONT_TYPE_ITALIC:
-                output_block_font_italic = font.Font(size=self.font_size, family=self.font_family, slant="italic")
-                tag_config_record.terminal_text.tag_config(f"{tag_config_record.tag_config_name}", font=output_block_font_italic)
-            elif tag_config_record.font_type == FONT_TYPE_BOLD_ITALIC:
-                output_block_font_bold_italic = font.Font(weight='bold', size=self.font_size, family=self.font_family, slant="italic")
-                tag_config_record.terminal_text.tag_config(f"{tag_config_record.tag_config_name}", font=output_block_font_bold_italic)
-            else:
-                pass
+        self.terminal_font_normal.config(size=self.font_size)
+        self.terminal_font_bold.config(size=self.font_size)
+        self.terminal_font_italic.config(size=self.font_size)
+        self.terminal_font_bold_italic.config(size=self.font_size)
 
     def reset_ssh_shell_size(self):
-        self.ssh_shell.resize_pty(width=int(self.shell_terminal_width_pixel // self.get_font_mapped_width()),
-                                  height=int(self.shell_terminal_height_pixel // self.get_font_mapped_height()))
+        self.ssh_shell.resize_pty(
+            width=int(self.shell_terminal_width_pixel // self.global_info.get_font_mapped_width(self.font_size, self.font_family)),
+            height=int(self.shell_terminal_height_pixel // self.global_info.get_font_mapped_height(self.font_size, self.font_family)))
 
     def front_end_thread_func_ctrl_comb_key(self, event):
         """
@@ -9532,33 +9444,31 @@ class TerminalVt100:
                 cred = self.find_ssh_credential(self.host_obj)
             except Exception as e:
                 print("TerminalVt100.back_end_thread_func: 查找可用的凭据错误，", e)
-                output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
+                # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
                 try:
                     self.terminal_normal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color, spacing1=0,
                                                          spacing2=0,
-                                                         spacing3=0, font=output_block_font_normal)
+                                                         spacing3=0, font=self.terminal_font_normal)
                     self.terminal_normal_text.insert(tkinter.END, "TerminalVt100.back_end_thread_func: 查找可用的凭据错误",
                                                      "default")
                     self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
                     self.terminal_normal_text.focus_force()
                 except tkinter.TclError as e:
                     print("TerminalVt100.back_end_thread_func:", e)
-                    return
                 return
             if cred is None:
                 print("TerminalVt100.back_end_thread_func: Credential is None, Could not find correct credential")
-                output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
+                # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
                 try:
                     self.terminal_normal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color, spacing1=0,
                                                          spacing2=0,
-                                                         spacing3=0, font=output_block_font_normal)
+                                                         spacing3=0, font=self.terminal_font_normal)
                     self.terminal_normal_text.insert(tkinter.END, "TerminalVt100.back_end_thread_func: 查找可用的凭据错误None",
                                                      "default")
                     self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
                     self.terminal_normal_text.focus_force()
                 except tkinter.TclError as e:
                     print("TerminalVt100.back_end_thread_func:", e)
-                    return
                 return
             # ★★开始ssh登录并创建ssh_shell，发送信息并接收输出信息
             self.run_invoke_shell(cred)
@@ -9575,7 +9485,7 @@ class TerminalVt100:
         """
         # ★★创建ssh连接★★
         ssh_client = paramiko.client.SSHClient()
-        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在known_hosts文件里的主机
         try:
             if cred.cred_type == CRED_TYPE_SSH_PASS:
                 print("TerminalVt100.run_invoke_shell : 使用ssh_password密码登录")
@@ -9593,8 +9503,9 @@ class TerminalVt100:
             print(f"TerminalVt100.run_invoke_shell : Authentication Error: {e}")
             raise e
         # ★★连接后，创建invoke_shell交互式shell★★
-        self.ssh_shell = ssh_client.invoke_shell(width=int(self.shell_terminal_width_pixel // self.get_font_mapped_width()),
-                                                 height=int(self.shell_terminal_height_pixel // self.get_font_mapped_height()))
+        self.ssh_shell = ssh_client.invoke_shell(
+            width=int(self.shell_terminal_width_pixel // self.global_info.get_font_mapped_width(self.font_size, self.font_family)),
+            height=int(self.shell_terminal_height_pixel // self.global_info.get_font_mapped_height(self.font_size, self.font_family)))
         # ★★创建线程专门负责接收输出并解析，最后在Text显示输出（解析后的内容）★★
         recv_thred = threading.Thread(target=self.run_invoke_shell_recv)
         recv_thred.start()  # 线程start后，不要join()，主界面才不会卡住
@@ -9630,18 +9541,11 @@ class TerminalVt100:
         而不是立即响应vt100光标的操作，假如立即响应，会让程序显示时变卡，速度变慢
         :return:
         """
-        # 先创建一个默认的terminal_application_text显示属性tag
-        output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
-        self.terminal_application_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
-                                                  font=output_block_font_normal,
-                                                  spacing1=0, spacing2=0, spacing3=0)
-        self.tag_config_record_list.append(TagConfigRecord("default", FONT_TYPE_NORMAL, self.terminal_application_text))
         # 先创建一个默认的terminal_normal_text显示属性tag
-        output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
+        # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
         self.terminal_normal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
-                                             font=output_block_font_normal,
+                                             font=self.terminal_font_normal,
                                              spacing1=0, spacing2=0, spacing3=0)
-        self.tag_config_record_list.append(TagConfigRecord("default", FONT_TYPE_NORMAL, self.terminal_normal_text))
         # 不停地从ssh_shell接收输出信息，直到关闭了终端窗口
         while True:
             if self.is_closed:
@@ -9662,7 +9566,8 @@ class TerminalVt100:
                 if ret is not None:
                     print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了★Enter Alternate Keypad Mode★ {match_pattern}")
                     # 首次匹配，首次进入alternate_keypad_mode需要清空此模式下Text控件内容
-                    self.enter_alternate_keypad_mode_text(received_bytes[ret.end():])
+                    new_received_bytes = received_bytes[ret.end():]
+                    self.enter_alternate_keypad_mode_text(new_received_bytes)
                     continue
                 if self.is_alternate_keypad_mode:
                     # 如果已经处于应用模式，则本次接收到的信息交给 self.enter_alternate_keypad_mode_text() 处理
@@ -9672,19 +9577,24 @@ class TerminalVt100:
                 self.process_received_bytes_on_normal_mode(received_bytes)
             except Exception as e:
                 print(e)
+                self.is_closed = True
                 return
 
     def process_received_bytes_on_normal_mode(self, received_bytes):
-        self.before_recv_text_index = self.vt100_cursor_normal.index
+        self.before_recv_text_index = self.terminal_normal_text.index(tkinter.INSERT)  # 对每次接收信息处理前的索引
         output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
+        output_block_ctrl_and_normal_content_list_new = [x for x in output_block_ctrl_and_normal_content_list if x]  # 新列表不含空元素
+        if len(output_block_ctrl_and_normal_content_list_new) == 0:
+            print(f"TerminalVt100.process_received_bytes_on_normal_mode: 本次接收到的信息拆分后列表为空")
+            # self.terminal_normal_text.mark_set("insert", self.vt100_cursor_normal.index)
+            self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
+            self.terminal_normal_text.focus_force()
+            return
         # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析，普通输出模式 ★★★★★★
-        for block_bytes in output_block_ctrl_and_normal_content_list:
+        for block_bytes in output_block_ctrl_and_normal_content_list_new:
             if self.is_closed:
                 print("TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 本函数结束了")
                 return
-            if len(block_bytes) == 0:
-                print("TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: block_bytes为空")
-                continue
             print("TerminalVt100.process_received_bytes_on_normal_mode Start of one block_bytes 普通输出模式: block_bytes不为空★★")
             block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
             # ★匹配 [m 或 [0m  -->清除所有属性
@@ -9693,24 +9603,24 @@ class TerminalVt100:
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
                 # 在self.terminal_text里输出解析后的内容
-                self.normal_mode_print_lines(block_str[ret.end():], 'default')
+                new_block_str = block_str[ret.end():]
+                self.normal_mode_print_lines(new_block_str, 'default')
                 continue
             # ★匹配 [01m 到 [08m  [01;34m  [01;34;42m   -->字体风格
             match_pattern = r'^\[([0-9]{1,2};){,4}[0-9]{1,2}m'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
-                vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
-                                                          output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
+                new_block_str = block_str[ret.end():]
+                output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
+                vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
+                                                          output_block_control_seq=output_block_control_seq,
                                                           terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_NORMAL)
-                # vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
-                # 在self.terminal_text里输出解析后的内容
-                # start_index = self.vt100_cursor_normal.index
-                vt100_output_block_obj.start_index = self.vt100_cursor_normal.index
-                self.normal_mode_print_lines(block_str[ret.end():], "default")
-                vt100_output_block_obj.end_index = self.vt100_cursor_normal.index
-                # 处理vt100输出自带有的颜色风格
-                set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color)
+                vt100_output_block_obj.start_index = self.terminal_normal_text.index(tkinter.INSERT)
+                self.normal_mode_print_lines(new_block_str, "default")  # 输出内容到Text组件
+                vt100_output_block_obj.end_index = self.terminal_normal_text.index(tkinter.INSERT)
+                # 处理vt100输出自带的颜色风格
+                set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color_normal)
                 set_vt100_tag_thread.start()
                 continue
             # ★匹配 [C  [8C  -->[数字C  向右移动vt100_cursor（text_cursor光标在本轮for循环结束后，一次recv处理完成后，再显示）
@@ -9718,14 +9628,14 @@ class TerminalVt100:
             ret = re.search(match_pattern, block_str)
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                new_block_str = block_str[ret.end():]
                 output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1].replace("\0", "")
-                vt100_output_block_obj = Vt100OutputBlock(output_block_content=block_str[ret.end():],
+                vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
                                                           output_block_control_seq=output_block_control_seq,
                                                           terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_NORMAL)
                 vt100_output_block_obj.move_text_index_right()  # 向右移动索引
                 # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
-                # new_block_bytes = block_str[ret.end():].replace('\0', '').encode("utf8")
-                self.normal_mode_print_chars(block_str[ret.end():], 'default')
+                self.normal_mode_print_chars(new_block_str, 'default')
                 del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
                 gc.collect()
                 continue
@@ -9734,17 +9644,18 @@ class TerminalVt100:
             ret = re.search(match_pattern, block_str)
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
-                if self.vt100_cursor_normal.get_current_right_counts() > 0:
-                    self.terminal_normal_text.delete(self.vt100_cursor_normal.index, str(self.vt100_cursor_normal.line) + ".end")
+                # if self.vt100_cursor_normal.get_current_right_counts() > 0:
+                self.terminal_normal_text.delete(tkinter.INSERT, tkinter.INSERT + " lineend")
                 # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
-                self.normal_mode_print_chars(block_str[ret.end():], "default")
+                new_block_str = block_str[ret.end():]
+                self.normal_mode_print_chars(new_block_str, "default")
                 continue
             # ★匹配 [H  -->vt100_cursor光标回到屏幕开头，复杂清屏，一般vt100光标回到开头后，插入的内容会覆盖原界面的内容，未覆盖到的内容还得继续展示
             match_pattern = r'^\[H'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
-                self.vt100_cursor_normal.set_index("1.0")
+                self.terminal_normal_text.mark_set(tkinter.INSERT, "1.0")
                 continue
             # ★匹配 [42D  -->vt100_cursor光标左移42格，一般vt100光标回到当前行开头后，插入的内容会覆盖同行相应位置的内容，
             # 未覆盖的地方不动它，不折行，不产生新行
@@ -9755,9 +9666,11 @@ class TerminalVt100:
                 # 匹配到之后，可能 block_bytes[ret.end():] 是新的内容，要覆盖同一行相应长度的字符
                 # need to copy_current_page_move_cursor_to_head_and_cover_content
                 print("★匹配 [数字D -->光标左移n格，复杂清屏")
+                new_block_str = block_str[ret.end():]
+                output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
                 vt100_output_block_obj = Vt100OutputBlock(
-                    output_block_content=block_str[ret.end():],
-                    output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
+                    output_block_content=new_block_str,
+                    output_block_control_seq=output_block_control_seq,
                     terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_NORMAL)
                 vt100_output_block_obj.left_move_vt100_cursor_and_or_overwrite_content_in_current_line()
                 del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
@@ -9770,7 +9683,6 @@ class TerminalVt100:
                 print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: ★单独匹配到了 {match_pattern}")
                 # to do
                 self.terminal_normal_text.insert(tkinter.END, "\n", 'default')  # 暂时在Text组件末尾插入一个空行
-                self.vt100_cursor_normal.set_index(self.terminal_normal_text.index(tkinter.END + "-1c"))
                 continue
             # ★匹配  b'\x08'  -->回退符，向左移动光标
             match_pattern = b'\x08'
@@ -9786,26 +9698,25 @@ class TerminalVt100:
                 continue
             # ★匹配  b'\x0d'  --> '\r'
             match_pattern = '^\\r'
-            block_str_filter = block_str.replace("\r\n", "\n")
-            ret = re.search(match_pattern, block_str_filter)
+            new_block_str = block_str.replace("\r\n", "\n")
+            ret = re.search(match_pattern, new_block_str)
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: ★单独匹配到了 {match_pattern}")
-                self.normal_mode_print_chars(block_str_filter, "default")
+                self.normal_mode_print_chars(new_block_str, "default")
                 continue
             # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
             print("TerminalVt100.process_received_bytes_on_normal_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
             self.normal_mode_print_lines(block_str, "default")
         # ★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★
+        current_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
         end_line = int(self.terminal_normal_text.index(tkinter.END + "-1c").split(".")[0])
-        if self.vt100_cursor_normal.line != end_line:  # 如果输出的内容有换行，则将text_cursor光标移动到最后一行的行尾
-            print("TerminalVt100.process_received_bytes_on_normal_mode: 行数不同: ", self.vt100_cursor_normal.line, end_line)
-            self.terminal_normal_text.mark_set("insert", tkinter.END)
-            self.vt100_cursor_normal.set_index(self.terminal_normal_text.index(tkinter.END + "-1c"))
+        if current_line != end_line:  # 如果输出的内容有换行，则将text_cursor光标移动到最后一行的行尾
+            print("TerminalVt100.process_received_bytes_on_normal_mode: 行数不同: ", current_line, end_line)
+            self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.END)
         else:
-            self.terminal_normal_text.mark_set("insert", self.vt100_cursor_normal.index)
-            print(f"TerminalVt100.process_received_bytes_on_normal_mode: 行数相同: {self.vt100_cursor_normal.index}")
+            print(f"TerminalVt100.process_received_bytes_on_normal_mode: 行数相同: {current_line}")
         # 匹配用户自定义高亮词汇
-        last_recv_content_str = self.terminal_normal_text.get(self.before_recv_text_index, self.vt100_cursor_normal.index)
+        last_recv_content_str = self.terminal_normal_text.get(self.before_recv_text_index, tkinter.INSERT)
         custom_tag_config_obj = CustomTagConfigSet(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
                                                    start_index=self.before_recv_text_index, host_obj=self.host_obj,
                                                    terminal_mode=VT100_TERMINAL_MODE_NORMAL, global_info=self.global_info)
@@ -9817,10 +9728,13 @@ class TerminalVt100:
     def enter_alternate_keypad_mode_text(self, received_bytes):
         # self.terminal_application_text已经在self.show_terminal_on_terminal_frame()里创建了，只是暂时未显示
         if not self.is_alternate_keypad_mode:
-            # 说明是首次进入此模式，需要清空Text内容
+            # 说明是首次进入此模式
+            # 先创建一个默认的terminal_application_text显示属性tag
+            # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
+            self.terminal_application_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
+                                                      font=self.terminal_font_normal,
+                                                      spacing1=0, spacing2=0, spacing3=0)
             self.is_alternate_keypad_mode = True
-            self.terminal_application_text.delete("1.0", tkinter.END)  # 清空Text内容
-            self.vt100_cursor_app.set_index("1.0")
         # match exit alternate_keypad_mode
         match_pattern = b'\x1b\[\?1l\x1b>'
         ret = re.search(match_pattern, received_bytes)
@@ -9828,13 +9742,19 @@ class TerminalVt100:
             print(f"TerminalVt100.enter_alternate_keypad_mode_text: 匹配到了★Exit Alternate Keypad Mode★ {match_pattern}")
             self.is_alternate_keypad_mode = False
             self.exit_alternate_keypad_mode = False
+            # 退出应用模式前，先清空其内容
+            self.terminal_application_text.delete("1.0", tkinter.END)  # 清空Text内容
             self.terminal_application_text.place_forget()  # 先隐藏应用模式Text控件
-            # 展示普通模式Text控件
+            # 再展示普通模式Text控件
             self.terminal_normal_text.place(x=0, y=0, width=self.shell_terminal_width_pixel + self.text_pad,
                                             height=self.shell_terminal_height_pixel + self.text_pad)
-            self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
-            self.terminal_normal_text.mark_set("insert", tkinter.END)
-            self.terminal_normal_text.focus_force()
+            new_received_bytes = received_bytes[ret.end():]
+            if len(new_received_bytes) > 0:
+                self.process_received_bytes_on_normal_mode(new_received_bytes)
+            else:
+                self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
+                self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.END)
+                self.terminal_normal_text.focus_force()
             return
         # 展示应用模式Text控件
         self.terminal_normal_text.place_forget()  # 先隐藏普通模式Text控件
@@ -9849,75 +9769,76 @@ class TerminalVt100:
         self.process_received_bytes_on_alternate_keypad_mode(received_bytes)
 
     def process_received_bytes_on_alternate_keypad_mode(self, received_bytes):
-        # self.terminal_application_text.insert(tkinter.END,received_bytes.decode("utf8"))
         output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
+        output_block_ctrl_and_normal_content_list_new = [x for x in output_block_ctrl_and_normal_content_list if x]  # 新列表不含空元素
         # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析 ★★★★★★
-        for block_bytes in output_block_ctrl_and_normal_content_list:
-            # if self.is_closed:
-            #     print("TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 本函数结束了")
-            #     return
-            if len(block_bytes) == 0:
-                print("TerminalVt100.process_received_bytes_on_alternate_keypad_mode: block_bytes为空")
-                continue
-            print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: block_bytes不为空★★ {block_bytes}")
+        if len(output_block_ctrl_and_normal_content_list_new) == 0:
+            print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 本次接收到的信息拆分后列表为空")
+            return
+        for block_bytes in output_block_ctrl_and_normal_content_list_new:
+            if self.is_closed:
+                print("TerminalVt100.process_received_bytes_on_alternate_keypad_mode app输出模式: 本函数结束了")
+                return
             block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
-            # block_str = block_bytes.decode("utf8")
             # ★匹配 [m 或 [0m  -->清除所有属性
             match_pattern = r'^\[[0]?m'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
                 # print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
                 # 在self.terminal_text里输出解析后的内容
-                block_str_filter = block_str[ret.end():]
-                self.app_mode_print_chars(block_str_filter, "default")
-                # self.terminal_application_text.insert(self.vt100_cursor_app, block_str_filter, 'default')
+                new_block_str = block_str[ret.end():]
+                if len(new_block_str) > 0:
+                    self.app_mode_print_chars(new_block_str, "default")
                 continue
             # ★匹配 [01m 到 [08m  [01;34m  [01;34;42m  [0;1;4;31m  -->这种字体风格
             match_pattern = r'^\[([0-9]{1,2};){,4}[0-9]{1,2}m'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
-                output_block_content = block_str[ret.end():].replace('\0', '')
-                vt100_output_block_obj = Vt100OutputBlock(output_block_content=output_block_content,
-                                                          output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
-                                                          terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
-                vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
-                # 在self.terminal_text里输出解析后的内容
-                vt100_output_block_obj.start_index = self.vt100_cursor_app.index
-                self.app_mode_print_chars(output_block_content, vt100_output_block_obj.output_block_tag_config_name)
-                vt100_output_block_obj.end_index = self.vt100_cursor_app.index
-                # 处理vt100输出自带有的颜色风格
-                set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color)
-                set_vt100_tag_thread.start()
+                new_block_str = block_str[ret.end():].replace('\0', '')
+                if len(new_block_str) > 0:
+                    vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
+                                                              output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
+                                                              terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
+                    # vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
+                    # 在self.terminal_text里输出解析后的内容
+                    vt100_output_block_obj.start_index = self.terminal_application_text.index(tkinter.INSERT)
+                    self.app_mode_print_chars(new_block_str, vt100_output_block_obj.output_block_tag_config_name)
+                    vt100_output_block_obj.end_index = self.terminal_application_text.index(tkinter.INSERT)
+                    # 处理vt100输出自带有的颜色风格
+                    set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color_app)
+                    set_vt100_tag_thread.start()
                 continue
             # ★匹配 [C  [8C  -->[数字C  向右移动vt100_cursor（Text_cursor在本轮for循环结束后（一次recv处理完成后）再显示光标
-            match_pattern = r'^\[[0-9]*C'
+            match_pattern = r'^\[[0-9]{,3}C'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
                 output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
-                new_block_bytes = block_str[ret.end():].replace('\0', '')
-                vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_bytes,
-                                                          output_block_control_seq=output_block_control_seq,
-                                                          terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
-                vt100_output_block_obj.move_text_index_right()  # 向右移动索引
-                # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
-                # self.match_backspace_x08_app(new_block_bytes)  # ★★匹配回退符并向左移动索引★★
-                self.app_mode_print_chars(new_block_bytes, "default")
-                del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
-                gc.collect()
+                new_block_str = block_str[ret.end():].replace('\0', '')
+                if len(new_block_str) > 0:
+                    vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
+                                                              output_block_control_seq=output_block_control_seq,
+                                                              terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
+                    vt100_output_block_obj.move_text_index_right()  # 向右移动索引
+                    # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
+                    # self.match_backspace_x08_app(new_block_bytes)  # ★★匹配回退符并向左移动索引★★
+                    self.app_mode_print_chars(new_block_str, "default")
+                    del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
+                    gc.collect()
                 continue
             # ★匹配 [K  -->从当前光标位置向右清除到本行行尾所有内容 app
             match_pattern = r'^\[K'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
-                if self.vt100_cursor_app.get_current_right_counts() > 0:
-                    self.terminal_application_text.delete(self.vt100_cursor_app.index, str(self.vt100_cursor_app.line) + ".end")
+                right_content_counts = len(self.terminal_application_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
+                if right_content_counts > 0:
+                    self.terminal_application_text.delete(tkinter.INSERT, tkinter.INSERT + " lineend")
                 # # 有时匹配了控制序列后，在其末尾还会有回退符，普通字符等  这里得再匹配一次
-                # new_block_bytes = block_str[ret.end():]
-                # if len(new_block_bytes) > 0:
-                self.app_mode_print_chars(block_str[ret.end():], "default")
+                new_block_str = block_str[ret.end():]
+                if len(new_block_str) > 0:
+                    self.app_mode_print_chars(new_block_str, "default")
                 continue
             # ★匹配 [H  -->光标回到屏幕开头，复杂清屏，一般vt100光标回到开头后，插入的内容会覆盖原界面的内容，未覆盖到的内容还得继续展示
             match_pattern = r'^\[H'
@@ -9926,8 +9847,8 @@ class TerminalVt100:
                 print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
                 # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
                 # need to copy_current_page_move_cursor_to_head_and_cover_content
-                print("★匹配 [H -->光标回到屏幕开头，复杂清屏: copied_current_page set True")
-                self.vt100_cursor_app.set_index("1.0")
+                print("process_received_bytes_on_alternate_keypad_mode ★匹配 [H -->光标回到屏幕开头，复杂清屏")
+                self.terminal_application_text.mark_set(tkinter.INSERT, "1.0")
                 continue
             # ★匹配 [6;26H  -->光标移动到指定行列
             match_pattern = r'^\[\d{1,};\d{1,}H'
@@ -9935,12 +9856,12 @@ class TerminalVt100:
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
                 # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
+                # 如果有内容，那就输出呗
                 line_column_list = block_str[ret.start() + 1:ret.end() - 1].split(";")
-                self.vt100_cursor_app.set_index(line_column_list[0] + "." + str(int(line_column_list[1]) - 1))
-                new_block_bytes = block_str[ret.end():]
-                if len(new_block_bytes) > 0:
-                    self.app_mode_print_chars(new_block_bytes, "default")
-                self.terminal_application_text.mark_set("insert", self.vt100_cursor_app.index)
+                self.terminal_application_text.mark_set(tkinter.INSERT, f"{line_column_list[0]}.{str(int(line_column_list[1]) - 1)}")
+                new_block_str = block_str[ret.end():]
+                if len(new_block_str) > 0:
+                    self.app_mode_print_chars(new_block_str, "default")
                 continue
             # ★匹配 [J  -->清空屏幕，一般和[H一起出现
             match_pattern = r'^\[J'
@@ -9958,9 +9879,10 @@ class TerminalVt100:
                 # 匹配到之后，可能 block_bytes[ret.end():] 是新的内容，要覆盖同一行相应长度的字符
                 # need to copy_current_page_move_cursor_to_head_and_cover_content
                 print("★匹配 [数字D -->光标左移n格，复杂清屏")
+                output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
                 vt100_output_block_obj = Vt100OutputBlock(
                     output_block_content=block_str[ret.end():],
-                    output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
+                    output_block_control_seq=output_block_control_seq,
                     terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
                 vt100_output_block_obj.left_move_vt100_cursor_and_or_overwrite_content_in_current_line()
                 del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
@@ -9968,53 +9890,55 @@ class TerminalVt100:
                 continue
             # ★匹配  b'\x0d'  --> '\r'
             match_pattern = '^\\r'
-            block_str_filter = block_str.replace("\r\n", "\n")
+            block_str_filter = block_str  # .replace("\r\n", "\n")
             ret = re.search(match_pattern, block_str_filter)
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode app输出模式: ★单独匹配到了 {match_pattern}")
-                self.app_mode_print_chars(block_str_filter, "default")
+                if len(block_str_filter) > 0:
+                    self.app_mode_print_chars(block_str_filter, "default")
                 continue
             # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
             # print("TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
             # block_str_filter = block_str.replace('\0', '').replace(chr(0x0f), '')
             self.app_mode_print_lines(block_str, "default")
         # ★★★★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★★★★
-        self.terminal_application_text.see(tkinter.END)
+        self.terminal_application_text.see(tkinter.INSERT)
         self.terminal_application_text.focus_force()
 
     def app_mode_print_chars(self, content_str, tag_config_name):
-        """
-        content_str  # <str> 要打印的字符串，含有特殊字符，未过滤，未替换，原始的（仅移除了ESC控制序列）
-        :param content_str:
-        :param tag_config_name:
-        :return:
-        """
-        # print(f"PrintVt100Content.print content_str : {content_str}")
+        print(f"fuck 1 PrintVt100Content.print content_str : {content_str.encode('utf8')}")
         if len(content_str) > 0:
             for char in content_str:
                 # print(f"PrintVt100Content.print: {char.encode('utf8')}")
                 if char == '\0':
                     continue
                 elif char == '\r':
-                    self.vt100_cursor_app.move_to_linestart()
+                    self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
                 elif char == '\n':
-                    self.vt100_cursor_app.line_move_down(1)  # 光标下移一行且移到行首
+                    current_line = int(self.terminal_application_text.index(tkinter.INSERT).split(".")[0])
+                    end_line = int(self.terminal_application_text.index(tkinter.END + "-1c").split(".")[0])
+                    if current_line < end_line:
+                        self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
+                        self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + "+1l")
+                    else:
+                        self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " lineend")
+                        self.terminal_application_text.insert(tkinter.INSERT, "\n", tag_config_name)
                 elif char == chr(0x08):
-                    self.vt100_cursor_app.column_move_left(1)
+                    self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + "-1c")  # 到行首了还能左移吗？
                 elif char == chr(0x0f):
                     continue
                 elif char == chr(0x07):  # 响铃
                     continue
                 else:
-                    if self.vt100_cursor_app.get_current_right_counts() >= 1:
-                        # 每插入一个字符前，先向右删除一个字符（覆盖）
-                        self.terminal_application_text.replace(self.vt100_cursor_app.index,
-                                                               self.vt100_cursor_app.get_index_column_move_right(1),
-                                                               char, tag_config_name)
-                    else:
-                        self.terminal_application_text.insert(self.vt100_cursor_app.index, char, tag_config_name)
-                    self.vt100_cursor_app.column_move_right(1)  # 同步更新索引
-                    # print(f"PrintVt100Content.print: 当前vt100_cursor: {self.vt100_cursor_app.index}")
+                    try:
+                        right_content_counts = len(self.terminal_application_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
+                        if right_content_counts > 0:
+                            self.terminal_application_text.replace(tkinter.INSERT, tkinter.INSERT + "+1c", char, tag_config_name)
+                        else:
+                            self.terminal_application_text.insert(tkinter.INSERT, char, tag_config_name)
+                    except tkinter.TclError as e:
+                        print("except:", e)
+                        return
 
     def app_mode_print_lines(self, content_str, tag_config_name):
         """
@@ -10023,26 +9947,38 @@ class TerminalVt100:
         :param tag_config_name:
         :return:
         """
-        content_str_filter = content_str.replace("\r\n", "\n").replace("\0", '').replace(chr(0x0f), "")
+        # content_str_filter = content_str.replace("\r\n", "\n").replace("\0", '').replace(chr(0x0f), "")
+        content_str_filter = content_str.replace("\0", '').replace(chr(0x0f), "")
         if len(content_str_filter) > 0:
             line_index = 0
             for line in content_str_filter.split("\n"):
-                # print(f"PrintVt100Content.print: {char.encode('utf8')}")
-                if line_index > 0:
-                    self.terminal_application_text.insert(self.vt100_cursor_app.index, "\n", tag_config_name)
-                    self.vt100_cursor_app.line_move_down(1)  # 光标下移一行且移到行首
-                line_length = len(line)
-                if line_length > 0:
-                    if self.vt100_cursor_app.get_current_right_counts() >= 1:
+                try:
+                    # print(f"PrintVt100Content.print: {char.encode('utf8')}")
+                    if line_index > 0:
+                        current_line = int(self.terminal_application_text.index(tkinter.INSERT).split(".")[0])
+                        end_line = int(self.terminal_application_text.index(tkinter.END + "-1c").split(".")[0])
+                        if current_line < end_line:
+                            self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
+                            self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + "+1l")
+                        else:
+                            self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " lineend")
+                            self.terminal_application_text.insert(tkinter.INSERT, "\n", tag_config_name)
+                    line_length = len(line)
+                    if line_length > 0:
                         # 每插入n个字符前，先向右删除n个字符（覆盖）
-                        self.terminal_application_text.replace(self.vt100_cursor_app.index,
-                                                               self.vt100_cursor_app.get_index_column_move_right(line_length),
-                                                               line, tag_config_name)
-                    else:
-                        self.terminal_application_text.insert(self.vt100_cursor_app.index, line, tag_config_name)
-                    self.vt100_cursor_app.column_move_right(line_length)  # 同步更新索引
-                line_index += 1
-                # print(f"PrintVt100Content.print: 当前vt100_cursor: {self.vt100_cursor_normal.index}")
+                        right_content_counts = len(self.terminal_application_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
+                        if right_content_counts >= line_length:
+                            self.terminal_application_text.replace(tkinter.INSERT, tkinter.INSERT + f"+{str(line_length)}c", line,
+                                                                   tag_config_name)
+                        elif right_content_counts > 0:
+                            self.terminal_application_text.replace(tkinter.INSERT, tkinter.INSERT + " lineend", line,
+                                                                   tag_config_name)
+                        else:
+                            self.terminal_application_text.insert(tkinter.INSERT, line, tag_config_name)
+                    line_index += 1
+                except tkinter.TclError as e:
+                    print("except:", e)
+                    return
 
     def normal_mode_print_chars(self, content_str, tag_config_name):
         """
@@ -10059,26 +9995,33 @@ class TerminalVt100:
                 if char == '\0':
                     continue
                 elif char == '\r':
-                    self.vt100_cursor_normal.move_to_linestart()
+                    self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
                 elif char == '\n':
-                    self.vt100_cursor_normal.line_move_down(1)  # 光标下移一行且移到行首
+                    current_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
+                    end_line = int(self.terminal_normal_text.index(tkinter.END + "-1c").split(".")[0])
+                    if current_line < end_line:
+                        self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
+                        self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + "+1l")
+                    else:
+                        self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " lineend")
+                        self.terminal_normal_text.insert(tkinter.INSERT, "\n", tag_config_name)
                 elif char == chr(0x08):
-                    self.vt100_cursor_normal.column_move_left(1)
+                    self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + "-1c")
                 elif char == chr(0x0f):
                     continue
                 elif char == chr(0x07):  # 响铃
                     continue
                 else:
-                    print(f"PrintVt100Content.print: 输出普通字符: {char.encode('utf8')}")
-                    if self.vt100_cursor_normal.get_current_right_counts() >= 1:
-                        # 每插入一个字符前，先向右删除一个字符（覆盖）
-                        self.terminal_normal_text.replace(self.vt100_cursor_normal.index,
-                                                          self.vt100_cursor_normal.get_index_column_move_right(1),
-                                                          char, tag_config_name)
-                    else:
-                        self.terminal_normal_text.insert(self.vt100_cursor_normal.index, char, tag_config_name)
-                    self.vt100_cursor_normal.column_move_right(1)  # 同步更新索引
-                    # print(f"PrintVt100Content.print: 当前vt100_cursor: {self.vt100_cursor_normal.index}")
+                    try:
+                        print(f"PrintVt100Content.print: 输出普通字符: {char.encode('utf8')}")
+                        right_content_counts = len(self.terminal_normal_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
+                        if right_content_counts > 0:
+                            self.terminal_normal_text.replace(tkinter.INSERT, tkinter.INSERT + "+1c", char, tag_config_name)
+                        else:
+                            self.terminal_normal_text.insert(tkinter.INSERT, char, tag_config_name)
+                    except tkinter.TclError as e:
+                        print("except:", e)
+                        return
 
     def normal_mode_print_lines(self, content_str, tag_config_name):
         """
@@ -10087,26 +10030,38 @@ class TerminalVt100:
         :param tag_config_name:
         :return:
         """
-        content_str_filter = content_str.replace("\r\n", "\n").replace("\0", '').replace(chr(0x0f), "")
+        # content_str_filter = content_str.replace("\r\n", "\n").replace("\0", '').replace(chr(0x0f), "")
+        content_str_filter = content_str.replace("\0", '').replace(chr(0x0f), "")
         if len(content_str_filter) > 0:
             line_index = 0
             for line in content_str_filter.split("\n"):
-                # print(f"PrintVt100Content.print: {char.encode('utf8')}")
-                if line_index > 0:
-                    self.terminal_normal_text.insert(self.vt100_cursor_normal.index, "\n", tag_config_name)
-                    self.vt100_cursor_normal.line_move_down(1)  # 光标下移一行且移到行首
-                line_length = len(line)
-                if line_length > 0:
-                    if self.vt100_cursor_normal.get_current_right_counts() >= 1:
+                try:
+                    # print(f"PrintVt100Content.print: {char.encode('utf8')}")
+                    if line_index > 0:
+                        current_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
+                        end_line = int(self.terminal_normal_text.index(tkinter.END + "-1c").split(".")[0])
+                        if current_line < end_line:
+                            self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
+                            self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + "+1l")
+                        else:
+                            self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " lineend")
+                            self.terminal_normal_text.insert(tkinter.INSERT, "\n", tag_config_name)
+                    line_length = len(line)
+                    if line_length > 0:
                         # 每插入n个字符前，先向右删除n个字符（覆盖）
-                        self.terminal_normal_text.replace(self.vt100_cursor_normal.index,
-                                                          self.vt100_cursor_normal.get_index_column_move_right(line_length),
-                                                          line, tag_config_name)
-                    else:
-                        self.terminal_normal_text.insert(self.vt100_cursor_normal.index, line, tag_config_name)
-                    self.vt100_cursor_normal.column_move_right(line_length)  # 同步更新索引
-                line_index += 1
-                # print(f"PrintVt100Content.print: 当前vt100_cursor: {self.vt100_cursor_normal.index}")
+                        right_content_counts = len(self.terminal_normal_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
+                        if right_content_counts >= line_length:
+                            self.terminal_normal_text.replace(tkinter.INSERT, tkinter.INSERT + f"+{str(line_length)}c", line,
+                                                              tag_config_name)
+                        elif right_content_counts > 0:
+                            self.terminal_normal_text.replace(tkinter.INSERT, tkinter.INSERT + " lineend", line,
+                                                              tag_config_name)
+                        else:
+                            self.terminal_normal_text.insert(tkinter.INSERT, line, tag_config_name)
+                    line_index += 1
+                except tkinter.TclError as e:
+                    print("except:", e)
+                    return
 
 
 class Vt100OutputBlock:
@@ -10121,23 +10076,15 @@ class Vt100OutputBlock:
         self.start_index = start_index  # 这段需要修饰的字符串所处位置 起始坐标
         self.end_index = end_index  # 这段需要修饰的字符串所处位置 结束坐标
 
-    def move_cursor_left(self, count):
-        count_str = "-" + str(count) + "c"
-        if self.terminal_mode == VT100_TERMINAL_MODE_NORMAL:
-            self.terminal_vt100_obj.vt100_cursor_normal += count_str
-        else:
-            self.terminal_vt100_obj.vt100_cursor_app += count_str
-
     def move_text_index_right(self):
         if self.output_block_control_seq == "":
-            count = 1
+            count = "1"
         else:
-            count = int(self.output_block_control_seq)
+            count = self.output_block_control_seq
         if self.terminal_mode == VT100_TERMINAL_MODE_NORMAL:
-            self.terminal_vt100_obj.vt100_cursor_normal.column_move_right(count)
+            self.terminal_vt100_obj.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + f"+{count}c")
         else:
-            self.terminal_vt100_obj.vt100_cursor_app.column_move_right(count)
-        # self.terminal_text_obj.mark_set("insert", self.vt100_cursor)  # 这行注释了，因为只移动索引，暂时不显示光标
+            self.terminal_vt100_obj.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + f"+{count}c")
 
     def left_move_vt100_cursor_and_or_overwrite_content_in_current_line(self):
         if self.terminal_mode == VT100_TERMINAL_MODE_NORMAL:
@@ -10147,13 +10094,14 @@ class Vt100OutputBlock:
 
     def left_move_vt100_cursor_and_or_overwrite_content_in_current_line_normal(self):
         if self.output_block_control_seq.isdigit():
-            self.terminal_vt100_obj.vt100_cursor_normal.column_move_left(int(self.output_block_control_seq))  # 先左移n格
+            self.terminal_vt100_obj.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + f"-{self.output_block_control_seq}c")
         # 移动vt100_cursor后，右边剩下的字符
         self.terminal_vt100_obj.normal_mode_print_chars(self.output_block_content, "default")
 
     def left_move_vt100_cursor_and_or_overwrite_content_in_current_line_app(self):
         if self.output_block_control_seq.isdigit():
-            self.terminal_vt100_obj.vt100_cursor_app.column_move_left(int(self.output_block_control_seq))  # 先左移n格
+            self.terminal_vt100_obj.terminal_application_text.mark_set(tkinter.INSERT,
+                                                                       tkinter.INSERT + f"-{self.output_block_control_seq}c")
         # 移动vt100_cursor后，右边剩下的字符
         self.terminal_vt100_obj.app_mode_print_chars(self.output_block_content, "default")
 
@@ -10213,9 +10161,10 @@ class Vt100OutputBlock:
                 self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="white")
             # 字体设置
             elif int(ctrl_seq_seg) == 1:  # 粗体
-                output_block_font_bold = font.Font(weight='bold', size=self.terminal_vt100_obj.font_size,
-                                                   family=self.terminal_vt100_obj.font_family)
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", font=output_block_font_bold)
+                # output_block_font_bold = font.Font(weight='bold', size=self.terminal_vt100_obj.font_size,
+                #                                   family=self.terminal_vt100_obj.font_family)
+                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}",
+                                                                        font=self.terminal_vt100_obj.terminal_font_bold)
                 already_set_font = True
             elif int(ctrl_seq_seg) == 4:  # 下划线
                 self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", underline=1)
@@ -10226,13 +10175,9 @@ class Vt100OutputBlock:
             else:
                 continue
         if not already_set_font:
-            output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
-            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", font=output_block_font_normal)
-            self.terminal_vt100_obj.tag_config_record_list.append(
-                TagConfigRecord(self.output_block_tag_config_name, FONT_TYPE_NORMAL, self.terminal_vt100_obj.terminal_normal_text))
-        else:
-            self.terminal_vt100_obj.tag_config_record_list.append(
-                TagConfigRecord(self.output_block_tag_config_name, FONT_TYPE_BOLD, self.terminal_vt100_obj.terminal_normal_text))
+            # output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
+            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}",
+                                                                    font=self.terminal_vt100_obj.terminal_font_normal)
         self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{self.output_block_tag_config_name}",
                                                              self.start_index,
                                                              self.end_index)
@@ -10282,10 +10227,10 @@ class Vt100OutputBlock:
                 self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="white")
             # 字体设置
             elif int(ctrl_seq_seg) == 1:  # 粗体
-                output_block_font_bold = font.Font(weight='bold', size=self.terminal_vt100_obj.font_size,
-                                                   family=self.terminal_vt100_obj.font_family)
+                # output_block_font_bold = font.Font(weight='bold', size=self.terminal_vt100_obj.font_size,
+                #                                    family=self.terminal_vt100_obj.font_family)
                 self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
-                                                                             font=output_block_font_bold)
+                                                                             font=self.terminal_vt100_obj.terminal_font_bold)
                 already_set_font = True
             elif int(ctrl_seq_seg) == 4:  # 下划线
                 self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", underline=1)
@@ -10296,17 +10241,12 @@ class Vt100OutputBlock:
             else:
                 continue
         if not already_set_font:
-            output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
+            # output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
             self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
-                                                                         font=output_block_font_normal)
-            self.terminal_vt100_obj.tag_config_record_list.append(
-                TagConfigRecord(self.output_block_tag_config_name, FONT_TYPE_NORMAL, self.terminal_vt100_obj.terminal_application_text))
-        else:
-            self.terminal_vt100_obj.tag_config_record_list.append(
-                TagConfigRecord(self.output_block_tag_config_name, FONT_TYPE_BOLD, self.terminal_vt100_obj.terminal_application_text))
-        self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{self.output_block_tag_config_name}",
-                                                             self.start_index,
-                                                             self.end_index)
+                                                                         font=self.terminal_vt100_obj.terminal_font_normal)
+        self.terminal_vt100_obj.terminal_application_text.tag_add(f"{self.output_block_tag_config_name}",
+                                                                  self.start_index,
+                                                                  self.end_index)
 
 
 class CustomMatchObject:
@@ -10517,13 +10457,11 @@ class CustomTagConfigSet:
             print("CustomTagConfigSet.set_custom_tag_normal: 未找到目标主机的配色方案，已退出此函数")
             return
         for custom_match_object in scheme_obj.custom_match_object_list:
-            custom_match_font = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
+            # custom_match_font = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
             font_type = FONT_TYPE_NORMAL
             if custom_match_object.bold:
-                custom_match_font.configure(weight="bold")
                 font_type += 1
             if custom_match_object.italic:
-                custom_match_font.configure(slant="italic")
                 font_type += 2
             for match_pattern in custom_match_object.match_pattern_lines.split("\n"):
                 if match_pattern == "":
@@ -10548,10 +10486,19 @@ class CustomTagConfigSet:
                                                                                 underline=custom_match_object.underline,
                                                                                 underlinefg=custom_match_object.underlinefg,
                                                                                 overstrike=custom_match_object.overstrike,
-                                                                                overstrikefg=custom_match_object.overstrikefg,
-                                                                                font=custom_match_font)
-                        self.terminal_vt100_obj.tag_config_record_list.append(
-                            TagConfigRecord(tag_config_name, font_type, self.terminal_vt100_obj.terminal_normal_text))
+                                                                                overstrikefg=custom_match_object.overstrikefg)
+                        if font_type == FONT_TYPE_NORMAL:
+                            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                                    font=self.terminal_vt100_obj.terminal_font_normal)
+                        elif font_type == FONT_TYPE_BOLD:
+                            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                                    font=self.terminal_vt100_obj.terminal_font_bold)
+                        elif font_type == FONT_TYPE_ITALIC:
+                            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                                    font=self.terminal_vt100_obj.terminal_font_italic)
+                        elif font_type == FONT_TYPE_BOLD_ITALIC:
+                            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                                    font=self.terminal_vt100_obj.terminal_font_bold_italic)
                     except tkinter.TclError as e:
                         print("CustomTagConfigSet.set_custom_tag_normal: 未选择文字", e)
                         return
@@ -10569,5 +10516,7 @@ if __name__ == '__main__':
         project_default.save()
     global_info_obj.load_all_data_from_sqlite3()  # 项目加载完成后，再加载其他资源，创建内置的shell着色方案
     global_info_obj.load_builtin_font_file()  # 加载程序内置字体文件 family="JetBrains Mono"
-    main_window_obj = MainWindow(width=800, height=480, title='CofAble', global_info=global_info_obj)  # 创建程序主界面
+    # 创建程序主界面对象，全局只有一个
+    main_window_obj = MainWindow(width=800, height=480, title='CofAble', global_info=global_info_obj)
+    global_info_obj.main_window = main_window_obj
     main_window_obj.show()  # 显示主界面，一切从这里开始
