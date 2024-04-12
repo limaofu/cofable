@@ -2210,7 +2210,7 @@ class GlobalInfo:
             self.inspection_template_obj_list = self.load_inspection_template_from_dbfile()
             self.inspection_job_record_obj_list = self.load_inspection_job_record_from_dbfile()
             self.inspection_job_record_obj_list.reverse()  # 逆序，按时间从新到旧
-            self.create_builtin_custome_tag_config_scheme()  # 创建内置的shell着色方案★★
+            self.create_builtin_custome_tag_config_scheme()  # 创★★建内置的shell着色方案★★
             self.custome_tag_config_scheme_obj_list = self.load_custome_tag_config_scheme()  # 加载所有着色方案，含刚刚创建的内置方案
             # 加载完成所有资源后，创建定时作业监听器
             self.launch_template_trigger()
@@ -2284,9 +2284,16 @@ class GlobalInfo:
                                               oid="7d285a2c-cf94-4012-9846-19ac7ac070e2",
                                               project_oid=project_oid,
                                               global_info=self)
+        # ★ 日期 时间  前景色-蓝色 #52a3f6
+        match_pattern_disk_size_net_speed = [r'\b\d{4}-\d{2}-\d{2}\b', r'\b\d{2}:\d{2}:\d{2}\b']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed),
+                              foreground="#52a3f6", backgroun="#323232"))
         # ★ ip-mac地址 前景色-紫色
-        match_pattern_ip_mac_addr = [r'(\d{1,3}\.){3}\d{1,3}', r'([0-9a-f]{2}:){5}[0-9a-f]{2}', r'[^:]([0-9a-f]{4}:){2}[0-9a-f]{4}[^:]',
-                                     r'([0-9a-f]{2}-){5}[0-9a-f]{2}', r'[^-]([0-9a-f]{4}-){2}[0-9a-f]{4}[^-]']  # ipv6暂未匹配
+        match_pattern_ip_mac_addr = [r'(\d{1,3}\.){3}\d{1,3}', r'([0-9a-f]{2}:){5}[0-9a-f]{2}',
+                                     r'[^:]([0-9a-f]{4}:){2}[0-9a-f]{4}[^:]',
+                                     r'([0-9a-f]{2}-){5}[0-9a-f]{2}',
+                                     r'[^-]([0-9a-f]{4}-){2}[0-9a-f]{4}[^-]']  # ipv6暂未匹配
         scheme_huawei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_ip_mac_addr), foreground="#ff4dff"))
         # ★ 错误，禁止，关闭等词语 前景色-红色
@@ -2304,18 +2311,28 @@ class GlobalInfo:
         scheme_huawei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_default_unknown), foreground="#ba7131"))
         # ★ 数字+大小（G,M,K），表示磁盘大小，网络大小 前景色-青色
-        match_pattern_disk_size_net_speed = [r'\b(\d{1,}\.){,1}\d{1,}T[b]{,1}\b', r'\b(\d{1,}\.){,1}\d{1,}G[i]{,1}[b]{,1}\b',
-                                             r'\b(\d{1,}\.){,1}\d{1,}M[i]{,1}[b]{,1}\b', r'\b(\d{1,}\.){,1}\d{1,}K[i]{,1}[b]{,1}\b',
+        match_pattern_disk_size_net_speed = [r'\b(\d{1,}\.){,1}\d{1,}T[b]{,1}\b',
+                                             r'\b(\d{1,}\.){,1}\d{1,}G[i]{,1}[b]{,1}\b',
+                                             r'\b(\d{1,}\.){,1}\d{1,}M[i]{,1}[b]{,1}\b',
+                                             r'\b(\d{1,}\.){,1}\d{1,}K[i]{,1}[b]{,1}\b',
                                              r'\b\d{1,}[" "]{,1}byte[s]{,1}']
         scheme_huawei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed), foreground="cyan"))
+        # ★ 数字+ packets  表示网络发包数量 前景色-黄色 #e2ed14
+        match_pattern_disk_size_net_speed = [r'\b\d{1,}[" "]{,1}packet[s]{,1}']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed), foreground="#e2ed14"))
+        # ★ 数字%  前景色-绿色 #6bb520
+        match_pattern_disk_size_net_speed = [r'\b\d{1,}[" "]{,1}\%']
+        scheme_huawei.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed), foreground="#6bb520"))
         # ★ yes,true,all 前景色-绿 #7ffd01
         match_pattern_yes_true = [r'\byes\b', r'\btrue\b', r'\ball\b', r'\btagged\b']
         scheme_huawei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_yes_true), foreground="#7ffd01"))
         # ★ no,false,none,null 前景色-棕 #fcc560
         match_pattern_no_false = [r'\bno\b', r'\bfalse\b', r'\bnone\b', r'\bnul\b', r'\bnull\b', r'\buntagged\b',
-                                  r'\bunassigned\b']
+                                  r'\bunassigned\b', r'\bN/A\b']
         scheme_huawei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_no_false), foreground="#fcc560"))
         # ★ 匹配网口名称+序号 前景色-青色
@@ -3474,7 +3491,7 @@ class MainWindow:
                                 "版本:  v1.0 dev",
                                 "本软件使用GPL-v3.0协议开源",
                                 "作者:  Cof-Lee（李茂福）",
-                                "更新时间: 2024-04-03"]
+                                "更新时间: 2024-04-12"]
         self.padx = 2
         self.pady = 2
         self.view_width = 20
@@ -9349,13 +9366,17 @@ class TerminalVt100:
         elif event.keysym == "Delete":
             input_byte = struct.pack('b', event.keycode)
         elif event.keysym == "Down":
-            input_byte = b'\033OB'  # ESC O B    对应  方向键(↓)    VK_DOWN (40)
+            # input_byte = b'\033OB'  # ESC O B    对应  方向键(↓)    VK_DOWN (40)
+            input_byte = b'\033[B'  # ESC [ B    对应  方向键(↓)    VK_DOWN (40)
         elif event.keysym == "Up":
-            input_byte = b'\033OA'  # ESC O A    对应  方向键(↑)    VK_UP (38)
+            # input_byte = b'\033OA'  # ESC O A    对应  方向键(↑)    VK_UP (38)
+            input_byte = b'\033[A'  # ESC [ A    对应  方向键(↑)    VK_UP (38)
         elif event.keysym == "Left":
-            input_byte = b'\033OD'  # ESC O D    对应  方向键(←)    VK_LEFT (37)
+            # input_byte = b'\033OD'  # ESC O D    对应  方向键(←)    VK_LEFT (37)
+            input_byte = b'\033[D'  # ESC [ D    对应  方向键(←)    VK_LEFT (37)
         elif event.keysym == "Right":
-            input_byte = b'\033OC'  # ESC O C    对应  方向键(→)    VK_RIGHT (39)
+            # input_byte = b'\033OC'  # ESC O C    对应  方向键(→)    VK_RIGHT (39)
+            input_byte = b'\033[C'  # ESC [ C    对应  方向键(→)    VK_RIGHT (39)
         elif event.keysym == "Control_L":
             self.ctrl_pressed = True
             input_byte = event.char.encode("utf8")
@@ -10542,7 +10563,7 @@ if __name__ == '__main__':
         project_default = Project(global_info=global_info_obj)
         global_info_obj.project_obj_list.append(project_default)
         project_default.save()
-    global_info_obj.load_all_data_from_sqlite3()  # 项目加载完成后，再加载其他资源，创建内置的shell着色方案
+    global_info_obj.load_all_data_from_sqlite3()  # 项目加载完成后，再加载其他资源，★★创建内置的shell着色方案
     global_info_obj.load_builtin_font_file()  # 加载程序内置字体文件 family="JetBrains Mono"
     # 创建程序主界面对象，全局只有一个
     main_window_obj = MainWindow(width=800, height=480, title='CofAble', global_info=global_info_obj)
