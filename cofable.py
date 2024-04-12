@@ -8683,10 +8683,7 @@ class OpenSingleTerminalVt100:
         print("OpenSingleTerminalVt100.on_closing_terminal_pop_window: 本函数已结束了，子窗口已已已关闭")
         self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
         self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
-        self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
-        self.host_obj = None
-        self.global_info = None
-        self.terminal_vt100_obj = None
+        # self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
 
 
 class DivisionTerminalWindow:
@@ -8931,6 +8928,7 @@ class TerminalVt100:
         self.exit_alternate_keypad_mode = False
         self.user_input_byte_queue = None  # 存储的是用户输入的按键（含组合键）对应的ASCII码，元素为bytes(1到N个字节）
         self.back_end_thread = None
+        self.recv_thred = None
         self.text_pad = text_pad
         # self.vt100_cursor_normal = None  # <str>默认值为 current , self.terminal_normal_text的vt100光标索引
         # self.vt100_cursor_app = None  # <Vt100Cursor> , self.terminal_application_text的vt100光标索引
@@ -9028,14 +9026,15 @@ class TerminalVt100:
         self.terminal_application_text.bind("<Button-1>",
                                             lambda event: self.clear_selected_text_color(event, self.terminal_application_text))
         # 鼠标左击并移动（拖动）事件，动态设置选中的文本属性
-        self.terminal_normal_text.bind("<B1-Motion>", lambda event: self.set_selected_text_color(event, self.terminal_normal_text))
+        self.terminal_normal_text.bind("<B1-Motion>", lambda event: self.set_selected_text_color_b1_motion(event,
+                                                                                                           self.terminal_normal_text))
         self.terminal_application_text.bind("<B1-Motion>",
-                                            lambda event: self.set_selected_text_color(event, self.terminal_application_text))
+                                            lambda event: self.set_selected_text_color_b1_motion(event, self.terminal_application_text))
         # 鼠标左击释放事件，移动text_cursor光标到文本框末尾，不滚动内容
         self.terminal_normal_text.bind("<ButtonRelease-1>",
-                                       lambda event: self.set_selected_text_color_release(event, self.terminal_normal_text))
+                                       lambda event: self.set_selected_text_color_b1_release(event, self.terminal_normal_text))
         self.terminal_application_text.bind("<ButtonRelease-1>",
-                                            lambda event: self.set_selected_text_color_release(event, self.terminal_application_text))
+                                            lambda event: self.set_selected_text_color_b1_release(event, self.terminal_application_text))
         # 鼠标右键单击事件，弹出功能菜单
         self.terminal_normal_text.bind("<Button-3>", lambda event: self.pop_menu_on_terminal_text(event, self.terminal_normal_text))
         self.terminal_application_text.bind("<Button-3>",
@@ -9061,7 +9060,10 @@ class TerminalVt100:
         time.sleep(0.1)
         print("TerminalVt100.destroy_all: 开始清理 上面是self.is_closed")
         try:
-            cofable_stop_thread(self.back_end_thread)
+            if self.recv_thred is not None:
+                cofable_stop_thread(self.recv_thred)
+            if self.back_end_thread is not None:
+                cofable_stop_thread(self.back_end_thread)
         except ValueError as err:
             print("TerminalVt100.destroy_all:", err)
         except SystemError as err:
@@ -9074,14 +9076,13 @@ class TerminalVt100:
         terminal_text.tag_delete("selected")
 
     @staticmethod
-    def set_selected_text_color(_, terminal_text):
+    def set_selected_text_color_b1_motion(_, terminal_text):
         terminal_text.tag_delete("selected")
         try:
             terminal_text.tag_add("selected", tkinter.SEL_FIRST, tkinter.SEL_LAST)
             terminal_text.tag_config("selected", foreground="white", backgroun="gray")  # 将选中的文本设置属性
         except tkinter.TclError as e:
-            print("TerminalVt100.set_selected_text_color: 未选择任何文字", e)
-            return
+            print("TerminalVt100.set_selected_text_color: 移动鼠标时未选择任何文字", e)  # 因为移动鼠标的位置没有超过1个字符的距离
 
     def pop_menu_on_terminal_text(self, event, terminal_text):
         print("点击了右键")
@@ -9320,7 +9321,7 @@ class TerminalVt100:
             return
 
     @staticmethod
-    def set_selected_text_color_release(_, terminal_text):
+    def set_selected_text_color_b1_release(_, terminal_text):
         # 选择完文本后，text_cursor光标会停留在tkinter.SEL_LAST
         # self.terminal_text.mark_set("tkinter_END", tkinter.END)  # 使text_cursor光标移动到末尾
         # self.terminal_text.see("tkinter_END")  # 这个会使文本框滚动内容到末尾，选择的内容如果不在最后一页，则被滚动了，当前页面看不到了
@@ -9507,15 +9508,15 @@ class TerminalVt100:
             width=int(self.shell_terminal_width_pixel // self.global_info.get_font_mapped_width(self.font_size, self.font_family)),
             height=int(self.shell_terminal_height_pixel // self.global_info.get_font_mapped_height(self.font_size, self.font_family)))
         # ★★创建线程专门负责接收输出并解析，最后在Text显示输出（解析后的内容）★★
-        recv_thred = threading.Thread(target=self.run_invoke_shell_recv)
-        recv_thred.start()  # 线程start后，不要join()，主界面才不会卡住
+        self.recv_thred = threading.Thread(target=self.run_invoke_shell_recv)
+        self.recv_thred.start()  # 线程start后，不要join()，主界面才不会卡住
         # ★★下面只负责发送用户输入的所有字符，包括从剪贴板复制的★★
         cmd_index = 0
         while True:
             if self.is_closed:
                 self.ssh_shell.close()
                 ssh_client.close()
-                recv_thred.join()  # 结束本函数前，先等待它的子线程结束，防止线程游离
+                self.recv_thred.join()  # 结束本函数前，先等待它的子线程结束，防止线程游离
                 print("TerminalVt100.run_invoke_shell: 本函数结束了 在 while True: 处")
                 return
             try:
@@ -9665,9 +9666,9 @@ class TerminalVt100:
                 print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
                 # 匹配到之后，可能 block_bytes[ret.end():] 是新的内容，要覆盖同一行相应长度的字符
                 # need to copy_current_page_move_cursor_to_head_and_cover_content
-                print("★匹配 [数字D -->光标左移n格，复杂清屏")
                 new_block_str = block_str[ret.end():]
                 output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
+                print("★匹配 [数字D -->光标左移n格，复杂清屏", block_str.encode("utf8"))
                 vt100_output_block_obj = Vt100OutputBlock(
                     output_block_content=new_block_str,
                     output_block_control_seq=output_block_control_seq,
@@ -9703,6 +9704,19 @@ class TerminalVt100:
             if ret is not None:
                 print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: ★单独匹配到了 {match_pattern}")
                 self.normal_mode_print_chars(new_block_str, "default")
+                continue
+            # ★匹配 [6;26H  -->光标移动到指定行列，普通模式暂不处理这个，直接在当前位置插入剩下的普通字符
+            match_pattern = r'^\[\d{1,};\d{1,}H'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                print(f"TerminalVt100.process_received_bytes_on_normal_mode: 匹配到了 {match_pattern}")
+                # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
+                # 如果有内容，那就输出呗
+                # line_column_list = block_str[ret.start() + 1:ret.end() - 1].split(";")
+                # self.terminal_normal_text.mark_set(tkinter.INSERT, f"{line_column_list[0]}.{str(int(line_column_list[1]) - 1)}")
+                new_block_str = block_str[ret.end():]
+                if len(new_block_str) > 0:
+                    self.normal_mode_print_lines(new_block_str, "default")
                 continue
             # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
             print("TerminalVt100.process_received_bytes_on_normal_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
@@ -9803,7 +9817,7 @@ class TerminalVt100:
                     # vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
                     # 在self.terminal_text里输出解析后的内容
                     vt100_output_block_obj.start_index = self.terminal_application_text.index(tkinter.INSERT)
-                    self.app_mode_print_chars(new_block_str, vt100_output_block_obj.output_block_tag_config_name)
+                    self.app_mode_print_lines(new_block_str, vt100_output_block_obj.output_block_tag_config_name)
                     vt100_output_block_obj.end_index = self.terminal_application_text.index(tkinter.INSERT)
                     # 处理vt100输出自带有的颜色风格
                     set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color_app)
@@ -10094,14 +10108,28 @@ class Vt100OutputBlock:
 
     def left_move_vt100_cursor_and_or_overwrite_content_in_current_line_normal(self):
         if self.output_block_control_seq.isdigit():
-            self.terminal_vt100_obj.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + f"-{self.output_block_control_seq}c")
+            left_move_count = int(self.output_block_control_seq)
+            current_column = int(self.terminal_vt100_obj.terminal_normal_text.index(tkinter.INSERT).split(".")[1])
+            if current_column >= left_move_count:
+                self.terminal_vt100_obj.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + f"-{self.output_block_control_seq}c")
+            elif current_column > 0:
+                self.terminal_vt100_obj.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
+            else:
+                pass
         # 移动vt100_cursor后，右边剩下的字符
         self.terminal_vt100_obj.normal_mode_print_chars(self.output_block_content, "default")
 
     def left_move_vt100_cursor_and_or_overwrite_content_in_current_line_app(self):
         if self.output_block_control_seq.isdigit():
-            self.terminal_vt100_obj.terminal_application_text.mark_set(tkinter.INSERT,
-                                                                       tkinter.INSERT + f"-{self.output_block_control_seq}c")
+            left_move_count = int(self.output_block_control_seq)
+            current_column = int(self.terminal_vt100_obj.terminal_application_text.index(tkinter.INSERT).split(".")[1])
+            if current_column >= left_move_count:
+                self.terminal_vt100_obj.terminal_application_text.mark_set(tkinter.INSERT,
+                                                                           tkinter.INSERT + f"-{self.output_block_control_seq}c")
+            elif current_column > 0:
+                self.terminal_vt100_obj.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
+            else:
+                pass
         # 移动vt100_cursor后，右边剩下的字符
         self.terminal_vt100_obj.app_mode_print_chars(self.output_block_content, "default")
 
@@ -10448,7 +10476,7 @@ class CustomTagConfigSet:
     def set_custom_tag(self):
         if self.terminal_mode == VT100_TERMINAL_MODE_NORMAL:
             self.set_custom_tag_normal()
-        self.disconnect()
+        # self.disconnect()
 
     def set_custom_tag_normal(self):
         # 查找目标主机对应的配色方案，CustomTagConfigScheme对象
