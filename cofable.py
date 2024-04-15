@@ -8926,9 +8926,6 @@ class DivisionTerminalWindow:
         for host_session_record_obj in self.host_session_record_obj_list:
             host_session_record_obj.terminal_frontend_obj.hide()
 
-    def show_host_terminal_frontend_current_text(self, host_existed_session_recored_obj):
-        host_existed_session_recored_obj.terminal_frontend_obj.show_terminal_children_frame()
-
 
 class ClickHostSession:
     def __init__(self, division_terminal_window=None, host_session_record_obj=None):
