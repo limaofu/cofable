@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-15
+# update: 2024-04-16
 
 """
 开发日志：
@@ -9033,6 +9033,12 @@ class TerminalFrontend:
                                                       width=text_width, height=text_height, borderwidth=0,
                                                       font=self.terminal_font_normal, bg=self.bg_color, fg=self.fg_color,
                                                       wrap=tkinter.NONE, spacing1=0, spacing2=0, spacing3=0)
+        self.terminal_normal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
+                                             font=self.terminal_font_normal,
+                                             spacing1=0, spacing2=0, spacing3=0)
+        self.terminal_application_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
+                                                  font=self.terminal_font_normal,
+                                                  spacing1=0, spacing2=0, spacing3=0)
         # self.vt100_cursor_normal = Vt100Cursor(index="1.0", text_obj=self.terminal_normal_text)
         # self.vt100_cursor_app = Vt100Cursor(index="1.0", text_obj=self.terminal_application_text)
         # self.terminal_normal_text.pack()  # 显示Text控件，self.terminal_application_text暂时不显示
@@ -9440,10 +9446,10 @@ class TerminalFrontend:
                 self.process_received_bytes_on_normal_mode(received_bytes)
             except queue.Empty:
                 # print("队列中无内容", e)
-                time.sleep(0.01)
+                time.sleep(0.001)
                 continue
             recv_index += 1
-            time.sleep(0.01)
+            # time.sleep(0.001)
 
     def process_received_bytes_on_normal_mode(self, received_bytes):
         self.before_recv_text_index = self.terminal_normal_text.index(tkinter.INSERT)  # 对每次接收信息处理前的索引
@@ -9606,9 +9612,12 @@ class TerminalFrontend:
             # 说明是首次进入此模式
             # 先创建一个默认的terminal_application_text显示属性tag
             # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
-            self.terminal_application_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
-                                                      font=self.terminal_font_normal,
-                                                      spacing1=0, spacing2=0, spacing3=0)
+            self.current_terminal_text = CURRENT_TERMINAL_TEXT_APP
+            self.terminal_normal_text.place_forget()  # 先隐藏普通模式Text控件
+            self.terminal_application_text.place(x=0, y=0, width=self.shell_terminal_width_pixel - self.scrollbar_width,
+                                                 height=self.shell_terminal_height_pixel)
+            # self.terminal_application_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
+            self.terminal_application_text.focus_force()
             self.is_alternate_keypad_mode = True
         # match exit alternate_keypad_mode
         match_pattern = b'\x1b\[\?1l\x1b>'
@@ -9632,13 +9641,6 @@ class TerminalFrontend:
                 self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.END)
                 self.terminal_normal_text.focus_force()
             return
-        # 展示应用模式Text控件
-        self.current_terminal_text = CURRENT_TERMINAL_TEXT_APP
-        self.terminal_normal_text.place_forget()  # 先隐藏普通模式Text控件
-        self.terminal_application_text.place(x=0, y=0, width=self.shell_terminal_width_pixel - self.scrollbar_width,
-                                             height=self.shell_terminal_height_pixel)
-        # self.terminal_application_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
-        self.terminal_application_text.focus_force()
         # ★★★解析输出信息★★★
         # 发送命令已有相应线程: self.run_invoke_shell()
         # 接收命令已有相应线程: self.run_invoke_shell_recv() 由它负责接收并将收到的内容初步判断后 传参给本函数的received_bytes
