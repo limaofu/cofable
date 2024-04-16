@@ -2234,7 +2234,10 @@ class GlobalInfo:
         if self.division_terminal_window is not None:
             for host_session_record_obj in self.division_terminal_window.host_session_record_obj_list:
                 if host_session_record_obj.terminal_backend_obj.ssh_invoke_shell is not None:
-                    host_session_record_obj.terminal_backend_obj.ssh_invoke_shell.close()
+                    try:
+                        host_session_record_obj.terminal_backend_obj.ssh_invoke_shell.close()  # 如果已经关闭了，则再次关闭会抛出EOFError异常
+                    except EOFError as err:
+                        print(err)
                 if host_session_record_obj.terminal_backend_obj.ssh_client is not None:
                     host_session_record_obj.terminal_backend_obj.ssh_client.close()
                 cofable_stop_thread_silently(host_session_record_obj.parse_received_vt100_data_thread)
@@ -3997,7 +4000,7 @@ class MainWindow:
         self.window_obj.mainloop()
 
     def on_closing_main_window(self):
-        print("MainWindow: 退出了主程序 fuck")
+        print("MainWindow: 退出了主程序")
         self.global_info.exit_division_terminal_window()
         self.window_obj.destroy()
 
@@ -5283,17 +5286,12 @@ class ListResourceInFrame:
                 button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
             # ★Host-open_terminal
             if self.resource_type == RESOURCE_TYPE_HOST:
-                open_single_terminal_obj = OpenSingleTerminalVt100(global_info=self.global_info, host_oid=obj.oid)
-                button_open_terminal = tkinter.Button(self.top_frame_widget_dict["frame"], text="打开终端",
-                                                      command=open_single_terminal_obj.show)
-                button_open_terminal.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-                button_open_terminal.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
                 # 打开单独式终端
                 open_division_terminal_obj = OpenDivisionTerminalVt100(global_info=self.global_info, host_oid=obj.oid)
                 button_open_terminal2 = tkinter.Button(self.top_frame_widget_dict["frame"], text="打开终端2",
                                                        command=open_division_terminal_obj.open_session)
                 button_open_terminal2.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-                button_open_terminal2.grid(row=index + 1, column=6, padx=self.padx, pady=self.pady)
+                button_open_terminal2.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
             index += 1
         # 信息控件添加完毕
         self.top_frame_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
@@ -8696,79 +8694,6 @@ class OpenDivisionTerminalVt100:
         self.global_info.open_session_in_division_terminal_window(self.host_oid)
 
 
-class OpenSingleTerminalVt100:
-    """
-    打开单台主机的 在线终端，会创建一个PopWindow，在popwindow里创建一个用于显示终端输入及输出信息的Frame
-    """
-
-    def __init__(self, global_info=None, host_oid=""):
-        self.global_info = global_info
-        self.host_oid = host_oid
-        self.pop_window = None
-        self.shell_terminal_width = 100  # <int> vt100-width
-        self.shell_terminal_height = 24  # <int> vt100-height
-        self.font_family = "JetBrains Mono"  # 程序自带内置字体
-        self.font_name = ''  # <str>
-        self.font_size = 12  # <int>
-        self.bg_color = "black"  # <str> color
-        self.fg_color = "white"  # <str> color
-        self.padx = 2  # <int>
-        self.pady = 2  # <int>
-        self.terminal_vt100_obj = None  # <TerminalVt100>对象
-        self.text_pad = 4
-        self.host_obj = global_info.get_host_by_oid(host_oid)
-
-    def show(self):
-        # ★★创建子窗口★★
-        self.pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)
-        self.pop_window.title("Terminal")
-        screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
-        screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
-        # scrollbar_width==25
-        pop_win_width = int(self.shell_terminal_width * self.global_info.get_font_mapped_width(self.font_size,
-                                                                                               self.font_family)) + self.text_pad + 25
-        # func_frame_height==35
-        pop_win_height = int(self.shell_terminal_height * self.global_info.get_font_mapped_height(self.font_size,
-                                                                                                  self.font_family)) + self.text_pad + 35
-        win_pos_1 = f"{pop_win_width}x{pop_win_height}+"
-        win_pos_2 = f"{screen_width // 2 - int(pop_win_width // 2)}+{screen_height // 2 - pop_win_height // 2}"
-        self.pop_window.geometry(win_pos_1 + win_pos_2)  # 设置子窗口大小及位置，居中
-        self.global_info.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
-        self.pop_window.focus_force()  # 使子窗口获得焦点
-        # 子窗口点击右上角的关闭按钮后，触发此函数
-        self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
-        # 创建功能按钮Frame
-        func_frame = tkinter.Frame(self.pop_window, bg="pink", width=pop_win_width, height=35)
-        label_host_name = tkinter.Label(func_frame, text=self.host_obj.name, bd=1)
-        label_host_name.pack(side=tkinter.LEFT, padx=self.padx)
-        button_exit = tkinter.Button(func_frame, text="退出", command=self.on_closing_terminal_pop_window)
-        button_exit.pack(side=tkinter.LEFT, padx=self.padx)
-        terminal_frame = tkinter.Frame(self.pop_window, bg="green", width=pop_win_width, height=pop_win_height - 35)
-        func_frame.grid_propagate(False)
-        terminal_frame.pack_propagate(False)
-        func_frame.grid(row=0, column=0)
-        terminal_frame.grid(row=1, column=0)
-        # 创建TerminalVt100终端实例，1台主机一个实例，放在Frame里显示
-        self.terminal_vt100_obj = TerminalVt100(terminal_frame=terminal_frame, global_info=self.global_info, host_oid=self.host_oid,
-                                                shell_terminal_width_pixel=int(pop_win_width - 25 - self.text_pad),
-                                                shell_terminal_height_pixel=int(pop_win_height - 35 - self.text_pad),
-                                                font_family=self.font_family, font_size=self.font_size, font_name=self.font_name,
-                                                text_pad=self.text_pad)
-        self.terminal_vt100_obj.show_terminal_on_terminal_frame()
-
-    def on_closing_terminal_pop_window(self):
-        print("OpenSingleTerminalVt100.on_closing_terminal_pop_window: 本函数快结束了，子窗口还未关闭",
-              "self.vt100_obj.is_closed置True")
-        # self.vt100_obj.back_end_thread.join() # 等待terminal_vt100_obj结束它的子线程
-        print("OpenSingleTerminalVt100.on_closing_terminal_pop_window: 本函数快结束了，子窗口未未未关闭")
-        self.terminal_vt100_obj.destroy_all()
-        self.pop_window.destroy()  # 关闭子窗口
-        print("OpenSingleTerminalVt100.on_closing_terminal_pop_window: 本函数已结束了，子窗口已已已关闭")
-        self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
-        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
-        # self.global_info.main_window.list_resource_of_nav_frame_r_bottom_page(RESOURCE_TYPE_HOST)
-
-
 class DivisionTerminalWindow:
     """
     打开终端窗口，里面的主机是单独的会话，会创建一个PopWindow，在popwindow里创建一个用于显示终端输入及输出信息的Frame
@@ -8969,6 +8894,23 @@ class HostSessionRecord:
 
 
 class TerminalFrontend:
+    """
+    ★vt100特性总结
+    1. 客户端按下 ← 左方向键          发送的是 b'\033OD'    服务端回复的是  b'\x08'    对应操作 vt100_cursor 回退一格
+    2. 客户端按下 Backspace 回退键    发送的是 b'\x08'       服务端回复的是  b'\x08\x1b[K\x00\x00\x00\x00\x00\x00'  回退一格并清除到行尾
+    3. vt100认为 b'\x08' 只是回退一格，不删除任何字符，b'\x08\x1b[K' 才是回退1格并删除光标到行尾
+    4. 在当前行中间位置插入字符时，会覆盖当前vt100_cursor后面的字符，插入的字符有多少个，后面被覆盖的字符就有多少个，剩余字符不动它，除非有其他指令要清除这些剩余字符
+    5. 如果vt100_cursor不在当前行末尾，且收到的字符串中含有'\r\n'，则'\r\n'之后的字符串直接从下一行插入，而不是从当前vt100_cursor处插入，
+        即当前行字符不动它，当前行不会被拆成2行，这个真实原因如下：
+    6. vt100中，\r表示将光标移到当前行行首，然后啥也不做，\n表示插入新行（光标下移一行），所以'\r\n'表示先将光标移回当前行行首，再下移一行，即移动到下一行行首
+        有时，只有\r，不一定是要换行，可能只是将光标移到当前行行首，然后后面紧跟一个\033[K 清除从光标处到行尾的所有字符，即清除当前行所有内容
+        终端客户端按下回车键，发送的是'\r'字符
+
+    ★概念说明
+        vt100_cursor:  vt100光标，vt100发回的对于光标操作的指令（控制序列）
+        text_cursor:   tkinter.Text组件的光标（是在Text组件里的闪烁的那个光标-->mark）
+    """
+
     def __init__(self, terminal_frame=None, host_obj=None, global_info=None, host_session_record_obj=None,
                  shell_terminal_width_pixel=1008, shell_terminal_height_pixel=560, scrollbar_width=25,
                  font_size=14, font_family='', font_name='', bg_color="black", fg_color="white",
@@ -9420,25 +9362,24 @@ class TerminalFrontend:
         recv_index = 0
         while True:
             try:
-                # 从vt100数据队列中取出最先输入的字符 ★非阻塞★ 队列中无内容时弹出 _queue.Empty报错，这里之所以用非阻塞，是因为要判断self.is_closed
+                # 从vt100数据队列中取出最先输入的字符 ★非阻塞★ 队列中无内容时弹出 _queue.Empty报错，这里之所以用非阻塞，是因为可能要关闭此线程
                 received_bytes = self.vt100_receive_byte_queue.get(block=False)
-                print("TerminalVt100.run_invoke_shell_recv: 接收到信息:", received_bytes)
+                print("TerminalFrontend.parse_received_vt100_data: 接收到信息:", received_bytes)
                 # ★★★开始解析接收到的vt100输出★★★
-                print("TerminalVt100.run_invoke_shell_recv: 开始解析received_bytes")
                 if len(received_bytes) == 0:
-                    print("TerminalVt100.run_invoke_shell_recv: received_bytes为空，")
+                    print("TerminalFrontend.parse_received_vt100_data: received_bytes为空，")
                     continue
                 # ★★ enter alternate_keypad_mode 进入应用模式 ★★
                 match_pattern = b'\x1b\[\?1h\x1b='
                 ret = re.search(match_pattern, received_bytes)
                 if ret is not None:
-                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了★Enter Alternate Keypad Mode★ {match_pattern}")
+                    print(f"TerminalFrontend.parse_received_vt100_data: 匹配到了★Enter Alternate Keypad Mode★ {match_pattern}")
                     # 首次匹配，首次进入alternate_keypad_mode需要清空此模式下Text控件内容
                     new_received_bytes = received_bytes[ret.end():]
                     self.enter_alternate_keypad_mode_text(new_received_bytes)
                     continue
                 if self.is_alternate_keypad_mode:
-                    # 如果已经处于应用模式，则本次接收到的信息交给 self.enter_alternate_keypad_mode_text() 处理
+                    # 如果已经处于应用模式，则本次所有数据直接交给 self.enter_alternate_keypad_mode_text() 处理
                     self.enter_alternate_keypad_mode_text(received_bytes)
                     continue
                 # ★★ 不是应用模式，则由以下函数处理（普通模式） ★★
@@ -9456,20 +9397,18 @@ class TerminalFrontend:
         output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
         output_block_ctrl_and_normal_content_list_new = [x for x in output_block_ctrl_and_normal_content_list if x]  # 新列表不含空元素
         if len(output_block_ctrl_and_normal_content_list_new) == 0:
-            print(f"TerminalVt100.process_received_bytes_on_normal_mode: 本次接收到的信息拆分后列表为空")
-            # self.terminal_normal_text.mark_set("insert", self.vt100_cursor_normal.index)
+            print(f"TerminalFrontend.process_received_bytes_on_normal_mode: 本次接收到的信息拆分后列表为空")
             self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
             self.terminal_normal_text.focus_force()
             return
         # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析，普通输出模式 ★★★★★★
         for block_bytes in output_block_ctrl_and_normal_content_list_new:
-            print("TerminalVt100.process_received_bytes_on_normal_mode Start of one block_bytes 普通输出模式: block_bytes不为空★★")
             block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
             # ★匹配 [m 或 [0m  -->清除所有属性
             match_pattern = r'^\[[0]*m'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
                 # 在self.terminal_text里输出解析后的内容
                 new_block_str = block_str[ret.end():]
                 self.normal_mode_print_lines(new_block_str, 'default')
@@ -9478,7 +9417,7 @@ class TerminalFrontend:
             match_pattern = r'^\[([0-9]{1,2};){,4}[0-9]{1,2}m'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
                 new_block_str = block_str[ret.end():]
                 output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
                 vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
@@ -9495,7 +9434,7 @@ class TerminalFrontend:
             match_pattern = r'^\[[0-9]*C'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
                 new_block_str = block_str[ret.end():]
                 output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1].replace("\0", "")
                 vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
@@ -9511,7 +9450,7 @@ class TerminalFrontend:
             match_pattern = r'^\[K'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
                 # if self.vt100_cursor_normal.get_current_right_counts() > 0:
                 self.terminal_normal_text.delete(tkinter.INSERT, tkinter.INSERT + " lineend")
                 # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
@@ -9522,7 +9461,7 @@ class TerminalFrontend:
             match_pattern = r'^\[H'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
                 self.terminal_normal_text.mark_set(tkinter.INSERT, "1.0")
                 continue
             # ★匹配 [42D  -->vt100_cursor光标左移42格，一般vt100光标回到当前行开头后，插入的内容会覆盖同行相应位置的内容，
@@ -9530,12 +9469,13 @@ class TerminalFrontend:
             match_pattern = r'^\[[0-9]*D'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
                 # 匹配到之后，可能 block_bytes[ret.end():] 是新的内容，要覆盖同一行相应长度的字符
                 # need to copy_current_page_move_cursor_to_head_and_cover_content
                 new_block_str = block_str[ret.end():]
                 output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
-                print("★匹配 [数字D -->光标左移n格，复杂清屏", block_str.encode("utf8"))
+                print("TerminalFrontend.process_received_bytes_on_normal_mode ★匹配 [数字D -->光标左移n格，复杂清屏",
+                      block_str.encode("utf8"))
                 vt100_output_block_obj = Vt100OutputBlock(
                     output_block_content=new_block_str,
                     output_block_control_seq=output_block_control_seq,
@@ -9548,7 +9488,7 @@ class TerminalFrontend:
             match_pattern = r'^\[J'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: ★单独匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: ★单独匹配到了 {match_pattern}")
                 # to do
                 self.terminal_normal_text.insert(tkinter.END, "\n", 'default')  # 暂时在Text组件末尾插入一个空行
                 continue
@@ -9569,33 +9509,31 @@ class TerminalFrontend:
             new_block_str = block_str.replace("\r\n", "\n")
             ret = re.search(match_pattern, new_block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: ★单独匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: ★单独匹配到了 {match_pattern}")
                 self.normal_mode_print_chars(new_block_str, "default")
                 continue
             # ★匹配 [6;26H  -->光标移动到指定行列，普通模式暂不处理这个，直接在当前位置插入剩下的普通字符
             match_pattern = r'^\[\d{1,};\d{1,}H'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode: 匹配到了 {match_pattern}")
                 # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
                 # 如果有内容，那就输出呗
-                # line_column_list = block_str[ret.start() + 1:ret.end() - 1].split(";")
-                # self.terminal_normal_text.mark_set(tkinter.INSERT, f"{line_column_list[0]}.{str(int(line_column_list[1]) - 1)}")
                 new_block_str = block_str[ret.end():]
                 if len(new_block_str) > 0:
                     self.normal_mode_print_lines(new_block_str, "default")
                 continue
             # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
-            print("TerminalVt100.process_received_bytes_on_normal_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
+            print("TerminalFrontend.process_received_bytes_on_normal_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
             self.normal_mode_print_lines(block_str, "default")
         # ★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★
         current_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
         end_line = int(self.terminal_normal_text.index(tkinter.END + "-1c").split(".")[0])
         if current_line != end_line:  # 如果输出的内容有换行，则将text_cursor光标移动到最后一行的行尾
-            print("TerminalVt100.process_received_bytes_on_normal_mode: 行数不同: ", current_line, end_line)
+            print("TerminalFrontend.process_received_bytes_on_normal_mode: 行数不同: ", current_line, end_line)
             self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.END)
         else:
-            print(f"TerminalVt100.process_received_bytes_on_normal_mode: 行数相同: {current_line}")
+            print(f"TerminalFrontend.process_received_bytes_on_normal_mode: 行数相同: {current_line}")
         # 匹配用户自定义高亮词汇
         last_recv_content_str = self.terminal_normal_text.get(self.before_recv_text_index, tkinter.INSERT)
         custom_tag_config_obj = CustomTagConfigSet(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
@@ -9607,30 +9545,27 @@ class TerminalFrontend:
         self.terminal_normal_text.focus_force()
 
     def enter_alternate_keypad_mode_text(self, received_bytes):
-        # self.terminal_application_text已经在self.show_terminal_on_terminal_frame()里创建了，只是暂时未显示
         if not self.is_alternate_keypad_mode:
             # 说明是首次进入此模式
-            # 先创建一个默认的terminal_application_text显示属性tag
-            # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
             self.current_terminal_text = CURRENT_TERMINAL_TEXT_APP
-            self.terminal_normal_text.place_forget()  # 先隐藏普通模式Text控件
+            self.terminal_normal_text.place_forget()  # 先隐藏普通模式Text控件，再显示应用模式Text控件
             self.terminal_application_text.place(x=0, y=0, width=self.shell_terminal_width_pixel - self.scrollbar_width,
                                                  height=self.shell_terminal_height_pixel)
             # self.terminal_application_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
             self.terminal_application_text.focus_force()
             self.is_alternate_keypad_mode = True
-        # match exit alternate_keypad_mode
+        # ★ match exit alternate_keypad_mode
         match_pattern = b'\x1b\[\?1l\x1b>'
         ret = re.search(match_pattern, received_bytes)
         if ret is not None:
-            print(f"TerminalVt100.enter_alternate_keypad_mode_text: 匹配到了★Exit Alternate Keypad Mode★ {match_pattern}")
+            print(f"TerminalFrontend.enter_alternate_keypad_mode_text: 匹配到了★Exit Alternate Keypad Mode★ {match_pattern}")
             self.is_alternate_keypad_mode = False
             self.exit_alternate_keypad_mode = False
             # 退出应用模式前，先清空其内容
             self.terminal_application_text.delete("1.0", tkinter.END)  # 清空Text内容
             self.terminal_application_text.place_forget()  # 先隐藏应用模式Text控件
-            self.current_terminal_text = CURRENT_TERMINAL_TEXT_NORMAL
             # 再展示普通模式Text控件
+            self.current_terminal_text = CURRENT_TERMINAL_TEXT_NORMAL
             self.terminal_normal_text.place(x=0, y=0, width=self.shell_terminal_width_pixel - self.scrollbar_width,
                                             height=self.shell_terminal_height_pixel)
             new_received_bytes = received_bytes[ret.end():]
@@ -9652,7 +9587,7 @@ class TerminalFrontend:
         output_block_ctrl_and_normal_content_list_new = [x for x in output_block_ctrl_and_normal_content_list if x]  # 新列表不含空元素
         # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析 ★★★★★★
         if len(output_block_ctrl_and_normal_content_list_new) == 0:
-            print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 本次接收到的信息拆分后列表为空")
+            print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 本次接收到的信息拆分后列表为空")
             return
         for block_bytes in output_block_ctrl_and_normal_content_list_new:
             block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
@@ -9660,8 +9595,7 @@ class TerminalFrontend:
             match_pattern = r'^\[[0]?m'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                # print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
-                # 在self.terminal_text里输出解析后的内容
+                # print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
                 new_block_str = block_str[ret.end():]
                 if len(new_block_str) > 0:
                     self.app_mode_print_chars(new_block_str, "default")
@@ -9670,14 +9604,12 @@ class TerminalFrontend:
             match_pattern = r'^\[([0-9]{1,2};){,4}[0-9]{1,2}m'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
                 new_block_str = block_str[ret.end():].replace('\0', '')
                 if len(new_block_str) > 0:
                     vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
                                                               output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
                                                               terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
-                    # vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
-                    # 在self.terminal_text里输出解析后的内容
                     vt100_output_block_obj.start_index = self.terminal_application_text.index(tkinter.INSERT)
                     self.app_mode_print_lines(new_block_str, vt100_output_block_obj.output_block_tag_config_name)
                     vt100_output_block_obj.end_index = self.terminal_application_text.index(tkinter.INSERT)
@@ -9689,7 +9621,7 @@ class TerminalFrontend:
             match_pattern = r'^\[[0-9]{,3}C'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
                 output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
                 new_block_str = block_str[ret.end():].replace('\0', '')
                 if len(new_block_str) > 0:
@@ -9697,21 +9629,20 @@ class TerminalFrontend:
                                                               output_block_control_seq=output_block_control_seq,
                                                               terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
                     vt100_output_block_obj.move_text_index_right()  # 向右移动索引
-                    # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
-                    # self.match_backspace_x08_app(new_block_bytes)  # ★★匹配回退符并向左移动索引★★
+                    # 有时匹配了控制序列后，在其末尾还会有回退符，普通字符等  这里得再处理一次
                     self.app_mode_print_chars(new_block_str, "default")
-                    del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
+                    del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露。这里有必要吗？
                     gc.collect()
                 continue
             # ★匹配 [K  -->从当前光标位置向右清除到本行行尾所有内容 app
             match_pattern = r'^\[K'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
                 right_content_counts = len(self.terminal_application_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
                 if right_content_counts > 0:
                     self.terminal_application_text.delete(tkinter.INSERT, tkinter.INSERT + " lineend")
-                # # 有时匹配了控制序列后，在其末尾还会有回退符，普通字符等  这里得再匹配一次
+                # 有时匹配了控制序列后，在其末尾还会有回退符，普通字符等  这里得再处理一次
                 new_block_str = block_str[ret.end():]
                 if len(new_block_str) > 0:
                     self.app_mode_print_chars(new_block_str, "default")
@@ -9720,17 +9651,16 @@ class TerminalFrontend:
             match_pattern = r'^\[H'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
+                print(
+                    f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern} 光标回到屏幕开头，复杂清屏")
                 # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
-                # need to copy_current_page_move_cursor_to_head_and_cover_content
-                print("process_received_bytes_on_alternate_keypad_mode ★匹配 [H -->光标回到屏幕开头，复杂清屏")
                 self.terminal_application_text.mark_set(tkinter.INSERT, "1.0")
                 continue
             # ★匹配 [6;26H  -->光标移动到指定行列
             match_pattern = r'^\[\d{1,};\d{1,}H'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
                 # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
                 # 如果有内容，那就输出呗
                 line_column_list = block_str[ret.start() + 1:ret.end() - 1].split(";")
@@ -9743,18 +9673,15 @@ class TerminalFrontend:
             match_pattern = r'^\[J'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: ★单独匹配到了 {match_pattern}")
-                # to do
+                print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: ★单独匹配到了 {match_pattern}")
                 # self.terminal_application_text.insert(tkinter.END, "\n", 'default')  # 暂时在末尾插入一个空行
                 continue
             # ★匹配 [42D  -->光标左移42格，一般vt100光标回到当前行开头后，插入的内容会覆盖同行相应位置的内容，未覆盖的地方不动它，不折行，不产生新行
             match_pattern = r'^\[[0-9]*D'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode app输出模式: 匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode app输出模式: 匹配到了 {match_pattern}")
                 # 匹配到之后，可能 block_bytes[ret.end():] 是新的内容，要覆盖同一行相应长度的字符
-                # need to copy_current_page_move_cursor_to_head_and_cover_content
-                print("★匹配 [数字D -->光标左移n格，复杂清屏")
                 output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
                 vt100_output_block_obj = Vt100OutputBlock(
                     output_block_content=block_str[ret.end():],
@@ -9769,23 +9696,21 @@ class TerminalFrontend:
             block_str_filter = block_str  # .replace("\r\n", "\n")
             ret = re.search(match_pattern, block_str_filter)
             if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode app输出模式: ★单独匹配到了 {match_pattern}")
+                print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode app输出模式: ★单独匹配到了 {match_pattern}")
                 if len(block_str_filter) > 0:
                     self.app_mode_print_chars(block_str_filter, "default")
                 continue
             # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
             # print("TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
-            # block_str_filter = block_str.replace('\0', '').replace(chr(0x0f), '')
             self.app_mode_print_lines(block_str, "default")
         # ★★★★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★★★★
         self.terminal_application_text.see(tkinter.INSERT)
         self.terminal_application_text.focus_force()
 
     def app_mode_print_chars(self, content_str, tag_config_name):
-        print(f"fuck 1 PrintVt100Content.print content_str : {content_str.encode('utf8')}")
         if len(content_str) > 0:
             for char in content_str:
-                # print(f"PrintVt100Content.print: {char.encode('utf8')}")
+                # print(f"TerminalFrontend.app_mode_print_chars: {char.encode('utf8')}")
                 if char == '\0':
                     continue
                 elif char == '\r':
@@ -9813,7 +9738,7 @@ class TerminalFrontend:
                         else:
                             self.terminal_application_text.insert(tkinter.INSERT, char, tag_config_name)
                     except tkinter.TclError as e:
-                        print("except:", e)
+                        print("TerminalFrontend.app_mode_print_chars except:", e)
                         return
 
     def app_mode_print_lines(self, content_str, tag_config_name):
@@ -9829,7 +9754,6 @@ class TerminalFrontend:
             line_index = 0
             for line in content_str_filter.split("\n"):
                 try:
-                    # print(f"PrintVt100Content.print: {char.encode('utf8')}")
                     if line_index > 0:
                         current_line = int(self.terminal_application_text.index(tkinter.INSERT).split(".")[0])
                         end_line = int(self.terminal_application_text.index(tkinter.END + "-1c").split(".")[0])
@@ -9853,7 +9777,7 @@ class TerminalFrontend:
                             self.terminal_application_text.insert(tkinter.INSERT, line, tag_config_name)
                     line_index += 1
                 except tkinter.TclError as e:
-                    print("except:", e)
+                    print("TerminalFrontend.app_mode_print_lines except:", e)
                     return
 
     def normal_mode_print_chars(self, content_str, tag_config_name):
@@ -9867,7 +9791,7 @@ class TerminalFrontend:
         # content_str_filter = content_str.replace("\r\n", "\n").replace("\0", '')
         if len(content_str) > 0:
             for char in content_str:
-                # print(f"PrintVt100Content.print: {char.encode('utf8')}")
+                # print(f"TerminalFrontend.normal_mode_print_chars: {char.encode('utf8')}")
                 if char == '\0':
                     continue
                 elif char == '\r':
@@ -9889,14 +9813,14 @@ class TerminalFrontend:
                     continue
                 else:
                     try:
-                        print(f"PrintVt100Content.print: 输出普通字符: {char.encode('utf8')}")
+                        # print(f"TerminalFrontend.normal_mode_print_chars: 输出普通字符: {char.encode('utf8')}")
                         right_content_counts = len(self.terminal_normal_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
                         if right_content_counts > 0:
                             self.terminal_normal_text.replace(tkinter.INSERT, tkinter.INSERT + "+1c", char, tag_config_name)
                         else:
                             self.terminal_normal_text.insert(tkinter.INSERT, char, tag_config_name)
                     except tkinter.TclError as e:
-                        print("except:", e)
+                        print("TerminalFrontend.normal_mode_print_chars except:", e)
                         return
 
     def normal_mode_print_lines(self, content_str, tag_config_name):
@@ -9912,7 +9836,7 @@ class TerminalFrontend:
             line_index = 0
             for line in content_str_filter.split("\n"):
                 try:
-                    # print(f"PrintVt100Content.print: {char.encode('utf8')}")
+                    # print(f"TerminalFrontend.normal_mode_print_lines: {char.encode('utf8')}")
                     if line_index > 0:
                         current_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
                         end_line = int(self.terminal_normal_text.index(tkinter.END + "-1c").split(".")[0])
@@ -9936,7 +9860,7 @@ class TerminalFrontend:
                             self.terminal_normal_text.insert(tkinter.INSERT, line, tag_config_name)
                     line_index += 1
                 except tkinter.TclError as e:
-                    print("except:", e)
+                    print("TerminalFrontend.normal_mode_print_lines except:", e)
                     return
 
     def hide(self):
@@ -9983,7 +9907,7 @@ class TerminalBackend:
     def run(self):
         cred = self.find_credential_by_login_protocol()
         if cred is None:
-            self.vt100_receive_byte_queue.put("未找到可用凭据，退出TerminalBackend.run()函数".encode("utf8"))
+            self.vt100_receive_byte_queue.put("TerminalBackend.run 未找到可用凭据，退出TerminalBackend.run()函数".encode("utf8"))
             return
         self.create_invoke_shell(cred)
         self.recv_vt100_output_data_thread = threading.Thread(target=self.recv_vt100_output_data)
@@ -9998,14 +9922,14 @@ class TerminalBackend:
             try:
                 cred = self.find_ssh_credential(self.host_obj)
             except Exception as e:
-                print("TerminalVt100.back_end_thread_func: 查找可用的凭据错误，", e)
+                print("TerminalBackend.find_credential_by_login_protocol: 查找可用的凭据错误，", e)
                 return None
             if cred is None:
-                print("TerminalVt100.back_end_thread_func: Credential is None, Could not find correct credential")
+                print("TerminalBackend.find_credential_by_login_protocol: Credential is None, Could not find correct credential")
                 return None
             return cred
         elif self.host_obj.login_protocol == LOGIN_PROTOCOL_TELNET:
-            print("TerminalVt100.back_end_thread_func: 使用telnet协议远程目标主机")
+            print("TerminalBackend.find_credential_by_login_protocol: 使用telnet协议远程目标主机")
             return None
         else:
             return None
@@ -10059,19 +9983,19 @@ class TerminalBackend:
         self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在known_hosts文件里的主机
         try:
             if cred.cred_type == CRED_TYPE_SSH_PASS:
-                print("TerminalVt100.run_invoke_shell : 使用ssh_password密码登录")
+                print("TerminalBackend.create_invoke_shell : 使用ssh_password密码登录")
                 self.ssh_client.connect(hostname=self.host_obj.address, port=self.host_obj.ssh_port, username=cred.username,
                                         password=cred.password, timeout=LOGIN_AUTH_TIMEOUT)
             elif cred.cred_type == CRED_TYPE_SSH_KEY:
                 prikey_string_io = io.StringIO(cred.private_key)
                 pri_key = paramiko.RSAKey.from_private_key(prikey_string_io)
-                print("TerminalVt100.run_invoke_shell : 使用ssh_priKey密钥登录")
+                print("TerminalBackend.create_invoke_shell : 使用ssh_priKey密钥登录")
                 self.ssh_client.connect(hostname=self.host_obj.address, port=self.host_obj.ssh_port, username=cred.username,
                                         pkey=pri_key, timeout=LOGIN_AUTH_TIMEOUT)
             else:
                 pass
         except paramiko.AuthenticationException as e:
-            print(f"TerminalVt100.run_invoke_shell : Authentication Error: {e}")
+            print(f"TerminalBackend.create_invoke_shell : Authentication Error: {e}")
             raise e
         # ★★连接后，创建invoke_shell交互式shell★★
         self.ssh_invoke_shell = self.ssh_client.invoke_shell(width=self.shell_terminal_width, height=self.shell_terminal_height)
@@ -10083,12 +10007,11 @@ class TerminalBackend:
             if self.is_closed:
                 self.ssh_invoke_shell.close()
                 self.ssh_client.close()
-                print("TerminalVt100.run_invoke_shell: fuck fuck本函数结束了 在 while True: 处")
+                print("TerminalBackend.send_user_input_data: 本函数结束了 在 while True: 处")
                 return
             try:
                 # 从用户输入字符队列中取出最先输入的字符 ★非阻塞★ 队列中无内容时弹出 _queue.Empty报错，这里之所以用非阻塞，是因为要判断self.is_closed
                 user_cmd = self.user_input_byte_queue.get(block=False)
-                print("fuck fuck 发送命令:", user_cmd)
                 self.ssh_invoke_shell.send(user_cmd)  # 发送命令，一行命令（不过滤命令前后的空白字符，发送的是utf8编码后的bytes）
             except queue.Empty as err:
                 # print("user_input_byte_queue队列中无内容", err)
@@ -10101,15 +10024,14 @@ class TerminalBackend:
         # 不停地从ssh_shell接收输出信息，直到关闭了终端窗口
         while True:
             if self.is_closed:
-                print("TerminalVt100.run_invoke_shell_recv: 关闭了终端窗口，退出了本函数")
+                print("TerminalBackend.recv_vt100_output_data: 关闭了终端窗口，退出了本函数")
                 return
             try:
                 received_bytes = self.ssh_invoke_shell.recv(65535)
-                print("TerminalVt100.run_invoke_shell_recv: 接收到信息:", received_bytes)
+                print("TerminalBackend.recv_vt100_output_data: 接收到信息:", received_bytes)
                 # ★★★开始解析接收到的vt100输出★★★
-                print("TerminalVt100.run_invoke_shell_recv: 开始解析received_bytes")
                 if len(received_bytes) == 0:
-                    print("TerminalVt100.run_invoke_shell_recv: received_bytes为空，关闭 ssh_client, 退出了本函数")
+                    print("TerminalBackend.recv_vt100_output_data: received_bytes为空，关闭 ssh_client, 退出了本函数")
                     self.is_closed = True
                     return
                 # 有数据就往列队里扔
@@ -10118,1208 +10040,6 @@ class TerminalBackend:
                 print(e)
                 self.is_closed = True
                 return
-
-
-class TerminalVt100:
-    """
-    ★vt100特性总结
-    1. 客户端按下 ← 左方向键          发送的是 b'\033OD'    服务端回复的是  b'\x08'    对应操作 vt100_cursor 回退一格
-    2. 客户端按下 Backspace 回退键    发送的是 b'\x08'       服务端回复的是  b'\x08\x1b[K\x00\x00\x00\x00\x00\x00'  回退一格并清除到行尾
-    3. vt100认为 b'\x08' 只是回退一格，不删除任何字符，b'\x08\x1b[K' 才是回退1格并删除光标到行尾
-    4. 在当前行中间位置插入字符时，会覆盖当前vt100_cursor后面的字符，插入的字符有多少个，后面被覆盖的字符就有多少个，剩余字符不动它，除非有其他指令要清除这些剩余字符
-    5. 如果vt100_cursor不在当前行末尾，且收到的字符串中含有'\r\n'，则'\r\n'之后的字符串直接从下一行插入，而不是从当前vt100_cursor处插入，
-        即当前行字符不动它，当前行不会被拆成2行，这个真实原因如下：
-    6. vt100中，\r表示将光标移到当前行行首，然后啥也不做，\n表示插入新行（光标下移一行），所以'\r\n'表示先将光标移回当前行行首，再下移一行，即移动到下一行行首
-        有时，只有\r，不一定是要换行，可能只是将光标移到当前行行首，然后后面紧跟一个\033[K 清除从光标处到行尾的所有字符，即清除当前行所有内容
-        终端客户端按下回车键，发送的是'\r'字符
-
-    ★概念说明
-        vt100_cursor:  vt100光标，vt100发回的对于光标操作的指令（控制序列）
-        text_cursor:   tkinter.Text组件的光标（是在Text组件里的闪烁的那个光标-->mark）
-        text_index:    tkinter.Text组件的索引（是在Text组件里的-->index）
-    """
-
-    def __init__(self, terminal_frame=None, shell_terminal_width_pixel=1008, shell_terminal_height_pixel=560, global_info=None,
-                 host_oid="", font_size=14, font_family='', font_name='', bg_color="black", fg_color="white", text_pad=4):
-        # self.shell_terminal_width = shell_terminal_width  # <int> vt100-width
-        # self.shell_terminal_height = shell_terminal_height  # <int> vt100-height
-        self.shell_terminal_width_pixel = shell_terminal_width_pixel  # <int> self.terminal_text-width
-        self.shell_terminal_height_pixel = shell_terminal_height_pixel  # <int> self.terminal_text-height
-        self.font_family = font_family  # <str>
-        self.font_name = font_name  # <str>
-        self.font_size = font_size  # <int>
-        self.bg_color = bg_color  # <str> color
-        self.fg_color = fg_color  # <str> color
-        self.global_info = global_info
-        self.host_oid = host_oid  # <str>
-        self.terminal_frame = terminal_frame  # 在Frame里展示一台主机的终端，在Frame里创建相应的Text及Scrollbar
-        self.scrollbar_normal = None  # 在 show_terminal_on_terminal_frame()里赋值
-        self.terminal_normal_text = None  # 在 show_terminal_on_terminal_frame()里赋值，tkinter.Text()，普通模式下显示
-        self.terminal_application_text = None  # 在 show_terminal_on_terminal_frame()里赋值，tkinter.Text()，退出应用模式后，就隐藏了
-        self.padx = 2  # <int>
-        self.pady = 2  # <int>
-        self.is_closed = False  # 置为True时结束shell会话
-        # self.normal_tag_config_record_list = []  # 一次ssh会话的所有输出的tag_config属性记录列表，元素为<TagConfigRecord>对象
-        # self.app_tag_config_record_list = []  # 一次ssh会话的所有输出的tag_config属性记录列表，元素为<TagConfigRecord>对象
-        self.ssh_shell = None
-        self.ctrl_pressed = False  # 仅当Ctrl键按下时，此参数置为True，否则置False
-        self.need_reset_ssh_shell_size = False
-        self.is_alternate_keypad_mode = False
-        self.exit_alternate_keypad_mode = False
-        self.user_input_byte_queue = None  # 存储的是用户输入的按键（含组合键）对应的ASCII码，元素为bytes(1到N个字节）
-        self.back_end_thread = None
-        self.recv_thred = None
-        self.text_pad = text_pad
-        # self.vt100_cursor_normal = None  # <str>默认值为 current , self.terminal_normal_text的vt100光标索引
-        # self.vt100_cursor_app = None  # <Vt100Cursor> , self.terminal_application_text的vt100光标索引
-        self.before_recv_text_index = "1.0"  # <str>
-        self.host_obj = global_info.get_host_by_oid(host_oid)
-        # 整个类的实例只使用以下4个字体对象
-        self.terminal_font_normal = font.Font(size=self.font_size, family=self.font_family)
-        self.terminal_font_bold = font.Font(size=self.font_size, family=self.font_family,
-                                            weight="bold")
-        self.terminal_font_italic = font.Font(size=self.font_size, family=self.font_family,
-                                              slant="italic")
-        self.terminal_font_bold_italic = font.Font(size=self.font_size, family=self.font_family,
-                                                   weight="bold", slant="italic")
-
-    def find_ssh_credential(self, host_obj):
-        """
-        查找可用的ssh凭据，会登录一次目标主机（因为一台主机可以绑定多个同类型的凭据，依次尝试，直到找到可用的凭据）
-        :param host_obj:
-        :return:
-        """
-        # if host.login_protocol == LOGIN_PROTOCOL_SSH:
-        for cred_oid in host_obj.credential_oid_list:
-            cred = self.global_info.get_credential_by_oid(cred_oid)
-            if cred.cred_type == CRED_TYPE_SSH_PASS:
-                ssh_client = paramiko.client.SSHClient()
-                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
-                try:
-                    ssh_client.connect(hostname=host_obj.address, port=host_obj.ssh_port, username=cred.username,
-                                       password=cred.password,
-                                       timeout=LOGIN_AUTH_TIMEOUT)
-                except paramiko.AuthenticationException as e:
-                    # print(f"Authentication Error: {e}")
-                    raise e
-                ssh_client.close()
-                return cred
-            if cred.cred_type == CRED_TYPE_SSH_KEY:
-                ssh_client = paramiko.client.SSHClient()
-                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
-                prikey_obj = io.StringIO(cred.private_key)
-                try:
-                    pri_key = paramiko.RSAKey.from_private_key(prikey_obj)
-                except paramiko.ssh_exception.SSHException as e:
-                    # print("not a valid RSA private key file")
-                    raise e
-                try:
-                    ssh_client.connect(hostname=host_obj.address, port=host_obj.ssh_port, username=cred.username,
-                                       pkey=pri_key,
-                                       timeout=LOGIN_AUTH_TIMEOUT)
-                except paramiko.AuthenticationException as e:
-                    # print(f"Authentication Error: {e}")
-                    raise e
-                ssh_client.close()
-                return cred
-            else:
-                continue
-        return None
-
-    def show_terminal_on_terminal_frame(self):
-        """
-        正式执行主机巡检任务，一台主机一个线程，本函数只处理一台主机，本函数调用self.create_ssh_operator_invoke_shell去执行命令
-        :return:
-        """
-        # ★★创建Text文本框及滚动条★★
-        self.scrollbar_normal = tkinter.Scrollbar(self.terminal_frame)
-        # scrollbar_normal.pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        self.scrollbar_normal.place(x=self.shell_terminal_width_pixel + self.text_pad, y=0, width=25,
-                                    height=self.shell_terminal_height_pixel + self.text_pad)
-        text_width = int(self.shell_terminal_width_pixel // self.global_info.get_font_mapped_width(self.font_size, self.font_family))
-        text_height = int(self.shell_terminal_height_pixel // self.global_info.get_font_mapped_height(self.font_size, self.font_family))
-        # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
-        self.terminal_normal_text = tkinter.Text(master=self.terminal_frame, yscrollcommand=self.scrollbar_normal.set,
-                                                 width=text_width, height=text_height, borderwidth=0,
-                                                 font=self.terminal_font_normal, bg=self.bg_color, fg=self.fg_color,
-                                                 wrap=tkinter.CHAR, spacing1=0, spacing2=0, spacing3=0)
-        self.terminal_application_text = tkinter.Text(master=self.terminal_frame,
-                                                      width=text_width, height=text_height, borderwidth=0,
-                                                      font=self.terminal_font_normal, bg=self.bg_color, fg=self.fg_color,
-                                                      wrap=tkinter.NONE, spacing1=0, spacing2=0, spacing3=0)
-        # self.vt100_cursor_normal = Vt100Cursor(index="1.0", text_obj=self.terminal_normal_text)
-        # self.vt100_cursor_app = Vt100Cursor(index="1.0", text_obj=self.terminal_application_text)
-        # self.terminal_normal_text.pack()  # 显示Text控件，self.terminal_application_text暂时不显示
-        self.terminal_normal_text.place(x=0, y=0, width=self.shell_terminal_width_pixel + self.text_pad,
-                                        height=self.shell_terminal_height_pixel + self.text_pad)
-        # spacing1为当前行与上一行之间距离，像素
-        # spacing2为当前行内如果有折行，则折行之间的距离，像素
-        # spacing3为当前行与下一行之间距离，像素
-        self.scrollbar_normal.config(command=self.terminal_normal_text.yview)
-        self.terminal_normal_text.configure(insertbackground='green')  # Text设置光标颜色
-        self.terminal_application_text.configure(insertbackground='green')  # Text设置光标颜色
-        # ★★★创建先进先出队列-实时存放用户输入字符★★★
-        self.user_input_byte_queue = queue.Queue(maxsize=2048)  # 存储的是用户输入的按键（含组合键）对应的ASCII码，元素为bytes(1到N个字节）
-        # ★★★★★ Text控件绑定鼠标点击事件 ★★★★★
-        # 鼠标左键单击事件，先清空选中的文本属性
-        self.terminal_normal_text.bind("<Button-1>", lambda event: self.clear_selected_text_color(event, self.terminal_normal_text))
-        self.terminal_application_text.bind("<Button-1>",
-                                            lambda event: self.clear_selected_text_color(event, self.terminal_application_text))
-        # 鼠标左击并移动（拖动）事件，动态设置选中的文本属性
-        self.terminal_normal_text.bind("<B1-Motion>", lambda event: self.set_selected_text_color_b1_motion(event,
-                                                                                                           self.terminal_normal_text))
-        self.terminal_application_text.bind("<B1-Motion>",
-                                            lambda event: self.set_selected_text_color_b1_motion(event, self.terminal_application_text))
-        # 鼠标左击释放事件，移动text_cursor光标到文本框末尾，不滚动内容
-        self.terminal_normal_text.bind("<ButtonRelease-1>",
-                                       lambda event: self.set_selected_text_color_b1_release(event, self.terminal_normal_text))
-        self.terminal_application_text.bind("<ButtonRelease-1>",
-                                            lambda event: self.set_selected_text_color_b1_release(event, self.terminal_application_text))
-        # 鼠标右键单击事件，弹出功能菜单
-        self.terminal_normal_text.bind("<Button-3>", lambda event: self.pop_menu_on_terminal_text(event, self.terminal_normal_text))
-        self.terminal_application_text.bind("<Button-3>",
-                                            lambda event: self.pop_menu_on_terminal_text(event, self.terminal_application_text))
-        # 下面这个匹配组合键，以单个ascii码的方式发送
-        # self.terminal_normal_text.bind("<Control-c>", self.front_end_thread_func_ctrl_comb_key)
-        # self.terminal_normal_text.bind("<Control-z>", self.front_end_thread_func_ctrl_comb_key)
-        # 下面这个也能发送Ctrl+A之类的组合键，以单个ascii码的方式发送
-        self.terminal_normal_text.bind("<KeyPress>", self.front_end_input_func_printable_char)  # 监听键盘输入的字符
-        self.terminal_normal_text.bind("<KeyRelease>", self.front_end_ctrl_key_release)  # 监听Ctrl键释放事件
-        self.terminal_normal_text.bind("<MouseWheel>", self.scroll_mouse_wheel_and_press_ctl)  # 监听鼠标滚轮滚动事件
-        self.terminal_application_text.bind("<KeyPress>", self.front_end_input_func_printable_char)
-        self.terminal_application_text.bind("<KeyRelease>", self.front_end_ctrl_key_release)  # 监听Ctrl键释放事件
-        self.terminal_application_text.bind("<MouseWheel>", self.scroll_mouse_wheel_and_press_ctl)
-        # ★★★创建后端线程，用于发送命令及接收输出信息★★★
-        # self.back_end_thread_func()
-        self.back_end_thread = threading.Thread(target=self.back_end_thread_func)
-        self.back_end_thread.start()  # 线程start后，不要join()，主界面才不会卡住
-
-    def destroy_all(self):
-        print("TerminalVt100.destroy_all: 开始清理 下面是self.is_closed")
-        self.is_closed = True
-        time.sleep(0.1)
-        print("TerminalVt100.destroy_all: 开始清理 上面是self.is_closed")
-        try:
-            if self.recv_thred is not None:
-                cofable_stop_thread(self.recv_thred)
-            if self.back_end_thread is not None:
-                cofable_stop_thread(self.back_end_thread)
-        except ValueError as err:
-            print("TerminalVt100.destroy_all:", err)
-        except SystemError as err:
-            print("TerminalVt100.destroy_all:", err)
-        print("TerminalVt100.destroy_all: 开始清理 上面是 self.terminal_application_text.delete, tkinter.END)")
-        print("TerminalVt100.destroy_all: 清理完成")
-
-    @staticmethod
-    def clear_selected_text_color(_, terminal_text):
-        terminal_text.tag_delete("selected")
-
-    @staticmethod
-    def set_selected_text_color_b1_motion(_, terminal_text):
-        terminal_text.tag_delete("selected")
-        try:
-            terminal_text.tag_add("selected", tkinter.SEL_FIRST, tkinter.SEL_LAST)
-            terminal_text.tag_config("selected", foreground="white", backgroun="gray")  # 将选中的文本设置属性
-        except tkinter.TclError as e:
-            print("TerminalVt100.set_selected_text_color: 移动鼠标时未选择任何文字", e)  # 因为移动鼠标的位置没有超过1个字符的距离
-
-    def pop_menu_on_terminal_text(self, event, terminal_text):
-        print("点击了右键")
-        pop_menu_bar = tkinter.Menu(terminal_text, tearoff=0)
-        pop_menu_bar.add_command(label="全选", command=lambda: self.selecte_all_text_on_terminal_text(terminal_text))
-        pop_menu_bar.add_command(label="复制", command=lambda: self.copy_selected_text_on_terminal_text(terminal_text))
-        # pop_menu_bar.add_command(label="复制为RTF", command=lambda: self.copy_selected_text_on_terminal_text_rtf(terminal_text))
-        pop_menu_bar.add_command(label="粘贴", command=lambda: self.paste_text_on_terminal_text(terminal_text))
-        pop_menu_bar.add_command(label="查找", command=lambda: self.search_text_on_terminal_text(terminal_text))
-        pop_menu_bar.add_command(label="保存会话内容", command=lambda: self.save_all_text_on_terminal_text(terminal_text))
-        pop_menu_bar.add_command(label="清空会话内容★", command=lambda: self.clear_all_text_on_terminal_text(terminal_text))
-        pop_menu_bar.post(event.x_root, event.y_root)
-
-    @staticmethod
-    def selecte_all_text_on_terminal_text(terminal_text):
-        terminal_text.tag_delete("selected")
-        try:
-            terminal_text.tag_add(tkinter.SEL, "1.0", tkinter.END + "-1c")
-            terminal_text.tag_add("selected", tkinter.SEL_FIRST, tkinter.SEL_LAST)
-            terminal_text.tag_config("selected", foreground="white", backgroun="gray")  # 将选中的文本设置属性
-        except tkinter.TclError as e:
-            print("TerminalVt100.set_selected_text_color: 未选择任何文字", e)
-            return
-
-    @staticmethod
-    def copy_selected_text_on_terminal_text(terminal_text):
-        try:
-            selected_text = terminal_text.get(tkinter.SEL_FIRST, tkinter.SEL_LAST)
-            pyperclip.copy(selected_text)
-        except tkinter.TclError as e:
-            print("TerminalVt100.copy_selected_text_on_terminal_text: 未选择任何文字", e)
-            return
-
-    @staticmethod
-    def copy_selected_text_on_terminal_text_rtf(terminal_text):
-        try:
-            selected_text_dump = terminal_text.dump(tkinter.SEL_FIRST, tkinter.SEL_LAST, tag=True, text=True)
-            html_text = []
-            for key, value, index in selected_text_dump:
-                html_text.append('{')
-                html_text.append(key)
-                html_text.append(value)
-                html_text.append(index)
-                html_text.append('}')
-            pyperclip.copy(' '.join(html_text))
-        except tkinter.TclError as e:
-            print("TerminalVt100.copy_selected_text_on_terminal_text: 未选择任何文字", e)
-            return
-
-    def paste_text_on_terminal_text(self, terminal_text):
-        pasted_text = pyperclip.paste()
-        pasted_text_r = pasted_text.replace("\r\n", "\r").replace("\n", "\r")  # 只发送\r回车，不发送\n换行
-        match_pattern = '\\r'
-        ret = re.search(match_pattern, pasted_text_r)
-        if ret is not None:  # 要粘贴的内容有换行，需要先询问一下人类用户，是否粘贴
-            terminal_text.focus_force()
-            # result = messagebox.askyesno("粘贴内容确认", f"是否粘贴以下内容:\n{pasted_text}")
-            # messagebox.askyesno()参数1为弹窗标题，参数2为弹窗内容，有2个按钮（是，否），点击"是"时返回True
-            pop_askyesno_window = tkinter.Toplevel(self.terminal_frame)
-            pop_askyesno_window.title("粘贴内容确认")
-            screen_width = self.terminal_frame.winfo_screenwidth()
-            screen_height = self.terminal_frame.winfo_screenheight()
-            pop_win_width = 480
-            pop_win_height = 180
-            win_pos = f"{pop_win_width}x{pop_win_height}+{screen_width // 2 - pop_win_width // 2}+{screen_height // 2 - pop_win_height // 2}"
-            pop_askyesno_window.geometry(win_pos)  # 设置子窗口大小及位置，居中
-            pop_askyesno_window.configure(bg="pink")
-            # 子窗口点击右上角的关闭按钮后，触发此函数:
-            pop_askyesno_window.protocol("WM_DELETE_WINDOW",
-                                         lambda: self.pop_pop_askyesno_window_window_on_closing(pop_askyesno_window,
-                                                                                                terminal_text))
-            # 查找窗口中添加控件
-            text = tkinter.Text(pop_askyesno_window)
-            button_ok = tkinter.Button(pop_askyesno_window, text="确定",
-                                       command=lambda: self.paste_text_on_terminal_text_ok(pop_askyesno_window,
-                                                                                           terminal_text, text))
-            button_cancel = tkinter.Button(pop_askyesno_window, text="取消",
-                                           command=lambda: self.pop_pop_askyesno_window_window_on_closing(pop_askyesno_window,
-                                                                                                          terminal_text))
-            text.place(x=10, y=0, width=pop_win_width - 20, height=pop_win_height - 35)
-            button_ok.place(x=100, y=pop_win_height - 32, width=50, height=30)
-            button_cancel.place(x=260, y=pop_win_height - 32, width=50, height=30)
-            text.insert(tkinter.END, pasted_text)
-            text.focus_force()
-        else:
-            # 要粘贴的内容无换行，直接粘贴
-            self.user_input_byte_queue.put(pasted_text_r.encode("utf8"))
-            terminal_text.focus_force()
-
-    def paste_text_on_terminal_text_ok(self, pop_askyesno_window, terminal_text, content_text):
-        pasted_text_r = content_text.get("1.0", tkinter.END + "-1c").replace("\r\n", "\r").replace("\n", "\r")  # 只发送\r回车，不发送\n换行
-        pop_askyesno_window.destroy()
-        terminal_text.focus_force()
-        self.user_input_byte_queue.put(pasted_text_r.encode("utf8"))
-
-    @staticmethod
-    def pop_pop_askyesno_window_window_on_closing(pop_askyesno_window, terminal_text):
-        print("TerminalVt100.pop_pop_askyesno_window_window_on_closing: 用户取消了粘贴")
-        pop_askyesno_window.destroy()
-        terminal_text.focus_force()
-
-    def search_text_on_terminal_text(self, terminal_text):
-        try:
-            all_text = terminal_text.get("1.0", tkinter.END)
-        except tkinter.TclError as e:
-            print("TerminalVt100.search_text_on_terminal_text: 获取Text内容失败", e)
-            return
-        print(all_text)
-        pop_widget_dict = {"pop_search_window": tkinter.Toplevel(self.terminal_frame)}
-        pop_widget_dict["pop_search_window"].title("在当前会话内容中查找")
-        screen_width = self.terminal_frame.winfo_screenwidth()
-        screen_height = self.terminal_frame.winfo_screenheight()
-        pop_win_width = 340
-        pop_win_height = 30
-        win_pos = f"{pop_win_width}x{pop_win_height}+{screen_width // 2 - pop_win_width // 2}+{screen_height // 2 - pop_win_height // 2}"
-        pop_widget_dict["pop_search_window"].geometry(win_pos)  # 设置子窗口大小及位置，居中
-        pop_widget_dict["pop_search_window"].configure(bg="pink")
-        # 子窗口点击右上角的关闭按钮后，触发此函数:
-        pop_widget_dict["pop_search_window"].protocol("WM_DELETE_WINDOW",
-                                                      lambda: self.pop_search_window_on_closing(pop_widget_dict,
-                                                                                                terminal_text))
-        # 查找窗口中添加控件
-        pop_widget_dict["sv_searh_text"] = tkinter.StringVar()
-        entry_search = tkinter.Entry(pop_widget_dict["pop_search_window"],
-                                     textvariable=pop_widget_dict["sv_searh_text"], width=30)
-        entry_search.pack(side=tkinter.LEFT, padx=5)
-        search_button = tkinter.Button(pop_widget_dict["pop_search_window"], text="查找",
-                                       command=lambda: self.pop_search_window_click_search_button(pop_widget_dict,
-                                                                                                  terminal_text, all_text))
-        search_button.pack(side=tkinter.LEFT, padx=5)
-        pop_widget_dict["search_up_button"] = tkinter.Button(pop_widget_dict["pop_search_window"], text="↑",
-                                                             state=tkinter.DISABLED, width=2,
-                                                             command=lambda: self.pop_search_window_click_search_up_button(pop_widget_dict,
-                                                                                                                           terminal_text))
-        pop_widget_dict["search_up_button"].pack(side=tkinter.LEFT, padx=5)
-        pop_widget_dict["search_down_button"] = tkinter.Button(pop_widget_dict["pop_search_window"], text="↓",
-                                                               state=tkinter.DISABLED, width=2,
-                                                               command=lambda: self.pop_search_window_click_search_down_button(
-                                                                   pop_widget_dict,
-                                                                   terminal_text))
-        pop_widget_dict["search_down_button"].pack(side=tkinter.LEFT, padx=5)
-        entry_search.focus_force()
-
-    @staticmethod
-    def pop_search_window_on_closing(pop_search_window_widget_dict, terminal_text):
-        pop_search_window_widget_dict["pop_search_window"].destroy()
-        try:
-            terminal_text.tag_delete("matched")
-            terminal_text.focus_force()
-        except tkinter.TclError as e:
-            print("TerminalVt100.highlight_search_text_on_terminal_text: 未选匹配何文字", e)
-            terminal_text.focus_force()
-            return
-
-    def pop_search_window_click_search_button(self, pop_widget_dict, terminal_text, all_text):
-        search_text = pop_widget_dict["sv_searh_text"].get()
-        if len(search_text) != 0:
-            print(f"TerminalVt100.pop_search_window_click_search_button: 开始查找{search_text}")
-            match_pattern = search_text
-            ret = re.finditer(match_pattern, all_text, re.I)
-            pop_widget_dict["ret_list"] = []
-            for ret_item in ret:
-                pop_widget_dict["ret_list"].append(ret_item)
-            if len(pop_widget_dict["ret_list"]) > 0:
-                print(f"TerminalVt100.pop_search_window_click_search_button: 匹配到了{search_text}")
-                pop_widget_dict["search_up_button"].configure(state=tkinter.NORMAL)
-                pop_widget_dict["search_down_button"].configure(state=tkinter.NORMAL)
-                pop_widget_dict["ret_index"] = len(pop_widget_dict["ret_list"]) - 1
-                self.highlight_search_text_on_terminal_text(pop_widget_dict, terminal_text)
-            else:
-                try:
-                    terminal_text.tag_delete("matched")
-                    terminal_text.see(tkinter.END)
-                except tkinter.TclError as e:
-                    print("TerminalVt100.pop_search_window_click_search_button: 未选匹配何文字", e)
-                    return
-
-    def pop_search_window_click_search_up_button(self, pop_widget_dict, terminal_text):
-        len_ret_list = len(pop_widget_dict["ret_list"])
-        if len_ret_list > 1:
-            print(f"TerminalVt100.pop_search_window_click_search_up_button: 向上查找")
-            pop_widget_dict["ret_index"] = (pop_widget_dict["ret_index"] - 1) % len_ret_list
-            self.highlight_search_text_on_terminal_text(pop_widget_dict, terminal_text)
-
-    def pop_search_window_click_search_down_button(self, pop_widget_dict, terminal_text):
-        len_ret_list = len(pop_widget_dict["ret_list"])
-        if len_ret_list > 1:
-            print(f"TerminalVt100.pop_search_window_click_search_up_button: 向下查找")
-            pop_widget_dict["ret_index"] = (pop_widget_dict["ret_index"] + 1) % len_ret_list
-            self.highlight_search_text_on_terminal_text(pop_widget_dict, terminal_text)
-
-    @staticmethod
-    def highlight_search_text_on_terminal_text(pop_widget_dict, terminal_text):
-        start_index, end_index = pop_widget_dict["ret_list"][pop_widget_dict["ret_index"]].span()
-        print(start_index, end_index)
-        start_index_count = "+" + str(start_index) + "c"
-        end_index_count = "+" + str(end_index) + "c"
-        print(terminal_text.get("1.0" + start_index_count, "1.0" + end_index_count))
-        try:
-            terminal_text.tag_delete("matched")
-            terminal_text.tag_add("matched", "1.0" + start_index_count, "1.0" + end_index_count)
-            terminal_text.tag_config("matched", foreground="red", backgroun="white")  # 将选中的文本设置属性
-            terminal_text.see("1.0" + end_index_count)
-        except tkinter.TclError as e:
-            print("TerminalVt100.highlight_search_text_on_terminal_text: 未选匹配何文字", e)
-            return
-
-    @staticmethod
-    def save_all_text_on_terminal_text(terminal_text):
-        try:
-            all_text = terminal_text.get("1.0", tkinter.END)
-        except tkinter.TclError as e:
-            print("TerminalVt100.save_all_text_on_terminal_text: 获取Text内容失败", e)
-            terminal_text.focus_force()
-            return
-        file_path = filedialog.asksaveasfile(title="保存到文件", filetypes=[("Text files", "*.log"), ("All files", "*.*")],
-                                             defaultextension=".log")
-        if not file_path:
-            print("未选择文件")
-            terminal_text.focus_force()
-        else:
-            # 保存巡检命令及输出结果到文本文件
-            all_text_n = all_text.replace("\r\n", "\n")
-            with open(file_path.name, "a", encoding="utf8") as fileobj:  # 追加，不存在文件则新建
-                fileobj.write(all_text_n)
-            terminal_text.focus_force()
-
-    @staticmethod
-    def clear_all_text_on_terminal_text(terminal_text):
-        try:
-            terminal_text.delete("1.0", tkinter.END)
-            # terminal_text.mark_set(tkinter.INSERT,"1.0")  # 可不设置，默认自动回到"1.0"
-        except tkinter.TclError as e:
-            print("TerminalVt100.save_all_text_on_terminal_text: 获取Text内容失败", e)
-            terminal_text.focus_force()
-            return
-
-    @staticmethod
-    def set_selected_text_color_b1_release(_, terminal_text):
-        # 选择完文本后，text_cursor光标会停留在tkinter.SEL_LAST
-        # self.terminal_text.mark_set("tkinter_END", tkinter.END)  # 使text_cursor光标移动到末尾
-        # self.terminal_text.see("tkinter_END")  # 这个会使文本框滚动内容到末尾，选择的内容如果不在最后一页，则被滚动了，当前页面看不到了
-        # terminal_text.mark_set(tkinter.INSERT, "end lineend")  # 这个会使闪烁的光标(text_cursor)移到最后一行行末，但页面不会滚动，选中的内容仍在当前界面
-        terminal_text.mark_set(tkinter.INSERT, tkinter.END)
-
-    def front_end_input_func_printable_char(self, event):
-        """
-        处理普通可打印字符，控制键及组合按键
-        ★★★ 按键，ascii字符，vt100控制符是3个不同的概念
-        按键可以对应一个字符，也可没有相应字符，
-        按下shift/ctrl等控制键后再按其他键，可能会产生换档字符（如按下shift加数字键2，产生字符@）
-        vt100控制符是由ESC（十六进制为\0x1b，八进制为\033）加其他可打印字符组成，比如:
-        按键↑（方向键Up）对应的vt100控制符为 ESC加字母OA，即b'\033OA'
-        ★★★
-        :param event:
-        :return:
-        """
-        print("普通字符输入如下：")
-        print(event.keysym)
-        print(event.keycode)
-        # 非可打印字符没有event.char，event.char为空，需要发送event.keycode或转为vt100控制序列再发送
-        if event.keysym == "BackSpace":
-            input_byte = struct.pack('b', event.keycode)
-        elif event.keysym == "Delete":
-            input_byte = struct.pack('b', event.keycode)
-        elif event.keysym == "Down":
-            # input_byte = b'\033OB'  # ESC O B    对应  方向键(↓)    VK_DOWN (40)
-            input_byte = b'\033[B'  # ESC [ B    对应  方向键(↓)    VK_DOWN (40)
-        elif event.keysym == "Up":
-            # input_byte = b'\033OA'  # ESC O A    对应  方向键(↑)    VK_UP (38)
-            input_byte = b'\033[A'  # ESC [ A    对应  方向键(↑)    VK_UP (38)
-        elif event.keysym == "Left":
-            # input_byte = b'\033OD'  # ESC O D    对应  方向键(←)    VK_LEFT (37)
-            input_byte = b'\033[D'  # ESC [ D    对应  方向键(←)    VK_LEFT (37)
-        elif event.keysym == "Right":
-            # input_byte = b'\033OC'  # ESC O C    对应  方向键(→)    VK_RIGHT (39)
-            input_byte = b'\033[C'  # ESC [ C    对应  方向键(→)    VK_RIGHT (39)
-        elif event.keysym == "Control_L":
-            self.ctrl_pressed = True
-            input_byte = event.char.encode("utf8")
-        elif event.keysym == "Control_R":
-            self.ctrl_pressed = True
-            input_byte = event.char.encode("utf8")
-        else:
-            # 可打印字符只能发送event.char，因为输入!@#$%^&*()这些换档符号时，需要先按下Shift键再按下相应数字键，
-            # Shift键本身不发送（Shift键没有event.char），要发送的是换档后的符号
-            # ctrl+字母 这类组合键也是单一字符\0x01到\0x1A
-            input_byte = event.char.encode("utf8")
-        if len(input_byte) != 0:
-            self.user_input_byte_queue.put(input_byte)
-        return "break"  # 事件处理脚本返回 "break" 会中断后面的绑定，所以键盘输入不会被插入到文本框
-
-    def front_end_ctrl_key_release(self, event):
-        if event.keysym == "Control_L":
-            self.ctrl_pressed = False  # Ctrl键释放了，就置False
-            if self.need_reset_ssh_shell_size:
-                self.reset_ssh_shell_size()
-        elif event.keysym == "Control_R":
-            self.ctrl_pressed = False  # Ctrl键释放了，就置False
-            if self.need_reset_ssh_shell_size:
-                self.reset_ssh_shell_size()
-        else:
-            pass
-
-    def scroll_mouse_wheel_and_press_ctl(self, event):
-        direction = event.delta
-        if self.ctrl_pressed and direction > 0:
-            print("按下了Ctrl且滚轮向上滚动", direction)
-            if self.font_size < 36:
-                self.font_size += 1
-                self.reset_text_tag_config_font_size()  # 实时设置Text字体大小
-                if self.ssh_shell is not None:
-                    self.need_reset_ssh_shell_size = True  # self.front_end_ctrl_key_release()
-            return "break"
-        elif self.ctrl_pressed and direction < 0:
-            print("按下了Ctrl且滚轮向下滚动", direction)
-            if self.font_size > 10:
-                self.font_size -= 1
-                self.reset_text_tag_config_font_size()  # 实时设置Text字体大小
-                if self.ssh_shell is not None:
-                    self.need_reset_ssh_shell_size = True  # self.front_end_ctrl_key_release()
-            return "break"
-        else:
-            pass
-
-    def reset_text_tag_config_font_size(self):
-        text_width = int(self.shell_terminal_width_pixel // self.global_info.get_font_mapped_width(self.font_size, self.font_family))
-        text_height = int(self.shell_terminal_height_pixel // self.global_info.get_font_mapped_height(self.font_size, self.font_family))
-        self.terminal_normal_text.configure(width=text_width, height=text_height, borderwidth=0, spacing1=0, spacing2=0, spacing3=0)
-        self.terminal_application_text.configure(width=text_width, height=text_height, borderwidth=0, spacing1=0, spacing2=0, spacing3=0)
-        self.terminal_font_normal.config(size=self.font_size)
-        self.terminal_font_bold.config(size=self.font_size)
-        self.terminal_font_italic.config(size=self.font_size)
-        self.terminal_font_bold_italic.config(size=self.font_size)
-
-    def reset_ssh_shell_size(self):
-        self.ssh_shell.resize_pty(
-            width=int(self.shell_terminal_width_pixel // self.global_info.get_font_mapped_width(self.font_size, self.font_family)),
-            height=int(self.shell_terminal_height_pixel // self.global_info.get_font_mapped_height(self.font_size, self.font_family)))
-
-    def front_end_thread_func_ctrl_comb_key(self, event):
-        """
-        处理组合键
-        :param event:
-        :return:
-        """
-        print("控制组合键输入如下：")
-        print(event.keysym)
-        print(event.keycode)
-        # print(ord(event.char))  # 非可打印字符没有event.char，为空
-        # input_byte = struct.pack('b', event.keycode)
-        input_byte = event.char.encode("utf8")
-        self.user_input_byte_queue.put(input_byte)
-
-    def back_end_thread_func(self):
-        """
-        vt100终端的后端线程，首先尝试登录，查找可用的主机凭据，然后再正式登录，
-        监听Text组件的用户输入，发送输入信息到vt100服务端，再创建专门的线程去接收vt100服务端发回的信息
-        最后将收到的信息解析后，展示在Text组件里
-        :return:
-        """
-        if self.host_obj.login_protocol == LOGIN_PROTOCOL_SSH:
-            try:
-                cred = self.find_ssh_credential(self.host_obj)
-            except Exception as e:
-                print("TerminalVt100.back_end_thread_func: 查找可用的凭据错误，", e)
-                # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
-                try:
-                    self.terminal_normal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color, spacing1=0,
-                                                         spacing2=0,
-                                                         spacing3=0, font=self.terminal_font_normal)
-                    self.terminal_normal_text.insert(tkinter.END, "TerminalVt100.back_end_thread_func: 查找可用的凭据错误",
-                                                     "default")
-                    self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
-                    self.terminal_normal_text.focus_force()
-                except tkinter.TclError as e:
-                    print("TerminalVt100.back_end_thread_func:", e)
-                return
-            if cred is None:
-                print("TerminalVt100.back_end_thread_func: Credential is None, Could not find correct credential")
-                # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
-                try:
-                    self.terminal_normal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color, spacing1=0,
-                                                         spacing2=0,
-                                                         spacing3=0, font=self.terminal_font_normal)
-                    self.terminal_normal_text.insert(tkinter.END, "TerminalVt100.back_end_thread_func: 查找可用的凭据错误None",
-                                                     "default")
-                    self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
-                    self.terminal_normal_text.focus_force()
-                except tkinter.TclError as e:
-                    print("TerminalVt100.back_end_thread_func:", e)
-                return
-            # ★★开始ssh登录并创建ssh_shell，发送信息并接收输出信息
-            self.run_invoke_shell(cred)
-        elif self.host_obj.login_protocol == LOGIN_PROTOCOL_TELNET:
-            print("TerminalVt100.back_end_thread_func: 使用telnet协议远程目标主机")
-        else:
-            pass
-        print("TerminalVt100.back_end_thread_func: 本函数结束了，自然结束，在结尾处")
-
-    def run_invoke_shell(self, cred):
-        """
-        使用invoke_shell交互式shell发送用户输入的命令，创建线程专门负责接收输出并解析，最后在Text显示输出（解析后的内容）
-        :return:
-        """
-        # ★★创建ssh连接★★
-        ssh_client = paramiko.client.SSHClient()
-        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在known_hosts文件里的主机
-        try:
-            if cred.cred_type == CRED_TYPE_SSH_PASS:
-                print("TerminalVt100.run_invoke_shell : 使用ssh_password密码登录")
-                ssh_client.connect(hostname=self.host_obj.address, port=self.host_obj.ssh_port, username=cred.username,
-                                   password=cred.password, timeout=LOGIN_AUTH_TIMEOUT)
-            elif cred.cred_type == CRED_TYPE_SSH_KEY:
-                prikey_string_io = io.StringIO(cred.private_key)
-                pri_key = paramiko.RSAKey.from_private_key(prikey_string_io)
-                print("TerminalVt100.run_invoke_shell : 使用ssh_priKey密钥登录")
-                ssh_client.connect(hostname=self.host_obj.address, port=self.host_obj.ssh_port, username=cred.username,
-                                   pkey=pri_key, timeout=LOGIN_AUTH_TIMEOUT)
-            else:
-                pass
-        except paramiko.AuthenticationException as e:
-            print(f"TerminalVt100.run_invoke_shell : Authentication Error: {e}")
-            raise e
-        # ★★连接后，创建invoke_shell交互式shell★★
-        self.ssh_shell = ssh_client.invoke_shell(
-            width=int(self.shell_terminal_width_pixel // self.global_info.get_font_mapped_width(self.font_size, self.font_family)),
-            height=int(self.shell_terminal_height_pixel // self.global_info.get_font_mapped_height(self.font_size, self.font_family)))
-        # ★★创建线程专门负责接收输出并解析，最后在Text显示输出（解析后的内容）★★
-        self.recv_thred = threading.Thread(target=self.run_invoke_shell_recv)
-        self.recv_thred.start()  # 线程start后，不要join()，主界面才不会卡住
-        # ★★下面只负责发送用户输入的所有字符，包括从剪贴板复制的★★
-        cmd_index = 0
-        while True:
-            if self.is_closed:
-                self.ssh_shell.close()
-                ssh_client.close()
-                self.recv_thred.join()  # 结束本函数前，先等待它的子线程结束，防止线程游离
-                print("TerminalVt100.run_invoke_shell: 本函数结束了 在 while True: 处")
-                return
-            try:
-                # 从用户输入字符队列中取出最先输入的字符 ★非阻塞★ 队列中无内容时弹出 _queue.Empty报错，这里之所以用非阻塞，是因为要判断self.is_closed
-                user_cmd = self.user_input_byte_queue.get(block=False)
-                print("发送命令:", user_cmd)
-                self.ssh_shell.send(user_cmd)  # 发送命令，一行命令（不过滤命令前后的空白字符，发送的是utf8编码后的bytes）
-            except queue.Empty:
-                # print("队列中无内容", e)
-                time.sleep(0.02)
-                continue
-            cmd_index += 1
-            time.sleep(0.02)
-
-    def run_invoke_shell_recv(self):
-        """
-        解析接收到的vt100输出，并解析vt100属性，最后输出到 terminal_text
-        这里区分为2个概念：
-            vt100_cursor: vt100光标，vt100发回的对于光标操作的指令（控制序列）
-            text_cursor:  tkinter.Text组件的光标（是在Text组件里的闪烁的那个光标-->mark）
-            text_index:   tkinter.Text组件的索引（是在Text组件里的-->index）
-        对于vt100的光标移动操作，首先在Text里移动index到相应位置，一次recv解析完成后，再让Text的光标移动到text_index位置并闪烁。
-        而不是立即响应vt100光标的操作，假如立即响应，会让程序显示时变卡，速度变慢
-        :return:
-        """
-        # 先创建一个默认的terminal_normal_text显示属性tag
-        # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
-        self.terminal_normal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
-                                             font=self.terminal_font_normal,
-                                             spacing1=0, spacing2=0, spacing3=0)
-        # 不停地从ssh_shell接收输出信息，直到关闭了终端窗口
-        while True:
-            if self.is_closed:
-                print("TerminalVt100.run_invoke_shell_recv: 关闭了终端窗口，退出了本函数")
-                return
-            try:
-                received_bytes = self.ssh_shell.recv(65535)
-                print("TerminalVt100.run_invoke_shell_recv: 接收到信息:", received_bytes)
-                # ★★★开始解析接收到的vt100输出★★★
-                print("TerminalVt100.run_invoke_shell_recv: 开始解析received_bytes")
-                if len(received_bytes) == 0:
-                    print("TerminalVt100.run_invoke_shell_recv: received_bytes为空，关闭 ssh_client, 退出了本函数")
-                    self.is_closed = True
-                    return
-                # ★★ enter alternate_keypad_mode 进入应用模式 ★★
-                match_pattern = b'\x1b\[\?1h\x1b='
-                ret = re.search(match_pattern, received_bytes)
-                if ret is not None:
-                    print(f"TerminalVt100.parse_vt100_received_bytes: 匹配到了★Enter Alternate Keypad Mode★ {match_pattern}")
-                    # 首次匹配，首次进入alternate_keypad_mode需要清空此模式下Text控件内容
-                    new_received_bytes = received_bytes[ret.end():]
-                    self.enter_alternate_keypad_mode_text(new_received_bytes)
-                    continue
-                if self.is_alternate_keypad_mode:
-                    # 如果已经处于应用模式，则本次接收到的信息交给 self.enter_alternate_keypad_mode_text() 处理
-                    self.enter_alternate_keypad_mode_text(received_bytes)
-                    continue
-                # ★★ 不是应用模式，则由以下函数处理（普通模式） ★★
-                self.process_received_bytes_on_normal_mode(received_bytes)
-            except Exception as e:
-                print(e)
-                self.is_closed = True
-                return
-
-    def process_received_bytes_on_normal_mode(self, received_bytes):
-        self.before_recv_text_index = self.terminal_normal_text.index(tkinter.INSERT)  # 对每次接收信息处理前的索引
-        output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
-        output_block_ctrl_and_normal_content_list_new = [x for x in output_block_ctrl_and_normal_content_list if x]  # 新列表不含空元素
-        if len(output_block_ctrl_and_normal_content_list_new) == 0:
-            print(f"TerminalVt100.process_received_bytes_on_normal_mode: 本次接收到的信息拆分后列表为空")
-            # self.terminal_normal_text.mark_set("insert", self.vt100_cursor_normal.index)
-            self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
-            self.terminal_normal_text.focus_force()
-            return
-        # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析，普通输出模式 ★★★★★★
-        for block_bytes in output_block_ctrl_and_normal_content_list_new:
-            if self.is_closed:
-                print("TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 本函数结束了")
-                return
-            print("TerminalVt100.process_received_bytes_on_normal_mode Start of one block_bytes 普通输出模式: block_bytes不为空★★")
-            block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
-            # ★匹配 [m 或 [0m  -->清除所有属性
-            match_pattern = r'^\[[0]*m'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
-                # 在self.terminal_text里输出解析后的内容
-                new_block_str = block_str[ret.end():]
-                self.normal_mode_print_lines(new_block_str, 'default')
-                continue
-            # ★匹配 [01m 到 [08m  [01;34m  [01;34;42m   -->字体风格
-            match_pattern = r'^\[([0-9]{1,2};){,4}[0-9]{1,2}m'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
-                new_block_str = block_str[ret.end():]
-                output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
-                vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
-                                                          output_block_control_seq=output_block_control_seq,
-                                                          terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_NORMAL)
-                vt100_output_block_obj.start_index = self.terminal_normal_text.index(tkinter.INSERT)
-                self.normal_mode_print_lines(new_block_str, "default")  # 输出内容到Text组件
-                vt100_output_block_obj.end_index = self.terminal_normal_text.index(tkinter.INSERT)
-                # 处理vt100输出自带的颜色风格
-                set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color_normal)
-                set_vt100_tag_thread.start()
-                continue
-            # ★匹配 [C  [8C  -->[数字C  向右移动vt100_cursor（text_cursor光标在本轮for循环结束后，一次recv处理完成后，再显示）
-            match_pattern = r'^\[[0-9]*C'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
-                new_block_str = block_str[ret.end():]
-                output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1].replace("\0", "")
-                vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
-                                                          output_block_control_seq=output_block_control_seq,
-                                                          terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_NORMAL)
-                vt100_output_block_obj.move_text_index_right()  # 向右移动索引
-                # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
-                self.normal_mode_print_chars(new_block_str, 'default')
-                del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
-                gc.collect()
-                continue
-            # ★匹配 [K  -->从当前vt100_cursor光标位置向右清除到本行行尾所有内容
-            match_pattern = r'^\[K'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
-                # if self.vt100_cursor_normal.get_current_right_counts() > 0:
-                self.terminal_normal_text.delete(tkinter.INSERT, tkinter.INSERT + " lineend")
-                # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
-                new_block_str = block_str[ret.end():]
-                self.normal_mode_print_chars(new_block_str, "default")
-                continue
-            # ★匹配 [H  -->vt100_cursor光标回到屏幕开头，复杂清屏，一般vt100光标回到开头后，插入的内容会覆盖原界面的内容，未覆盖到的内容还得继续展示
-            match_pattern = r'^\[H'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
-                self.terminal_normal_text.mark_set(tkinter.INSERT, "1.0")
-                continue
-            # ★匹配 [42D  -->vt100_cursor光标左移42格，一般vt100光标回到当前行开头后，插入的内容会覆盖同行相应位置的内容，
-            # 未覆盖的地方不动它，不折行，不产生新行
-            match_pattern = r'^\[[0-9]*D'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
-                # 匹配到之后，可能 block_bytes[ret.end():] 是新的内容，要覆盖同一行相应长度的字符
-                # need to copy_current_page_move_cursor_to_head_and_cover_content
-                new_block_str = block_str[ret.end():]
-                output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
-                print("★匹配 [数字D -->光标左移n格，复杂清屏", block_str.encode("utf8"))
-                vt100_output_block_obj = Vt100OutputBlock(
-                    output_block_content=new_block_str,
-                    output_block_control_seq=output_block_control_seq,
-                    terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_NORMAL)
-                vt100_output_block_obj.left_move_vt100_cursor_and_or_overwrite_content_in_current_line()
-                del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
-                gc.collect()
-                continue
-            # ★匹配 [J  -->清空屏幕，一般和[H一起出现
-            match_pattern = r'^\[J'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: ★单独匹配到了 {match_pattern}")
-                # to do
-                self.terminal_normal_text.insert(tkinter.END, "\n", 'default')  # 暂时在Text组件末尾插入一个空行
-                continue
-            # ★匹配  b'\x08'  -->回退符，向左移动光标
-            match_pattern = b'\x08'
-            ret = re.search(match_pattern, block_bytes)
-            if ret is not None:
-                self.normal_mode_print_chars(block_str, "default")
-                continue
-            # ★匹配  b'\x07'  -->响铃
-            match_pattern = b'\x07'
-            ret = re.search(match_pattern, block_bytes)
-            if ret is not None:
-                self.normal_mode_print_chars(block_str, "default")
-                continue
-            # ★匹配  b'\x0d'  --> '\r'
-            match_pattern = '^\\r'
-            new_block_str = block_str.replace("\r\n", "\n")
-            ret = re.search(match_pattern, new_block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode 普通输出模式: ★单独匹配到了 {match_pattern}")
-                self.normal_mode_print_chars(new_block_str, "default")
-                continue
-            # ★匹配 [6;26H  -->光标移动到指定行列，普通模式暂不处理这个，直接在当前位置插入剩下的普通字符
-            match_pattern = r'^\[\d{1,};\d{1,}H'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_normal_mode: 匹配到了 {match_pattern}")
-                # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
-                # 如果有内容，那就输出呗
-                # line_column_list = block_str[ret.start() + 1:ret.end() - 1].split(";")
-                # self.terminal_normal_text.mark_set(tkinter.INSERT, f"{line_column_list[0]}.{str(int(line_column_list[1]) - 1)}")
-                new_block_str = block_str[ret.end():]
-                if len(new_block_str) > 0:
-                    self.normal_mode_print_lines(new_block_str, "default")
-                continue
-            # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
-            print("TerminalVt100.process_received_bytes_on_normal_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
-            self.normal_mode_print_lines(block_str, "default")
-        # ★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★
-        current_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
-        end_line = int(self.terminal_normal_text.index(tkinter.END + "-1c").split(".")[0])
-        if current_line != end_line:  # 如果输出的内容有换行，则将text_cursor光标移动到最后一行的行尾
-            print("TerminalVt100.process_received_bytes_on_normal_mode: 行数不同: ", current_line, end_line)
-            self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.END)
-        else:
-            print(f"TerminalVt100.process_received_bytes_on_normal_mode: 行数相同: {current_line}")
-        # 匹配用户自定义高亮词汇
-        last_recv_content_str = self.terminal_normal_text.get(self.before_recv_text_index, tkinter.INSERT)
-        custom_tag_config_obj = CustomTagConfigSet(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
-                                                   start_index=self.before_recv_text_index, host_obj=self.host_obj,
-                                                   terminal_mode=VT100_TERMINAL_MODE_NORMAL, global_info=self.global_info)
-        set_custom_tag_thread = threading.Thread(target=custom_tag_config_obj.set_custom_tag)
-        set_custom_tag_thread.start()
-        self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
-        self.terminal_normal_text.focus_force()
-
-    def enter_alternate_keypad_mode_text(self, received_bytes):
-        # self.terminal_application_text已经在self.show_terminal_on_terminal_frame()里创建了，只是暂时未显示
-        if not self.is_alternate_keypad_mode:
-            # 说明是首次进入此模式
-            # 先创建一个默认的terminal_application_text显示属性tag
-            # output_block_font_normal = font.Font(size=self.font_size, family=self.font_family)
-            self.terminal_application_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
-                                                      font=self.terminal_font_normal,
-                                                      spacing1=0, spacing2=0, spacing3=0)
-            self.is_alternate_keypad_mode = True
-        # match exit alternate_keypad_mode
-        match_pattern = b'\x1b\[\?1l\x1b>'
-        ret = re.search(match_pattern, received_bytes)
-        if ret is not None:
-            print(f"TerminalVt100.enter_alternate_keypad_mode_text: 匹配到了★Exit Alternate Keypad Mode★ {match_pattern}")
-            self.is_alternate_keypad_mode = False
-            self.exit_alternate_keypad_mode = False
-            # 退出应用模式前，先清空其内容
-            self.terminal_application_text.delete("1.0", tkinter.END)  # 清空Text内容
-            self.terminal_application_text.place_forget()  # 先隐藏应用模式Text控件
-            # 再展示普通模式Text控件
-            self.terminal_normal_text.place(x=0, y=0, width=self.shell_terminal_width_pixel + self.text_pad,
-                                            height=self.shell_terminal_height_pixel + self.text_pad)
-            new_received_bytes = received_bytes[ret.end():]
-            if len(new_received_bytes) > 0:
-                self.process_received_bytes_on_normal_mode(new_received_bytes)
-            else:
-                self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
-                self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.END)
-                self.terminal_normal_text.focus_force()
-            return
-        # 展示应用模式Text控件
-        self.terminal_normal_text.place_forget()  # 先隐藏普通模式Text控件
-        self.terminal_application_text.place(x=0, y=0, width=self.shell_terminal_width_pixel + self.text_pad,
-                                             height=self.shell_terminal_height_pixel + self.text_pad)
-        # self.terminal_application_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
-        self.terminal_application_text.focus_force()
-        # ★★★解析输出信息★★★
-        # 发送命令已有相应线程: self.run_invoke_shell()
-        # 接收命令已有相应线程: self.run_invoke_shell_recv() 由它负责接收并将收到的内容初步判断后 传参给本函数的received_bytes
-        # 解析received_bytes并输出到self.terminal_application_text 由以下函数处理（应用模式）
-        self.process_received_bytes_on_alternate_keypad_mode(received_bytes)
-
-    def process_received_bytes_on_alternate_keypad_mode(self, received_bytes):
-        output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
-        output_block_ctrl_and_normal_content_list_new = [x for x in output_block_ctrl_and_normal_content_list if x]  # 新列表不含空元素
-        # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析 ★★★★★★
-        if len(output_block_ctrl_and_normal_content_list_new) == 0:
-            print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 本次接收到的信息拆分后列表为空")
-            return
-        for block_bytes in output_block_ctrl_and_normal_content_list_new:
-            if self.is_closed:
-                print("TerminalVt100.process_received_bytes_on_alternate_keypad_mode app输出模式: 本函数结束了")
-                return
-            block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
-            # ★匹配 [m 或 [0m  -->清除所有属性
-            match_pattern = r'^\[[0]?m'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                # print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
-                # 在self.terminal_text里输出解析后的内容
-                new_block_str = block_str[ret.end():]
-                if len(new_block_str) > 0:
-                    self.app_mode_print_chars(new_block_str, "default")
-                continue
-            # ★匹配 [01m 到 [08m  [01;34m  [01;34;42m  [0;1;4;31m  -->这种字体风格
-            match_pattern = r'^\[([0-9]{1,2};){,4}[0-9]{1,2}m'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
-                new_block_str = block_str[ret.end():].replace('\0', '')
-                if len(new_block_str) > 0:
-                    vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
-                                                              output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
-                                                              terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
-                    # vt100_output_block_obj.set_tag_config(TAG_CONFIG_TYPE_FONT_AND_COLOR)  # 根据匹配到的控制序列设置字体颜色等风格
-                    # 在self.terminal_text里输出解析后的内容
-                    vt100_output_block_obj.start_index = self.terminal_application_text.index(tkinter.INSERT)
-                    self.app_mode_print_lines(new_block_str, vt100_output_block_obj.output_block_tag_config_name)
-                    vt100_output_block_obj.end_index = self.terminal_application_text.index(tkinter.INSERT)
-                    # 处理vt100输出自带有的颜色风格
-                    set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color_app)
-                    set_vt100_tag_thread.start()
-                continue
-            # ★匹配 [C  [8C  -->[数字C  向右移动vt100_cursor（Text_cursor在本轮for循环结束后（一次recv处理完成后）再显示光标
-            match_pattern = r'^\[[0-9]{,3}C'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
-                output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
-                new_block_str = block_str[ret.end():].replace('\0', '')
-                if len(new_block_str) > 0:
-                    vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
-                                                              output_block_control_seq=output_block_control_seq,
-                                                              terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
-                    vt100_output_block_obj.move_text_index_right()  # 向右移动索引
-                    # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
-                    # self.match_backspace_x08_app(new_block_bytes)  # ★★匹配回退符并向左移动索引★★
-                    self.app_mode_print_chars(new_block_str, "default")
-                    del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
-                    gc.collect()
-                continue
-            # ★匹配 [K  -->从当前光标位置向右清除到本行行尾所有内容 app
-            match_pattern = r'^\[K'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
-                right_content_counts = len(self.terminal_application_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
-                if right_content_counts > 0:
-                    self.terminal_application_text.delete(tkinter.INSERT, tkinter.INSERT + " lineend")
-                # # 有时匹配了控制序列后，在其末尾还会有回退符，普通字符等  这里得再匹配一次
-                new_block_str = block_str[ret.end():]
-                if len(new_block_str) > 0:
-                    self.app_mode_print_chars(new_block_str, "default")
-                continue
-            # ★匹配 [H  -->光标回到屏幕开头，复杂清屏，一般vt100光标回到开头后，插入的内容会覆盖原界面的内容，未覆盖到的内容还得继续展示
-            match_pattern = r'^\[H'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
-                # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
-                # need to copy_current_page_move_cursor_to_head_and_cover_content
-                print("process_received_bytes_on_alternate_keypad_mode ★匹配 [H -->光标回到屏幕开头，复杂清屏")
-                self.terminal_application_text.mark_set(tkinter.INSERT, "1.0")
-                continue
-            # ★匹配 [6;26H  -->光标移动到指定行列
-            match_pattern = r'^\[\d{1,};\d{1,}H'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
-                # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
-                # 如果有内容，那就输出呗
-                line_column_list = block_str[ret.start() + 1:ret.end() - 1].split(";")
-                self.terminal_application_text.mark_set(tkinter.INSERT, f"{line_column_list[0]}.{str(int(line_column_list[1]) - 1)}")
-                new_block_str = block_str[ret.end():]
-                if len(new_block_str) > 0:
-                    self.app_mode_print_chars(new_block_str, "default")
-                continue
-            # ★匹配 [J  -->清空屏幕，一般和[H一起出现
-            match_pattern = r'^\[J'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode: ★单独匹配到了 {match_pattern}")
-                # to do
-                # self.terminal_application_text.insert(tkinter.END, "\n", 'default')  # 暂时在末尾插入一个空行
-                continue
-            # ★匹配 [42D  -->光标左移42格，一般vt100光标回到当前行开头后，插入的内容会覆盖同行相应位置的内容，未覆盖的地方不动它，不折行，不产生新行
-            match_pattern = r'^\[[0-9]*D'
-            ret = re.search(match_pattern, block_str)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode app输出模式: 匹配到了 {match_pattern}")
-                # 匹配到之后，可能 block_bytes[ret.end():] 是新的内容，要覆盖同一行相应长度的字符
-                # need to copy_current_page_move_cursor_to_head_and_cover_content
-                print("★匹配 [数字D -->光标左移n格，复杂清屏")
-                output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
-                vt100_output_block_obj = Vt100OutputBlock(
-                    output_block_content=block_str[ret.end():],
-                    output_block_control_seq=output_block_control_seq,
-                    terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
-                vt100_output_block_obj.left_move_vt100_cursor_and_or_overwrite_content_in_current_line()
-                del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
-                gc.collect()
-                continue
-            # ★匹配  b'\x0d'  --> '\r'
-            match_pattern = '^\\r'
-            block_str_filter = block_str  # .replace("\r\n", "\n")
-            ret = re.search(match_pattern, block_str_filter)
-            if ret is not None:
-                print(f"TerminalVt100.process_received_bytes_on_alternate_keypad_mode app输出模式: ★单独匹配到了 {match_pattern}")
-                if len(block_str_filter) > 0:
-                    self.app_mode_print_chars(block_str_filter, "default")
-                continue
-            # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
-            # print("TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
-            # block_str_filter = block_str.replace('\0', '').replace(chr(0x0f), '')
-            self.app_mode_print_lines(block_str, "default")
-        # ★★★★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★★★★
-        self.terminal_application_text.see(tkinter.INSERT)
-        self.terminal_application_text.focus_force()
-
-    def app_mode_print_chars(self, content_str, tag_config_name):
-        print(f"fuck 1 PrintVt100Content.print content_str : {content_str.encode('utf8')}")
-        if len(content_str) > 0:
-            for char in content_str:
-                # print(f"PrintVt100Content.print: {char.encode('utf8')}")
-                if char == '\0':
-                    continue
-                elif char == '\r':
-                    self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
-                elif char == '\n':
-                    current_line = int(self.terminal_application_text.index(tkinter.INSERT).split(".")[0])
-                    end_line = int(self.terminal_application_text.index(tkinter.END + "-1c").split(".")[0])
-                    if current_line < end_line:
-                        self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
-                        self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + "+1l")
-                    else:
-                        self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " lineend")
-                        self.terminal_application_text.insert(tkinter.INSERT, "\n", tag_config_name)
-                elif char == chr(0x08):
-                    self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + "-1c")  # 到行首了还能左移吗？
-                elif char == chr(0x0f):
-                    continue
-                elif char == chr(0x07):  # 响铃
-                    continue
-                else:
-                    try:
-                        right_content_counts = len(self.terminal_application_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
-                        if right_content_counts > 0:
-                            self.terminal_application_text.replace(tkinter.INSERT, tkinter.INSERT + "+1c", char, tag_config_name)
-                        else:
-                            self.terminal_application_text.insert(tkinter.INSERT, char, tag_config_name)
-                    except tkinter.TclError as e:
-                        print("except:", e)
-                        return
-
-    def app_mode_print_lines(self, content_str, tag_config_name):
-        """
-        content_str  # <str> 要打印的字符串，含有特殊字符，未过滤，未替换，原始的（仅移除了ESC控制序列）
-        :param content_str:
-        :param tag_config_name:
-        :return:
-        """
-        # content_str_filter = content_str.replace("\r\n", "\n").replace("\0", '').replace(chr(0x0f), "")
-        content_str_filter = content_str.replace("\0", '').replace(chr(0x0f), "")
-        if len(content_str_filter) > 0:
-            line_index = 0
-            for line in content_str_filter.split("\n"):
-                try:
-                    # print(f"PrintVt100Content.print: {char.encode('utf8')}")
-                    if line_index > 0:
-                        current_line = int(self.terminal_application_text.index(tkinter.INSERT).split(".")[0])
-                        end_line = int(self.terminal_application_text.index(tkinter.END + "-1c").split(".")[0])
-                        if current_line < end_line:
-                            self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
-                            self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + "+1l")
-                        else:
-                            self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " lineend")
-                            self.terminal_application_text.insert(tkinter.INSERT, "\n", tag_config_name)
-                    line_length = len(line)
-                    if line_length > 0:
-                        # 每插入n个字符前，先向右删除n个字符（覆盖）
-                        right_content_counts = len(self.terminal_application_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
-                        if right_content_counts >= line_length:
-                            self.terminal_application_text.replace(tkinter.INSERT, tkinter.INSERT + f"+{str(line_length)}c", line,
-                                                                   tag_config_name)
-                        elif right_content_counts > 0:
-                            self.terminal_application_text.replace(tkinter.INSERT, tkinter.INSERT + " lineend", line,
-                                                                   tag_config_name)
-                        else:
-                            self.terminal_application_text.insert(tkinter.INSERT, line, tag_config_name)
-                    line_index += 1
-                except tkinter.TclError as e:
-                    print("except:", e)
-                    return
-
-    def normal_mode_print_chars(self, content_str, tag_config_name):
-        """
-        content_str  # <str> 要打印的字符串，含有特殊字符，未过滤，未替换，原始的（仅移除了ESC控制序列）
-        :param content_str:
-        :param tag_config_name:
-        :return:
-        """
-        # 按每字符输出时，不过滤
-        # content_str_filter = content_str.replace("\r\n", "\n").replace("\0", '')
-        if len(content_str) > 0:
-            for char in content_str:
-                # print(f"PrintVt100Content.print: {char.encode('utf8')}")
-                if char == '\0':
-                    continue
-                elif char == '\r':
-                    self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
-                elif char == '\n':
-                    current_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
-                    end_line = int(self.terminal_normal_text.index(tkinter.END + "-1c").split(".")[0])
-                    if current_line < end_line:
-                        self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
-                        self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + "+1l")
-                    else:
-                        self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " lineend")
-                        self.terminal_normal_text.insert(tkinter.INSERT, "\n", tag_config_name)
-                elif char == chr(0x08):
-                    self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + "-1c")
-                elif char == chr(0x0f):
-                    continue
-                elif char == chr(0x07):  # 响铃
-                    continue
-                else:
-                    try:
-                        print(f"PrintVt100Content.print: 输出普通字符: {char.encode('utf8')}")
-                        right_content_counts = len(self.terminal_normal_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
-                        if right_content_counts > 0:
-                            self.terminal_normal_text.replace(tkinter.INSERT, tkinter.INSERT + "+1c", char, tag_config_name)
-                        else:
-                            self.terminal_normal_text.insert(tkinter.INSERT, char, tag_config_name)
-                    except tkinter.TclError as e:
-                        print("except:", e)
-                        return
-
-    def normal_mode_print_lines(self, content_str, tag_config_name):
-        """
-        content_str  # <str> 要打印的字符串，含有特殊字符，未过滤，未替换，原始的（仅移除了ESC控制序列）
-        :param content_str:
-        :param tag_config_name:
-        :return:
-        """
-        # content_str_filter = content_str.replace("\r\n", "\n").replace("\0", '').replace(chr(0x0f), "")
-        content_str_filter = content_str.replace("\0", '').replace(chr(0x0f), "")
-        if len(content_str_filter) > 0:
-            line_index = 0
-            for line in content_str_filter.split("\n"):
-                try:
-                    # print(f"PrintVt100Content.print: {char.encode('utf8')}")
-                    if line_index > 0:
-                        current_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
-                        end_line = int(self.terminal_normal_text.index(tkinter.END + "-1c").split(".")[0])
-                        if current_line < end_line:
-                            self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
-                            self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + "+1l")
-                        else:
-                            self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " lineend")
-                            self.terminal_normal_text.insert(tkinter.INSERT, "\n", tag_config_name)
-                    line_length = len(line)
-                    if line_length > 0:
-                        # 每插入n个字符前，先向右删除n个字符（覆盖）
-                        right_content_counts = len(self.terminal_normal_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
-                        if right_content_counts >= line_length:
-                            self.terminal_normal_text.replace(tkinter.INSERT, tkinter.INSERT + f"+{str(line_length)}c", line,
-                                                              tag_config_name)
-                        elif right_content_counts > 0:
-                            self.terminal_normal_text.replace(tkinter.INSERT, tkinter.INSERT + " lineend", line,
-                                                              tag_config_name)
-                        else:
-                            self.terminal_normal_text.insert(tkinter.INSERT, line, tag_config_name)
-                    line_index += 1
-                except tkinter.TclError as e:
-                    print("except:", e)
-                    return
 
 
 class Vt100OutputBlock:
