@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-16
+# update: 2024-04-17
 
 """
 开发日志：
@@ -47,7 +47,8 @@
 ★. 支持用户自定义高亮字符设置（着色方案），支持正则表达式匹配并设置显示样式，每台主机可单独设置着色方案    2024年4月6日 完成
 ★. 优化了vt100输出显示逻辑，先输出内容，后上色（系统自带的颜色属性）                        2024年4月9日 完成
 ★. 修复了tkinter.Text组件的索引操作错误导致的闪退问题，以及引入结束线程机制，防止内存泄露      2024年4月12日 完成
-★. 处理用户自定义配色方案时，需要使用多线程，速度才够快
+★. 处理用户自定义配色方案时，需要使用多线程，速度才够快                                    2024年4月16日 完成
+★. 优化输出逻辑，提升显示速度，如 TerminalFrontend.app_mode_print_all 这个函数          2024年4月17日 完成
 
 资源操作逻辑：
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -9359,7 +9360,6 @@ class TerminalFrontend:
             return
 
     def parse_received_vt100_data(self):
-        recv_index = 0
         while True:
             try:
                 # 从vt100数据队列中取出最先输入的字符 ★非阻塞★ 队列中无内容时弹出 _queue.Empty报错，这里之所以用非阻塞，是因为可能要关闭此线程
@@ -9389,8 +9389,30 @@ class TerminalFrontend:
                 # print("队列中无内容", e)
                 time.sleep(0.001)
                 continue
-            recv_index += 1
             # time.sleep(0.001)
+
+    def parse_received_vt100_data_2(self, received_bytes):
+        print("TerminalFrontend.parse_received_vt100_data: 接收到信息:", received_bytes)
+        # ★★★开始解析接收到的vt100输出★★★
+        if len(received_bytes) == 0:
+            print("TerminalFrontend.parse_received_vt100_data: received_bytes为空，")
+            return
+        # ★★ enter alternate_keypad_mode 进入应用模式 ★★
+        match_pattern = b'\x1b\[\?1h\x1b='
+        ret = re.search(match_pattern, received_bytes)
+        if ret is not None:
+            print(f"TerminalFrontend.parse_received_vt100_data: 匹配到了★Enter Alternate Keypad Mode★ {match_pattern}")
+            # 首次匹配，首次进入alternate_keypad_mode需要清空此模式下Text控件内容
+            new_received_bytes = received_bytes[ret.end():]
+            self.enter_alternate_keypad_mode_text(new_received_bytes)
+            return
+        if self.is_alternate_keypad_mode:
+            # 如果已经处于应用模式，则本次所有数据直接交给 self.enter_alternate_keypad_mode_text() 处理
+            self.enter_alternate_keypad_mode_text(received_bytes)
+            return
+        # ★★ 不是应用模式，则由以下函数处理（普通模式） ★★
+        self.current_terminal_text = CURRENT_TERMINAL_TEXT_NORMAL
+        self.process_received_bytes_on_normal_mode(received_bytes)
 
     def process_received_bytes_on_normal_mode(self, received_bytes):
         self.before_recv_text_index = self.terminal_normal_text.index(tkinter.INSERT)  # 对每次接收信息处理前的索引
@@ -9411,7 +9433,7 @@ class TerminalFrontend:
                 print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
                 # 在self.terminal_text里输出解析后的内容
                 new_block_str = block_str[ret.end():]
-                self.normal_mode_print_lines(new_block_str, 'default')
+                self.normal_mode_print_all(new_block_str, 'default')
                 continue
             # ★匹配 [01m 到 [08m  [01;34m  [01;34;42m   -->字体风格
             match_pattern = r'^\[([0-9]{1,2};){,4}[0-9]{1,2}m'
@@ -9424,7 +9446,7 @@ class TerminalFrontend:
                                                           output_block_control_seq=output_block_control_seq,
                                                           terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_NORMAL)
                 vt100_output_block_obj.start_index = self.terminal_normal_text.index(tkinter.INSERT)
-                self.normal_mode_print_lines(new_block_str, "default")  # 输出内容到Text组件
+                self.normal_mode_print_all(new_block_str, "default")  # 输出内容到Text组件
                 vt100_output_block_obj.end_index = self.terminal_normal_text.index(tkinter.INSERT)
                 # 处理vt100输出自带的颜色风格
                 set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color_normal)
@@ -9443,8 +9465,6 @@ class TerminalFrontend:
                 vt100_output_block_obj.move_text_index_right()  # 向右移动索引
                 # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
                 self.normal_mode_print_chars(new_block_str, 'default')
-                del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
-                gc.collect()
                 continue
             # ★匹配 [K  -->从当前vt100_cursor光标位置向右清除到本行行尾所有内容
             match_pattern = r'^\[K'
@@ -9481,8 +9501,6 @@ class TerminalFrontend:
                     output_block_control_seq=output_block_control_seq,
                     terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_NORMAL)
                 vt100_output_block_obj.left_move_vt100_cursor_and_or_overwrite_content_in_current_line()
-                del vt100_output_block_obj  # 含有循环引用的对象，一旦使用完成就要立即删除，避免内存泄露
-                gc.collect()
                 continue
             # ★匹配 [J  -->清空屏幕，一般和[H一起出现
             match_pattern = r'^\[J'
@@ -9525,7 +9543,7 @@ class TerminalFrontend:
                 continue
             # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
             print("TerminalFrontend.process_received_bytes_on_normal_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
-            self.normal_mode_print_lines(block_str, "default")
+            self.normal_mode_print_all(block_str, "default")
         # ★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★
         current_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
         end_line = int(self.terminal_normal_text.index(tkinter.END + "-1c").split(".")[0])
@@ -9583,7 +9601,10 @@ class TerminalFrontend:
         self.process_received_bytes_on_alternate_keypad_mode(received_bytes)
 
     def process_received_bytes_on_alternate_keypad_mode(self, received_bytes):
-        output_block_ctrl_and_normal_content_list = received_bytes.split(b'\033')
+        sub_pattern = b'\x1b\[m\x0f'
+        received_bytes_sub = re.sub(sub_pattern, b'', received_bytes)
+        print("sub", received_bytes_sub)
+        output_block_ctrl_and_normal_content_list = received_bytes_sub.split(b'\033')
         output_block_ctrl_and_normal_content_list_new = [x for x in output_block_ctrl_and_normal_content_list if x]  # 新列表不含空元素
         # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析 ★★★★★★
         if len(output_block_ctrl_and_normal_content_list_new) == 0:
@@ -9598,7 +9619,8 @@ class TerminalFrontend:
                 # print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
                 new_block_str = block_str[ret.end():]
                 if len(new_block_str) > 0:
-                    self.app_mode_print_chars(new_block_str, "default")
+                    # self.app_mode_print_chars(new_block_str, "default")
+                    self.app_mode_print_all(new_block_str, "default")
                 continue
             # ★匹配 [01m 到 [08m  [01;34m  [01;34;42m  [0;1;4;31m  -->这种字体风格
             match_pattern = r'^\[([0-9]{1,2};){,4}[0-9]{1,2}m'
@@ -9611,7 +9633,7 @@ class TerminalFrontend:
                                                               output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
                                                               terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
                     vt100_output_block_obj.start_index = self.terminal_application_text.index(tkinter.INSERT)
-                    self.app_mode_print_lines(new_block_str, vt100_output_block_obj.output_block_tag_config_name)
+                    self.app_mode_print_all(new_block_str, vt100_output_block_obj.output_block_tag_config_name)
                     vt100_output_block_obj.end_index = self.terminal_application_text.index(tkinter.INSERT)
                     # 处理vt100输出自带有的颜色风格
                     set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color_app)
@@ -9645,7 +9667,7 @@ class TerminalFrontend:
                 # 有时匹配了控制序列后，在其末尾还会有回退符，普通字符等  这里得再处理一次
                 new_block_str = block_str[ret.end():]
                 if len(new_block_str) > 0:
-                    self.app_mode_print_chars(new_block_str, "default")
+                    self.app_mode_print_lines(new_block_str, "default")
                 continue
             # ★匹配 [H  -->光标回到屏幕开头，复杂清屏，一般vt100光标回到开头后，插入的内容会覆盖原界面的内容，未覆盖到的内容还得继续展示
             match_pattern = r'^\[H'
@@ -9655,6 +9677,10 @@ class TerminalFrontend:
                     f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern} 光标回到屏幕开头，复杂清屏")
                 # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
                 self.terminal_application_text.mark_set(tkinter.INSERT, "1.0")
+                # 如果有内容，那就输出呗
+                new_block_str = block_str[ret.end():]
+                if len(new_block_str) > 0:
+                    self.app_mode_print_all(new_block_str, "default")
                 continue
             # ★匹配 [6;26H  -->光标移动到指定行列
             match_pattern = r'^\[\d{1,};\d{1,}H'
@@ -9675,6 +9701,10 @@ class TerminalFrontend:
             if ret is not None:
                 print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: ★单独匹配到了 {match_pattern}")
                 # self.terminal_application_text.insert(tkinter.END, "\n", 'default')  # 暂时在末尾插入一个空行
+                # 有时匹配了控制序列后，在其末尾还会有回退符，普通字符等  这里得再处理一次
+                new_block_str = block_str[ret.end():]
+                if len(new_block_str) > 0:
+                    self.app_mode_print_all(new_block_str, "default")
                 continue
             # ★匹配 [42D  -->光标左移42格，一般vt100光标回到当前行开头后，插入的内容会覆盖同行相应位置的内容，未覆盖的地方不动它，不折行，不产生新行
             match_pattern = r'^\[[0-9]*D'
@@ -9702,7 +9732,7 @@ class TerminalFrontend:
                 continue
             # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
             # print("TerminalVt100.process_received_bytes_on_alternate_keypad_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
-            self.app_mode_print_lines(block_str, "default")
+            self.app_mode_print_all(block_str, "default")
         # ★★★★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★★★★
         self.terminal_application_text.see(tkinter.INSERT)
         self.terminal_application_text.focus_force()
@@ -9779,6 +9809,25 @@ class TerminalFrontend:
                 except tkinter.TclError as e:
                     print("TerminalFrontend.app_mode_print_lines except:", e)
                     return
+
+    def app_mode_print_all(self, content_str, tag_config_name):
+        # content_str_filter = content_str.replace("\r\n", "\n").replace("\0", '').replace(chr(0x0f), "")
+        content_str_filter = content_str.replace("\0", '')
+        len_content_str_filter = len(content_str_filter)
+        if len_content_str_filter > 0:
+            try:
+                # 每插入n个字符前，先向右删除n个字符（覆盖）
+                right_content_counts = len(self.terminal_application_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
+                if right_content_counts >= len_content_str_filter:
+                    self.terminal_application_text.replace(tkinter.INSERT, tkinter.INSERT + f"+{str(len_content_str_filter)}c",
+                                                           content_str_filter, tag_config_name)
+                elif right_content_counts > 0:
+                    self.terminal_application_text.replace(tkinter.INSERT, tkinter.INSERT + " lineend",
+                                                           content_str_filter, tag_config_name)
+                else:
+                    self.terminal_application_text.insert(tkinter.INSERT, content_str_filter, tag_config_name)
+            except tkinter.TclError as e:
+                print("TerminalFrontend.app_mode_print_lines except:", e)
 
     def normal_mode_print_chars(self, content_str, tag_config_name):
         """
@@ -9862,6 +9911,25 @@ class TerminalFrontend:
                 except tkinter.TclError as e:
                     print("TerminalFrontend.normal_mode_print_lines except:", e)
                     return
+
+    def normal_mode_print_all(self, content_str, tag_config_name):
+        # content_str_filter = content_str.replace("\r\n", "\n").replace("\0", '').replace(chr(0x0f), "")
+        content_str_filter = content_str.replace("\0", '')
+        len_content_str_filter = len(content_str_filter)
+        if len_content_str_filter > 0:
+            try:
+                # 每插入n个字符前，先向右删除n个字符（覆盖）
+                right_content_counts = len(self.terminal_normal_text.get(tkinter.INSERT, tkinter.INSERT + " lineend"))
+                if right_content_counts >= len_content_str_filter:
+                    self.terminal_normal_text.replace(tkinter.INSERT, tkinter.INSERT + f"+{str(len_content_str_filter)}c",
+                                                      content_str_filter, tag_config_name)
+                elif right_content_counts > 0:
+                    self.terminal_normal_text.replace(tkinter.INSERT, tkinter.INSERT + " lineend",
+                                                      content_str_filter, tag_config_name)
+                else:
+                    self.terminal_normal_text.insert(tkinter.INSERT, content_str_filter, tag_config_name)
+            except tkinter.TclError as e:
+                print("TerminalFrontend.app_mode_print_lines except:", e)
 
     def hide(self):
         self.terminal_children_frame.place_forget()  # 隐藏子Frame
@@ -10035,7 +10103,8 @@ class TerminalBackend:
                     self.is_closed = True
                     return
                 # 有数据就往列队里扔
-                self.vt100_receive_byte_queue.put(received_bytes)
+                # self.vt100_receive_byte_queue.put(received_bytes)
+                self.host_session_record_obj.terminal_frontend_obj.parse_received_vt100_data_2(received_bytes)  # 有数据就直接调前端界面处理
             except Exception as e:
                 print(e)
                 self.is_closed = True
@@ -10430,6 +10499,7 @@ class CustomTagConfigSet:
         self.start_index = start_index  # <str> "line.column"这种格式
         self.host_obj = host_obj
         self.global_info = global_info
+        self.tag_config_set_match_object_set_thread_list = []
 
     def disconnect(self):
         self.terminal_vt100_obj = None
@@ -10450,50 +10520,69 @@ class CustomTagConfigSet:
             return
         for custom_match_object in scheme_obj.custom_match_object_list:
             # custom_match_font = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
-            font_type = FONT_TYPE_NORMAL
-            if custom_match_object.bold:
-                font_type += 1
-            if custom_match_object.italic:
-                font_type += 2
-            for match_pattern in custom_match_object.match_pattern_lines.split("\n"):
-                if match_pattern == "":
-                    continue
-                ret = re.finditer(match_pattern, self.output_recv_content, re.I)
-                tag_config_name = uuid.uuid4().__str__()  # <str>
-                for ret_item in ret:
-                    print(f"CustomTagConfigSet.set_custom_tag_normal: 匹配到了{match_pattern}")
-                    start_index, end_index = ret_item.span()
-                    start_index_count = "+" + str(start_index) + "c"
-                    end_index_count = "+" + str(end_index) + "c"
-                    try:
-                        # terminal_text.tag_delete("matched")
-                        print("CustomTagConfigSet.set_custom_tag_normal:匹配内容",
-                              self.terminal_vt100_obj.terminal_normal_text.get(self.start_index + start_index_count,
-                                                                               self.start_index + end_index_count))
-                        self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{tag_config_name}", self.start_index + start_index_count,
-                                                                             self.start_index + end_index_count)
+            tag_config_set_match_object_obj = CustomTagConfigSetMatchObject(custom_match_object=custom_match_object,
+                                                                            terminal_vt100_obj=self.terminal_vt100_obj,
+                                                                            start_index=self.start_index,
+                                                                            output_recv_content=self.output_recv_content)
+            tag_config_set_match_object_set_thread = threading.Thread(target=tag_config_set_match_object_obj.set)
+            tag_config_set_match_object_set_thread.start()
+            self.tag_config_set_match_object_set_thread_list.append(tag_config_set_match_object_set_thread)
+        # for tag_config_set_match_object_set_thread in self.tag_config_set_match_object_set_thread_list:
+        #     tag_config_set_match_object_set_thread.join()
+
+
+class CustomTagConfigSetMatchObject:
+    def __init__(self, custom_match_object=None, terminal_vt100_obj=None, start_index="", output_recv_content=""):
+        self.custom_match_object = custom_match_object
+        self.terminal_vt100_obj = terminal_vt100_obj
+        self.start_index = start_index
+        self.output_recv_content = output_recv_content
+
+    def set(self):
+        font_type = FONT_TYPE_NORMAL
+        if self.custom_match_object.bold:
+            font_type += 1
+        if self.custom_match_object.italic:
+            font_type += 2
+        for match_pattern in self.custom_match_object.match_pattern_lines.split("\n"):
+            if match_pattern == "":
+                continue
+            ret = re.finditer(match_pattern, self.output_recv_content, re.I)
+            tag_config_name = uuid.uuid4().__str__()  # <str>
+            for ret_item in ret:
+                print(f"CustomTagConfigSet.set_custom_tag_normal: 匹配到了{match_pattern}")
+                start_index, end_index = ret_item.span()
+                start_index_count = "+" + str(start_index) + "c"
+                end_index_count = "+" + str(end_index) + "c"
+                try:
+                    # terminal_text.tag_delete("matched")
+                    print("CustomTagConfigSet.set_custom_tag_normal:匹配内容",
+                          self.terminal_vt100_obj.terminal_normal_text.get(self.start_index + start_index_count,
+                                                                           self.start_index + end_index_count))
+                    self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{tag_config_name}", self.start_index + start_index_count,
+                                                                         self.start_index + end_index_count)
+                    self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                            foreground=self.custom_match_object.foreground,
+                                                                            backgroun=self.custom_match_object.backgroun,
+                                                                            underline=self.custom_match_object.underline,
+                                                                            underlinefg=self.custom_match_object.underlinefg,
+                                                                            overstrike=self.custom_match_object.overstrike,
+                                                                            overstrikefg=self.custom_match_object.overstrikefg)
+                    if font_type == FONT_TYPE_NORMAL:
                         self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
-                                                                                foreground=custom_match_object.foreground,
-                                                                                backgroun=custom_match_object.backgroun,
-                                                                                underline=custom_match_object.underline,
-                                                                                underlinefg=custom_match_object.underlinefg,
-                                                                                overstrike=custom_match_object.overstrike,
-                                                                                overstrikefg=custom_match_object.overstrikefg)
-                        if font_type == FONT_TYPE_NORMAL:
-                            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
-                                                                                    font=self.terminal_vt100_obj.terminal_font_normal)
-                        elif font_type == FONT_TYPE_BOLD:
-                            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
-                                                                                    font=self.terminal_vt100_obj.terminal_font_bold)
-                        elif font_type == FONT_TYPE_ITALIC:
-                            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
-                                                                                    font=self.terminal_vt100_obj.terminal_font_italic)
-                        elif font_type == FONT_TYPE_BOLD_ITALIC:
-                            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
-                                                                                    font=self.terminal_vt100_obj.terminal_font_bold_italic)
-                    except tkinter.TclError as e:
-                        print("CustomTagConfigSet.set_custom_tag_normal: 未选择文字", e)
-                        return
+                                                                                font=self.terminal_vt100_obj.terminal_font_normal)
+                    elif font_type == FONT_TYPE_BOLD:
+                        self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                                font=self.terminal_vt100_obj.terminal_font_bold)
+                    elif font_type == FONT_TYPE_ITALIC:
+                        self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                                font=self.terminal_vt100_obj.terminal_font_italic)
+                    elif font_type == FONT_TYPE_BOLD_ITALIC:
+                        self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                                font=self.terminal_vt100_obj.terminal_font_bold_italic)
+                except tkinter.TclError as e:
+                    print("CustomTagConfigSet.set_custom_tag_normal:", e)
+                    return
 
 
 if __name__ == '__main__':
