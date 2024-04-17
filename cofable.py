@@ -2245,6 +2245,8 @@ class GlobalInfo:
                 cofable_stop_thread_silently(host_session_record_obj.terminal_backend_run_thread)
                 cofable_stop_thread_silently(host_session_record_obj.recv_vt100_output_data_thread)
                 cofable_stop_thread_silently(host_session_record_obj.send_user_input_data_thread)
+            time.sleep(0.1)
+            self.division_terminal_window.pop_window.quit()
 
     def load_all_data_from_sqlite3(self):  # 初始化global_info，从数据库加载所有数据到实例
         if self.sqlite3_dbfile_name is None:
@@ -4001,9 +4003,10 @@ class MainWindow:
         self.window_obj.mainloop()
 
     def on_closing_main_window(self):
-        print("MainWindow: 退出了主程序")
         self.global_info.exit_division_terminal_window()
-        self.window_obj.destroy()
+        print("MainWindow: 退出了主程序")
+        # self.window_obj.destroy()
+        self.window_obj.quit()
 
 
 class CreateResourceInFrame:
@@ -8982,9 +8985,9 @@ class TerminalFrontend:
         self.terminal_application_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
                                                   font=self.terminal_font_normal,
                                                   spacing1=0, spacing2=0, spacing3=0)
-        # self.vt100_cursor_normal = Vt100Cursor(index="1.0", text_obj=self.terminal_normal_text)
+        # self.vt100_cursor_normal = Vt100Cursor(index="1.0", text_obj=self.terminal_application_text)
         # self.vt100_cursor_app = Vt100Cursor(index="1.0", text_obj=self.terminal_application_text)
-        # self.terminal_normal_text.pack()  # 显示Text控件，self.terminal_application_text暂时不显示
+        # self.terminal_application_text.pack()  # 显示Text控件，self.terminal_application_text暂时不显示
         self.terminal_normal_text.place(x=0, y=0, width=self.shell_terminal_width_pixel - self.scrollbar_width,
                                         height=self.shell_terminal_height_pixel)
         # spacing1为当前行与上一行之间距离，像素
@@ -9013,8 +9016,8 @@ class TerminalFrontend:
         self.terminal_application_text.bind("<Button-3>",
                                             lambda event: self.pop_menu_on_terminal_text(event, self.terminal_application_text))
         # 下面这个匹配组合键，以单个ascii码的方式发送
-        # self.terminal_normal_text.bind("<Control-c>", self.front_end_thread_func_ctrl_comb_key)
-        # self.terminal_normal_text.bind("<Control-z>", self.front_end_thread_func_ctrl_comb_key)
+        # self.terminal_application_text.bind("<Control-c>", self.front_end_thread_func_ctrl_comb_key)
+        # self.terminal_application_text.bind("<Control-z>", self.front_end_thread_func_ctrl_comb_key)
         # 下面这个也能发送Ctrl+A之类的组合键，以单个ascii码的方式发送
         self.terminal_normal_text.bind("<KeyPress>", self.front_end_input_func_printable_char)  # 监听键盘输入的字符
         self.terminal_normal_text.bind("<KeyRelease>", self.front_end_ctrl_key_release)  # 监听Ctrl键释放事件
@@ -9423,34 +9426,39 @@ class TerminalFrontend:
             self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
             self.terminal_normal_text.focus_force()
             return
+        set_vt100_tag_thread_list = []
         # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析，普通输出模式 ★★★★★★
         for block_bytes in output_block_ctrl_and_normal_content_list_new:
             block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
             # ★匹配 [m 或 [0m  -->清除所有属性
-            match_pattern = r'^\[[0]*m'
+            match_pattern = r'^\[0{,1}m'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
-                print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
                 # 在self.terminal_text里输出解析后的内容
                 new_block_str = block_str[ret.end():]
-                self.normal_mode_print_all(new_block_str, 'default')
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}", new_block_str)
+                if len(new_block_str) > 0:
+                    self.normal_mode_print_all(new_block_str, 'default')
                 continue
             # ★匹配 [01m 到 [08m  [01;34m  [01;34;42m   -->字体风格
-            match_pattern = r'^\[([0-9]{1,2};){,4}[0-9]{1,2}m'
+            match_pattern = r'^\[([0-9]{1,2};){,3}[0-9]{1,2}m'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
                 print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
                 new_block_str = block_str[ret.end():]
                 output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
-                vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
-                                                          output_block_control_seq=output_block_control_seq,
-                                                          terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_NORMAL)
-                vt100_output_block_obj.start_index = self.terminal_normal_text.index(tkinter.INSERT)
+                vt100_output_block_obj = Vt100OutputBlockNormal(output_block_control_seq=output_block_control_seq,
+                                                                terminal_normal_text=self.terminal_normal_text,
+                                                                start_index=self.terminal_normal_text.index(tkinter.INSERT),
+                                                                fg_color=self.fg_color,
+                                                                bg_color=self.bg_color)
                 self.normal_mode_print_all(new_block_str, "default")  # 输出内容到Text组件
                 vt100_output_block_obj.end_index = self.terminal_normal_text.index(tkinter.INSERT)
                 # 处理vt100输出自带的颜色风格
-                set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color_normal)
+                set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color)
                 set_vt100_tag_thread.start()
+                set_vt100_tag_thread_list.append(set_vt100_tag_thread)
                 continue
             # ★匹配 [C  [8C  -->[数字C  向右移动vt100_cursor（text_cursor光标在本轮for循环结束后，一次recv处理完成后，再显示）
             match_pattern = r'^\[[0-9]*C'
@@ -9543,15 +9551,18 @@ class TerminalFrontend:
                 continue
             # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
             print("TerminalFrontend.process_received_bytes_on_normal_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
-            self.normal_mode_print_all(block_str, "default")
+            self.normal_mode_print_lines(block_str, "default")
         # ★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★
-        current_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
-        end_line = int(self.terminal_normal_text.index(tkinter.END + "-1c").split(".")[0])
-        if current_line != end_line:  # 如果输出的内容有换行，则将text_cursor光标移动到最后一行的行尾
-            print("TerminalFrontend.process_received_bytes_on_normal_mode: 行数不同: ", current_line, end_line)
-            self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.END)
-        else:
-            print(f"TerminalFrontend.process_received_bytes_on_normal_mode: 行数相同: {current_line}")
+        # current_line = int(self.terminal_application_text.index(tkinter.INSERT).split(".")[0])
+        # end_line = int(self.terminal_application_text.index(tkinter.END + "-1c").split(".")[0])
+        # if current_line != end_line:  # 如果输出的内容有换行，则将text_cursor光标移动到最后一行的行尾
+        #     print("TerminalFrontend.process_received_bytes_on_normal_mode: 行数不同: ", current_line, end_line)
+        #     self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.END)
+        # else:
+        #     print(f"TerminalFrontend.process_received_bytes_on_normal_mode: 行数相同: {current_line}")
+        # 一次输出解析完成后，要等待所有的字体颜色设置线程完成再继续
+        # for tag_thread in set_vt100_tag_thread_list:
+        #     tag_thread.join()
         # 匹配用户自定义高亮词汇
         last_recv_content_str = self.terminal_normal_text.get(self.before_recv_text_index, tkinter.INSERT)
         custom_tag_config_obj = CustomTagConfigSet(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
@@ -9559,6 +9570,8 @@ class TerminalFrontend:
                                                    terminal_mode=VT100_TERMINAL_MODE_NORMAL, global_info=self.global_info)
         set_custom_tag_thread = threading.Thread(target=custom_tag_config_obj.set_custom_tag)
         set_custom_tag_thread.start()
+        # set_custom_tag_thread.join()
+        # 字体颜色风格设置完成后，再显示焦点
         self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
         self.terminal_normal_text.focus_force()
 
@@ -9610,6 +9623,7 @@ class TerminalFrontend:
         if len(output_block_ctrl_and_normal_content_list_new) == 0:
             print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 本次接收到的信息拆分后列表为空")
             return
+        set_vt100_tag_thread_list = []
         for block_bytes in output_block_ctrl_and_normal_content_list_new:
             block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
             # ★匹配 [m 或 [0m  -->清除所有属性
@@ -9623,21 +9637,24 @@ class TerminalFrontend:
                     self.app_mode_print_all(new_block_str, "default")
                 continue
             # ★匹配 [01m 到 [08m  [01;34m  [01;34;42m  [0;1;4;31m  -->这种字体风格
-            match_pattern = r'^\[([0-9]{1,2};){,4}[0-9]{1,2}m'
+            match_pattern = r'^\[([0-9]{1,2};){,3}[0-9]{1,2}m'
             ret = re.search(match_pattern, block_str)
             if ret is not None:
                 print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 匹配到了 {match_pattern}")
+                output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
                 new_block_str = block_str[ret.end():].replace('\0', '')
                 if len(new_block_str) > 0:
-                    vt100_output_block_obj = Vt100OutputBlock(output_block_content=new_block_str,
-                                                              output_block_control_seq=block_str[ret.start() + 1:ret.end() - 1],
-                                                              terminal_vt100_obj=self, terminal_mode=VT100_TERMINAL_MODE_APP)
-                    vt100_output_block_obj.start_index = self.terminal_application_text.index(tkinter.INSERT)
+                    vt100_output_block_obj = Vt100OutputBlockApp(output_block_control_seq=output_block_control_seq,
+                                                                 terminal_application_text=self.terminal_application_text,
+                                                                 start_index=self.terminal_application_text.index(tkinter.INSERT),
+                                                                 fg_color=self.fg_color,
+                                                                 bg_color=self.bg_color)
                     self.app_mode_print_all(new_block_str, vt100_output_block_obj.output_block_tag_config_name)
                     vt100_output_block_obj.end_index = self.terminal_application_text.index(tkinter.INSERT)
                     # 处理vt100输出自带有的颜色风格
-                    set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color_app)
+                    set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color)
                     set_vt100_tag_thread.start()
+                    set_vt100_tag_thread_list.append(set_vt100_tag_thread)
                 continue
             # ★匹配 [C  [8C  -->[数字C  向右移动vt100_cursor（Text_cursor在本轮for循环结束后（一次recv处理完成后）再显示光标
             match_pattern = r'^\[[0-9]{,3}C'
@@ -9736,6 +9753,9 @@ class TerminalFrontend:
         # ★★★★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★★★★
         self.terminal_application_text.see(tkinter.INSERT)
         self.terminal_application_text.focus_force()
+        # 一次输出解析完成后，要等待所有的字体颜色设置线程完成再继续
+        for tag_thread in set_vt100_tag_thread_list:
+            tag_thread.join()
 
     def app_mode_print_chars(self, content_str, tag_config_name):
         if len(content_str) > 0:
@@ -9933,7 +9953,7 @@ class TerminalFrontend:
 
     def hide(self):
         self.terminal_children_frame.place_forget()  # 隐藏子Frame
-        # self.terminal_normal_text.place_forget()  # 隐藏普通模式Text控件
+        # self.terminal_application_text.place_forget()  # 隐藏普通模式Text控件
         # self.terminal_application_text.place_forget()  # 隐藏应用模式Text控件
 
     def show_terminal_children_frame(self):
@@ -9941,12 +9961,12 @@ class TerminalFrontend:
                                            height=self.shell_terminal_height_pixel)
         if self.current_terminal_text == CURRENT_TERMINAL_TEXT_NORMAL:
             # self.terminal_application_text.place_forget()  # 隐藏应用模式Text控件，显示普通模式Text控件
-            # self.terminal_normal_text.place(x=0, y=0, width=self.shell_terminal_width_pixel - self.scrollbar_width,
+            # self.terminal_application_text.place(x=0, y=0, width=self.shell_terminal_width_pixel - self.scrollbar_width,
             #                                 height=self.shell_terminal_height_pixel)
-            # self.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT)
+            # self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT)
             self.terminal_normal_text.focus_force()
         elif self.current_terminal_text == CURRENT_TERMINAL_TEXT_APP:
-            # self.terminal_normal_text.place_forget()  # 隐藏普通模式Text控件，显示应用模式Text控件
+            # self.terminal_application_text.place_forget()  # 隐藏普通模式Text控件，显示应用模式Text控件
             # self.terminal_application_text.place(x=0, y=0, width=self.shell_terminal_width_pixel - self.scrollbar_width,
             #                                      height=self.shell_terminal_height_pixel)
             self.terminal_application_text.focus_force()
@@ -10111,6 +10131,172 @@ class TerminalBackend:
                 return
 
 
+class Vt100OutputBlockNormal:
+    def __init__(self, output_block_control_seq="", terminal_normal_text=None, start_index="1.0", end_index="1.0",
+                 fg_color="white", bg_color="black"):
+        self.output_block_control_seq = output_block_control_seq
+        self.terminal_normal_text = terminal_normal_text
+        self.start_index = start_index  # 这段需要修饰的字符串所处位置 起始坐标
+        self.end_index = end_index  # 这段需要修饰的字符串所处位置 结束坐标
+        self.fg_color = fg_color
+        self.bg_color = bg_color
+        self.output_block_tag_config_name = ""
+
+    def set_tag_config_font_and_color(self):
+        self.output_block_tag_config_name = uuid.uuid4().__str__()  # <str>
+        self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}",
+                                             foreground=self.fg_color,
+                                             backgroun=self.bg_color,
+                                             spacing1=0, spacing2=0, spacing3=0)
+        ctrl_seq_seg_list = self.output_block_control_seq.split(";")
+        # already_set_font = False
+        for ctrl_seq_seg in ctrl_seq_seg_list:
+            # 前景色设置
+            if int(ctrl_seq_seg) == 30:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="black")
+            elif int(ctrl_seq_seg) == 31:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="red")
+            elif int(ctrl_seq_seg) == 32:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="green")
+            elif int(ctrl_seq_seg) == 33:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="yellow")
+            elif int(ctrl_seq_seg) == 34:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="blue")
+            elif int(ctrl_seq_seg) == 35:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="purple")
+            elif int(ctrl_seq_seg) == 36:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="cyan")
+            elif int(ctrl_seq_seg) == 37:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="white")
+            # 背景色设置
+            elif int(ctrl_seq_seg) == 40:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="black")
+            elif int(ctrl_seq_seg) == 41:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="red")
+            elif int(ctrl_seq_seg) == 42:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="green")
+            elif int(ctrl_seq_seg) == 43:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="yellow")
+            elif int(ctrl_seq_seg) == 44:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="blue")
+            elif int(ctrl_seq_seg) == 45:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="purple")
+            elif int(ctrl_seq_seg) == 46:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="cyan")
+            elif int(ctrl_seq_seg) == 47:
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="white")
+            # 字体设置
+            elif int(ctrl_seq_seg) == 1:  # 粗体
+                # output_block_font_bold = font.Font(weight='bold', size=self.terminal_vt100_obj.font_size,
+                #                                   family=self.terminal_vt100_obj.font_family)
+                # self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
+                #                                                         font=self.terminal_vt100_obj.terminal_font_bold)
+                # already_set_font = True
+                continue
+            elif int(ctrl_seq_seg) == 4:  # 下划线
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", underline=1)
+            elif int(ctrl_seq_seg) == 7:  # 反显，一般就单独出现不会有其他颜色设置了
+                self.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}",
+                                                     foreground=self.bg_color,
+                                                     backgroun=self.fg_color)
+            else:
+                continue
+        # if not already_set_font:
+        #     # output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
+        #     self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
+        #                                                             font=self.terminal_vt100_obj.terminal_font_normal)
+        # print("Vt100OutputBlock.set_tag_config_font_and_color_normal start_index ",
+        #       self.terminal_vt100_obj.terminal_application_text.index(self.start_index))
+        # print("Vt100OutputBlock.set_tag_config_font_and_color_normal end_index ",
+        #       self.terminal_vt100_obj.terminal_application_text.index(self.end_index))
+        self.terminal_normal_text.tag_add(f"{self.output_block_tag_config_name}",
+                                          self.start_index,
+                                          self.end_index)
+
+
+class Vt100OutputBlockApp:
+    def __init__(self, output_block_control_seq="", terminal_application_text=None, start_index="1.0", end_index="1.0",
+                 fg_color="white", bg_color="black"):
+        self.output_block_control_seq = output_block_control_seq
+        self.terminal_application_text = terminal_application_text
+        self.start_index = start_index  # 这段需要修饰的字符串所处位置 起始坐标
+        self.end_index = end_index  # 这段需要修饰的字符串所处位置 结束坐标
+        self.fg_color = fg_color
+        self.bg_color = bg_color
+        self.output_block_tag_config_name = ""
+
+    def set_tag_config_font_and_color(self):
+        self.output_block_tag_config_name = uuid.uuid4().__str__()  # <str>
+        self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
+                                                  foreground=self.fg_color,
+                                                  backgroun=self.bg_color,
+                                                  spacing1=0, spacing2=0, spacing3=0)
+        ctrl_seq_seg_list = self.output_block_control_seq.split(";")
+        # already_set_font = False
+        for ctrl_seq_seg in ctrl_seq_seg_list:
+            # 前景色设置
+            if int(ctrl_seq_seg) == 30:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="black")
+            elif int(ctrl_seq_seg) == 31:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="red")
+            elif int(ctrl_seq_seg) == 32:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="green")
+            elif int(ctrl_seq_seg) == 33:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="yellow")
+            elif int(ctrl_seq_seg) == 34:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="blue")
+            elif int(ctrl_seq_seg) == 35:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="purple")
+            elif int(ctrl_seq_seg) == 36:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="cyan")
+            elif int(ctrl_seq_seg) == 37:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="white")
+            # 背景色设置
+            elif int(ctrl_seq_seg) == 40:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="black")
+            elif int(ctrl_seq_seg) == 41:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="red")
+            elif int(ctrl_seq_seg) == 42:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="green")
+            elif int(ctrl_seq_seg) == 43:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="yellow")
+            elif int(ctrl_seq_seg) == 44:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="blue")
+            elif int(ctrl_seq_seg) == 45:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="purple")
+            elif int(ctrl_seq_seg) == 46:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="cyan")
+            elif int(ctrl_seq_seg) == 47:
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="white")
+            # 字体设置
+            elif int(ctrl_seq_seg) == 1:  # 粗体
+                # output_block_font_bold = font.Font(weight='bold', size=self.terminal_vt100_obj.font_size,
+                #                                   family=self.terminal_vt100_obj.font_family)
+                # self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
+                #                                                         font=self.terminal_vt100_obj.terminal_font_bold)
+                # already_set_font = True
+                continue
+            elif int(ctrl_seq_seg) == 4:  # 下划线
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", underline=1)
+            elif int(ctrl_seq_seg) == 7:  # 反显，一般就单独出现不会有其他颜色设置了
+                self.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
+                                                          foreground=self.bg_color,
+                                                          backgroun=self.fg_color)
+            else:
+                continue
+        # if not already_set_font:
+        #     # output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
+        #     self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
+        #                                                             font=self.terminal_vt100_obj.terminal_font_normal)
+        # print("Vt100OutputBlock.set_tag_config_font_and_color_normal start_index ",
+        #       self.terminal_vt100_obj.terminal_application_text.index(self.start_index))
+        # print("Vt100OutputBlock.set_tag_config_font_and_color_normal end_index ",
+        #       self.terminal_vt100_obj.terminal_application_text.index(self.end_index))
+        self.terminal_application_text.tag_add(f"{self.output_block_tag_config_name}",
+                                               self.start_index,
+                                               self.end_index)
+
+
 class Vt100OutputBlock:
     def __init__(self, output_block_content='', output_block_tag_config_name='', output_block_control_seq='',
                  terminal_vt100_obj=None, terminal_mode=VT100_TERMINAL_MODE_NORMAL, start_index="1.0", end_index="1.0"):
@@ -10144,7 +10330,8 @@ class Vt100OutputBlock:
             left_move_count = int(self.output_block_control_seq)
             current_column = int(self.terminal_vt100_obj.terminal_normal_text.index(tkinter.INSERT).split(".")[1])
             if current_column >= left_move_count:
-                self.terminal_vt100_obj.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + f"-{self.output_block_control_seq}c")
+                self.terminal_vt100_obj.terminal_normal_text.mark_set(tkinter.INSERT,
+                                                                      tkinter.INSERT + f"-{self.output_block_control_seq}c")
             elif current_column > 0:
                 self.terminal_vt100_obj.terminal_normal_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
             else:
@@ -10165,149 +10352,6 @@ class Vt100OutputBlock:
                 pass
         # 移动vt100_cursor后，右边剩下的字符
         self.terminal_vt100_obj.app_mode_print_chars(self.output_block_content, "default")
-
-    def set_tag_config(self, tag_config_type):
-        if tag_config_type == TAG_CONFIG_TYPE_FONT_AND_COLOR:
-            print(f"{self.output_block_control_seq}匹配到了 字体;颜色")
-            self.set_tag_config_font_and_color()
-
-    def set_tag_config_font_and_color(self):
-        if self.terminal_mode == VT100_TERMINAL_MODE_NORMAL:
-            self.set_tag_config_font_and_color_normal()
-        else:
-            self.set_tag_config_font_and_color_app()
-
-    def set_tag_config_font_and_color_normal(self):
-        self.output_block_tag_config_name = uuid.uuid4().__str__()  # <str>
-        self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}",
-                                                                foreground=self.terminal_vt100_obj.fg_color,
-                                                                backgroun=self.terminal_vt100_obj.bg_color,
-                                                                spacing1=0, spacing2=0, spacing3=0)
-        ctrl_seq_seg_list = self.output_block_control_seq.split(";")
-        already_set_font = False
-        for ctrl_seq_seg in ctrl_seq_seg_list:
-            # 前景色设置
-            if int(ctrl_seq_seg) == 30:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="black")
-            elif int(ctrl_seq_seg) == 31:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="red")
-            elif int(ctrl_seq_seg) == 32:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="green")
-            elif int(ctrl_seq_seg) == 33:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="yellow")
-            elif int(ctrl_seq_seg) == 34:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="blue")
-            elif int(ctrl_seq_seg) == 35:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="purple")
-            elif int(ctrl_seq_seg) == 36:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="cyan")
-            elif int(ctrl_seq_seg) == 37:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", foreground="white")
-            # 背景色设置
-            elif int(ctrl_seq_seg) == 40:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="black")
-            elif int(ctrl_seq_seg) == 41:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="red")
-            elif int(ctrl_seq_seg) == 42:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="green")
-            elif int(ctrl_seq_seg) == 43:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="yellow")
-            elif int(ctrl_seq_seg) == 44:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="blue")
-            elif int(ctrl_seq_seg) == 45:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="purple")
-            elif int(ctrl_seq_seg) == 46:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="cyan")
-            elif int(ctrl_seq_seg) == 47:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="white")
-            # 字体设置
-            elif int(ctrl_seq_seg) == 1:  # 粗体
-                # output_block_font_bold = font.Font(weight='bold', size=self.terminal_vt100_obj.font_size,
-                #                                   family=self.terminal_vt100_obj.font_family)
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}",
-                                                                        font=self.terminal_vt100_obj.terminal_font_bold)
-                already_set_font = True
-            elif int(ctrl_seq_seg) == 4:  # 下划线
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}", underline=1)
-            elif int(ctrl_seq_seg) == 7:  # 反显，一般就单独出现不会有其他颜色设置了
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}",
-                                                                        foreground=self.terminal_vt100_obj.bg_color,
-                                                                        backgroun=self.terminal_vt100_obj.fg_color)
-            else:
-                continue
-        if not already_set_font:
-            # output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
-            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.output_block_tag_config_name}",
-                                                                    font=self.terminal_vt100_obj.terminal_font_normal)
-        self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{self.output_block_tag_config_name}",
-                                                             self.start_index,
-                                                             self.end_index)
-
-    def set_tag_config_font_and_color_app(self):
-        self.output_block_tag_config_name = uuid.uuid4().__str__()  # <str>
-        self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
-                                                                     foreground=self.terminal_vt100_obj.fg_color,
-                                                                     backgroun=self.terminal_vt100_obj.bg_color,
-                                                                     spacing1=0, spacing2=0, spacing3=0)
-        ctrl_seq_seg_list = self.output_block_control_seq.split(";")
-        already_set_font = False
-        for ctrl_seq_seg in ctrl_seq_seg_list:
-            # 前景色设置
-            if int(ctrl_seq_seg) == 30:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="black")
-            elif int(ctrl_seq_seg) == 31:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="red")
-            elif int(ctrl_seq_seg) == 32:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="green")
-            elif int(ctrl_seq_seg) == 33:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="yellow")
-            elif int(ctrl_seq_seg) == 34:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="blue")
-            elif int(ctrl_seq_seg) == 35:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="purple")
-            elif int(ctrl_seq_seg) == 36:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="cyan")
-            elif int(ctrl_seq_seg) == 37:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", foreground="white")
-            # 背景色设置
-            elif int(ctrl_seq_seg) == 40:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="black")
-            elif int(ctrl_seq_seg) == 41:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="red")
-            elif int(ctrl_seq_seg) == 42:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="green")
-            elif int(ctrl_seq_seg) == 43:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="yellow")
-            elif int(ctrl_seq_seg) == 44:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="blue")
-            elif int(ctrl_seq_seg) == 45:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="purple")
-            elif int(ctrl_seq_seg) == 46:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="cyan")
-            elif int(ctrl_seq_seg) == 47:
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", backgroun="white")
-            # 字体设置
-            elif int(ctrl_seq_seg) == 1:  # 粗体
-                # output_block_font_bold = font.Font(weight='bold', size=self.terminal_vt100_obj.font_size,
-                #                                    family=self.terminal_vt100_obj.font_family)
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
-                                                                             font=self.terminal_vt100_obj.terminal_font_bold)
-                already_set_font = True
-            elif int(ctrl_seq_seg) == 4:  # 下划线
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}", underline=1)
-            elif int(ctrl_seq_seg) == 7:  # 反显，一般就单独出现不会有其他颜色设置了
-                self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
-                                                                             foreground=self.terminal_vt100_obj.bg_color,
-                                                                             backgroun=self.terminal_vt100_obj.fg_color)
-            else:
-                continue
-        if not already_set_font:
-            # output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
-            self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
-                                                                         font=self.terminal_vt100_obj.terminal_font_normal)
-        self.terminal_vt100_obj.terminal_application_text.tag_add(f"{self.output_block_tag_config_name}",
-                                                                  self.start_index,
-                                                                  self.end_index)
 
 
 class CustomMatchObject:
@@ -10501,7 +10545,7 @@ class CustomTagConfigSet:
         self.global_info = global_info
         self.tag_config_set_match_object_set_thread_list = []
 
-    def disconnect(self):
+    def __del__(self):
         self.terminal_vt100_obj = None
         self.host_obj = None
         self.global_info = None
@@ -10510,7 +10554,7 @@ class CustomTagConfigSet:
         if self.terminal_mode == VT100_TERMINAL_MODE_NORMAL:
             self.set_custom_tag_normal()
         self.terminal_vt100_obj.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
-        self.disconnect()
+        self.__del__()
 
     def set_custom_tag_normal(self):
         # 查找目标主机对应的配色方案，CustomTagConfigScheme对象
@@ -10527,8 +10571,8 @@ class CustomTagConfigSet:
             tag_config_set_match_object_set_thread = threading.Thread(target=tag_config_set_match_object_obj.set)
             tag_config_set_match_object_set_thread.start()
             self.tag_config_set_match_object_set_thread_list.append(tag_config_set_match_object_set_thread)
-        # for tag_config_set_match_object_set_thread in self.tag_config_set_match_object_set_thread_list:
-        #     tag_config_set_match_object_set_thread.join()
+        for tag_config_set_match_object_set_thread in self.tag_config_set_match_object_set_thread_list:
+            tag_config_set_match_object_set_thread.join()
 
 
 class CustomTagConfigSetMatchObject:
@@ -10537,6 +10581,10 @@ class CustomTagConfigSetMatchObject:
         self.terminal_vt100_obj = terminal_vt100_obj
         self.start_index = start_index
         self.output_recv_content = output_recv_content
+
+    def __del__(self):
+        self.custom_match_object = None
+        self.terminal_vt100_obj = None
 
     def set(self):
         font_type = FONT_TYPE_NORMAL
@@ -10550,13 +10598,13 @@ class CustomTagConfigSetMatchObject:
             ret = re.finditer(match_pattern, self.output_recv_content, re.I)
             tag_config_name = uuid.uuid4().__str__()  # <str>
             for ret_item in ret:
-                print(f"CustomTagConfigSet.set_custom_tag_normal: 匹配到了{match_pattern}")
+                print(f"CustomTagConfigSetMatchObject.set_custom_tag_normal: 匹配到了{match_pattern}")
                 start_index, end_index = ret_item.span()
                 start_index_count = "+" + str(start_index) + "c"
                 end_index_count = "+" + str(end_index) + "c"
                 try:
                     # terminal_text.tag_delete("matched")
-                    print("CustomTagConfigSet.set_custom_tag_normal:匹配内容",
+                    print("CustomTagConfigSetMatchObject.set_custom_tag_normal:匹配内容",
                           self.terminal_vt100_obj.terminal_normal_text.get(self.start_index + start_index_count,
                                                                            self.start_index + end_index_count))
                     self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{tag_config_name}", self.start_index + start_index_count,
