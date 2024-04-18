@@ -83,7 +83,6 @@ import base64
 import sched
 import queue
 import struct
-import gc
 import ctypes
 import tkinter
 from tkinter import messagebox
@@ -9041,8 +9040,8 @@ class TerminalFrontend:
     def set_custom_color_tag_config(self):
         while True:
             current_end_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
-            print("current_end_line", current_end_line)
-            print("self.last_set_color_end_line", self.last_set_color_end_line)
+            # print("current_end_line", current_end_line)
+            # print("self.last_set_color_end_line", self.last_set_color_end_line)
             if current_end_line > self.last_set_color_end_line:
                 last_recv_content_str = self.terminal_normal_text.get(str(self.last_set_color_end_line) + ".0", tkinter.INSERT)
                 custom_tag_config_obj = CustomTagConfigSet(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
@@ -9696,7 +9695,7 @@ class TerminalFrontend:
                 # 有时匹配了控制序列后，在其末尾还会有回退符，普通字符等  这里得再处理一次
                 new_block_str = block_str[ret.end():]
                 if len(new_block_str) > 0:
-                    self.app_mode_print_lines(new_block_str, "default")
+                    self.app_mode_print_lines(new_block_str, "default")  # 这里有时还会有单独的 '\r'
                 continue
             # ★匹配 [H  -->光标回到屏幕开头，复杂清屏，一般vt100光标回到开头后，插入的内容会覆盖原界面的内容，未覆盖到的内容还得继续展示
             match_pattern = r'^\[H'
@@ -9812,11 +9811,16 @@ class TerminalFrontend:
         :return:
         """
         # content_str_filter = content_str.replace("\r\n", "\n").replace("\0", '').replace(chr(0x0f), "")
-        content_str_filter = content_str.replace("\0", '').replace(chr(0x0f), "")
+        content_str_filter = content_str.replace("\0", '').replace(chr(0x0f), "").replace(chr(0x07), "")
         if len(content_str_filter) > 0:
             line_index = 0
             for line in content_str_filter.split("\n"):
                 try:
+                    if line == '\r':  # 如果只是单独的\r
+                        current_column = int(self.terminal_application_text.index(tkinter.INSERT).split(".")[1])
+                        if current_column > 0:
+                            self.terminal_application_text.mark_set(tkinter.INSERT, tkinter.INSERT + " linestart")
+                        continue
                     if line_index > 0:
                         current_line = int(self.terminal_application_text.index(tkinter.INSERT).split(".")[0])
                         end_line = int(self.terminal_application_text.index(tkinter.END + "-1c").split(".")[0])
