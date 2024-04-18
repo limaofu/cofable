@@ -8779,7 +8779,7 @@ class DivisionTerminalWindow:
             return
         # ★★若目标主机未存在会话，则新建会话
         host_session_record_obj = HostSessionRecord(host_obj=host_obj, global_info=self.global_info,
-                                                    shell_terminal_width_pixel=int(self.pop_win_width * 0.8),
+                                                    shell_terminal_width_pixel=int(self.pop_win_width * 0.8 - self.scrollbar_width),
                                                     shell_terminal_height_pixel=self.pop_win_height - self.terminal_tools_frame_height)
         # 查找目标主机对应的配色方案，CustomTagConfigScheme对象
         scheme_obj = self.global_info.get_custome_tag_config_scheme_by_oid(host_obj.custome_tag_config_scheme_oid)
