@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-18
+# update: 2024-04-21
 
 """
 开发日志：
@@ -2243,6 +2243,7 @@ class GlobalInfo:
                     host_session_record_obj.terminal_backend_obj.ssh_client.close()
                 cofable_stop_thread_silently(host_session_record_obj.parse_received_vt100_data_thread)
                 cofable_stop_thread_silently(host_session_record_obj.set_custom_color_tag_config_thread)
+                host_session_record_obj.process_received_pool.shutdown(wait=False)
                 cofable_stop_thread_silently(host_session_record_obj.terminal_backend_run_thread)
                 cofable_stop_thread_silently(host_session_record_obj.recv_vt100_output_data_thread)
                 cofable_stop_thread_silently(host_session_record_obj.send_user_input_data_thread)
@@ -8887,6 +8888,7 @@ class HostSessionRecord:
         # 以下线程，在结束主机会话或退出主程序时，需要强制退出线程
         self.parse_received_vt100_data_thread = None  # 终端-前端线程-处理接收到的vt100数据
         self.set_custom_color_tag_config_thread = None  # 终端-前端线程-给接收到的vt100数据进行用户自定义颜色匹配
+        self.process_received_pool = None  # 终端-前端线程-处理接收到的vt100数据时进行设置颜色字体等属性的线程池
         self.terminal_backend_run_thread = None  # 终端-后端主线程
         self.recv_vt100_output_data_thread = None  # 终端-后端线程-接收服务器返回的数据
         self.send_user_input_data_thread = None  # 终端-后端线程-发送用户输入数据给服务器
@@ -9036,19 +9038,32 @@ class TerminalFrontend:
         self.set_custom_color_tag_config_thread = threading.Thread(target=self.set_custom_color_tag_config)
         self.set_custom_color_tag_config_thread.start()
         self.host_session_record_obj.set_custom_color_tag_config_thread = self.set_custom_color_tag_config_thread
+        self.host_session_record_obj.process_received_pool = self.process_received_pool
 
     def set_custom_color_tag_config(self):
         while True:
             current_end_line = int(self.terminal_normal_text.index(tkinter.INSERT).split(".")[0])
-            # print("current_end_line", current_end_line)
-            # print("self.last_set_color_end_line", self.last_set_color_end_line)
+            # ★每次只处理最后 512 行内容，如果处理所有数据，内容过多时界面会很卡
             if current_end_line > self.last_set_color_end_line:
-                last_recv_content_str = self.terminal_normal_text.get(str(self.last_set_color_end_line) + ".0", tkinter.INSERT)
-                custom_tag_config_obj = CustomTagConfigSet(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
-                                                           start_index=str(self.last_set_color_end_line) + ".0", host_obj=self.host_obj,
-                                                           terminal_mode=VT100_TERMINAL_MODE_NORMAL, global_info=self.global_info)
-                self.last_set_color_end_line = current_end_line
-                custom_tag_config_obj.set_custom_tag()
+                diff_line = current_end_line - self.last_set_color_end_line
+                if diff_line <= 512:
+                    last_recv_content_str = self.terminal_normal_text.get(str(self.last_set_color_end_line) + ".0", tkinter.INSERT)
+                    custom_tag_config_obj = CustomTagConfigSet(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
+                                                               start_index=str(self.last_set_color_end_line) + ".0", host_obj=self.host_obj,
+                                                               terminal_mode=VT100_TERMINAL_MODE_NORMAL, global_info=self.global_info)
+                    self.last_set_color_end_line = current_end_line
+                    # thread_set=threading.Thread(target=custom_tag_config_obj.set_custom_tag)
+                    # thread_set.start()
+                    custom_tag_config_obj.set_custom_tag()
+                else:
+                    last_recv_content_str = self.terminal_normal_text.get(str(current_end_line - 512) + ".0", tkinter.INSERT)
+                    custom_tag_config_obj = CustomTagConfigSet(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
+                                                               start_index=str(current_end_line - 512) + ".0", host_obj=self.host_obj,
+                                                               terminal_mode=VT100_TERMINAL_MODE_NORMAL, global_info=self.global_info)
+                    self.last_set_color_end_line = current_end_line
+                    # thread_set=threading.Thread(target=custom_tag_config_obj.set_custom_tag)
+                    # thread_set.start()
+                    custom_tag_config_obj.set_custom_tag()
             time.sleep(0.1)
 
     @staticmethod
@@ -9417,16 +9432,16 @@ class TerminalFrontend:
             # time.sleep(0.001)
 
     def parse_received_vt100_data_2(self, received_bytes):
-        print("TerminalFrontend.parse_received_vt100_data: 接收到信息:", received_bytes)
+        # print("TerminalFrontend.parse_received_vt100_data_2: 接收到信息:", received_bytes)
         # ★★★开始解析接收到的vt100输出★★★
         if len(received_bytes) == 0:
-            print("TerminalFrontend.parse_received_vt100_data: received_bytes为空，")
+            print("TerminalFrontend.parse_received_vt100_data_2: received_bytes为空，")
             return
         # ★★ enter alternate_keypad_mode 进入应用模式 ★★
         match_pattern = b'\x1b\[\?1h\x1b='
         ret = re.search(match_pattern, received_bytes)
         if ret is not None:
-            print(f"TerminalFrontend.parse_received_vt100_data: 匹配到了★Enter Alternate Keypad Mode★ {match_pattern}")
+            print(f"TerminalFrontend.parse_received_vt100_data_2: 匹配到了★Enter Alternate Keypad Mode★ {match_pattern}")
             # 首次匹配，首次进入alternate_keypad_mode需要清空此模式下Text控件内容
             new_received_bytes = received_bytes[ret.end():]
             self.enter_alternate_keypad_mode_text(new_received_bytes)
@@ -9436,7 +9451,7 @@ class TerminalFrontend:
             self.enter_alternate_keypad_mode_text(received_bytes)
             return
         # ★★ 不是应用模式，则由以下函数处理（普通模式） ★★
-        self.current_terminal_text = CURRENT_TERMINAL_TEXT_NORMAL
+        # self.current_terminal_text = CURRENT_TERMINAL_TEXT_NORMAL
         self.process_received_bytes_on_normal_mode(received_bytes)
 
     def process_received_bytes_on_normal_mode(self, received_bytes):
@@ -9448,7 +9463,7 @@ class TerminalFrontend:
             self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
             self.terminal_normal_text.focus_force()
             return
-        # with ThreadPoolExecutor(max_workers=10000) as process_received_pool:
+        # process_received_pool = ThreadPoolExecutor(max_workers=10000)
         # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析，普通输出模式 ★★★★★★
         for block_bytes in output_block_ctrl_and_normal_content_list_new:
             block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
@@ -9582,6 +9597,11 @@ class TerminalFrontend:
         # ★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★
         # 一次输出解析完成后，要等待所有的字体颜色设置线程完成再继续，不再单独等待，全部都放一个线程池里
         # 匹配用户自定义高亮词汇，已单独做成一个线程了
+        # last_recv_content_str = self.terminal_normal_text.get(self.before_recv_text_index, tkinter.INSERT)
+        # custom_tag_config_obj = CustomTagConfigSet(output_recv_content=last_recv_content_str, terminal_vt100_obj=self,
+        #                                            start_index=str(self.last_set_color_end_line) + ".0", host_obj=self.host_obj,
+        #                                            terminal_mode=VT100_TERMINAL_MODE_NORMAL, global_info=self.global_info)
+        # custom_tag_config_obj.set_custom_tag()
         # 字体颜色风格设置完成后，再显示焦点
         self.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
         self.terminal_normal_text.focus_force()
@@ -9634,7 +9654,7 @@ class TerminalFrontend:
         if len(output_block_ctrl_and_normal_content_list_new) == 0:
             print(f"TerminalFrontend.process_received_bytes_on_alternate_keypad_mode: 本次接收到的信息拆分后列表为空")
             return
-        # with ThreadPoolExecutor(max_workers=10000) as process_received_pool:
+        process_received_pool = ThreadPoolExecutor(max_workers=1000)
         for block_bytes in output_block_ctrl_and_normal_content_list_new:
             block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
             # ★匹配 [m 或 [0m  -->清除所有属性
@@ -9665,7 +9685,7 @@ class TerminalFrontend:
                     # 处理vt100输出自带有的颜色风格
                     # set_vt100_tag_thread = threading.Thread(target=vt100_output_block_obj.set_tag_config_font_and_color)
                     # set_vt100_tag_thread.start()
-                    self.process_received_pool.submit(vt100_output_block_obj.set_tag_config_font_and_color)
+                    process_received_pool.submit(vt100_output_block_obj.set_tag_config_font_and_color)
                 continue
             # ★匹配 [C  [8C  -->[数字C  向右移动vt100_cursor（Text_cursor在本轮for循环结束后（一次recv处理完成后）再显示光标
             match_pattern = r'^\[[0-9]{,3}C'
@@ -9766,6 +9786,7 @@ class TerminalFrontend:
             else:
                 self.app_mode_print_all(block_str, "default")
         # ★★★★★★ 对一次recv接收后的信息解析输出完成后，页面滚动到Text末尾 ★★★★★★
+        process_received_pool.shutdown(wait=True)
         self.terminal_application_text.see(tkinter.INSERT)
         self.terminal_application_text.focus_force()
 
@@ -10588,16 +10609,10 @@ class CustomTagConfigSet:
         self.host_obj = host_obj
         self.global_info = global_info
 
-    def __del__(self):
-        self.terminal_vt100_obj = None
-        self.host_obj = None
-        self.global_info = None
-
     def set_custom_tag(self):
         if self.terminal_mode == VT100_TERMINAL_MODE_NORMAL:
             self.set_custom_tag_normal()
-        self.terminal_vt100_obj.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
-        self.__del__()
+        # self.terminal_vt100_obj.terminal_normal_text.yview(tkinter.MOVETO, 1.0)  # MOVETO表示移动到，0.0表示最开头，1.0表示最底端
 
     def set_custom_tag_normal(self):
         # 查找目标主机对应的配色方案，CustomTagConfigScheme对象
@@ -10605,7 +10620,8 @@ class CustomTagConfigSet:
         if scheme_obj is None:
             print("CustomTagConfigSet.set_custom_tag_normal: 未找到目标主机的配色方案，已退出此函数")
             return
-        with ThreadPoolExecutor(max_workers=1000) as tag_config_set_pool:
+        # tag_config_set_pool = ThreadPoolExecutor(max_workers=100)
+        with ThreadPoolExecutor(max_workers=100) as tag_config_set_pool:
             for custom_match_object in scheme_obj.custom_match_object_list:
                 # custom_match_font = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
                 tag_config_set_match_object_obj = CustomTagConfigSetMatchObject(custom_match_object=custom_match_object,
@@ -10615,6 +10631,7 @@ class CustomTagConfigSet:
                 # tag_config_set_match_object_set_thread = threading.Thread(target=tag_config_set_match_object_obj.set)
                 # tag_config_set_match_object_set_thread.start()
                 tag_config_set_pool.submit(tag_config_set_match_object_obj.set)
+        # tag_config_set_pool.shutdown(wait=False)
 
 
 class CustomTagConfigSetMatchObject:
@@ -10624,40 +10641,84 @@ class CustomTagConfigSetMatchObject:
         self.start_index = start_index
         self.output_recv_content = output_recv_content
 
-    def __del__(self):
-        self.custom_match_object = None
-        self.terminal_vt100_obj = None
-
     def set(self):
+        tag_config_name = uuid.uuid4().__str__()  # <str> 每个match_object使用同一个颜色字体风格
         font_type = FONT_TYPE_NORMAL
         if self.custom_match_object.bold:
             font_type += 1
         if self.custom_match_object.italic:
             font_type += 2
-        with ThreadPoolExecutor(max_workers=10000) as tag_config_set_pool:
+        self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                foreground=self.custom_match_object.foreground,
+                                                                backgroun=self.custom_match_object.backgroun,
+                                                                underline=self.custom_match_object.underline,
+                                                                underlinefg=self.custom_match_object.underlinefg,
+                                                                overstrike=self.custom_match_object.overstrike,
+                                                                overstrikefg=self.custom_match_object.overstrikefg)
+        if font_type == FONT_TYPE_NORMAL:
+            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                    font=self.terminal_vt100_obj.terminal_font_normal)
+        elif font_type == FONT_TYPE_BOLD:
+            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                    font=self.terminal_vt100_obj.terminal_font_bold)
+        elif font_type == FONT_TYPE_ITALIC:
+            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                    font=self.terminal_vt100_obj.terminal_font_italic)
+        elif font_type == FONT_TYPE_BOLD_ITALIC:
+            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{tag_config_name}",
+                                                                    font=self.terminal_vt100_obj.terminal_font_bold_italic)
+        # tag_config_set_pool = ThreadPoolExecutor(max_workers=1000)
+        with ThreadPoolExecutor(max_workers=100) as tag_config_set_pool:
             for match_pattern in self.custom_match_object.match_pattern_lines.split("\n"):
                 if match_pattern == "":
                     continue
-                ret = re.finditer(match_pattern, self.output_recv_content, re.I)
-                tag_config_name = uuid.uuid4().__str__()  # <str>
-                for ret_item in ret:
-                    # print(f"CustomTagConfigSetMatchObject.set: 匹配到了{match_pattern}")
-                    set_match_item_obj = CustomTagConfigSetMatchObjectRetItem(ret_item=ret_item, start_index=self.start_index,
-                                                                              custom_match_object=self.custom_match_object,
-                                                                              terminal_vt100_obj=self.terminal_vt100_obj,
-                                                                              tag_config_name=tag_config_name, font_type=font_type)
-                    tag_config_set_pool.submit(set_match_item_obj.set)
+                tag_config_set_match_pattern_obj = CustomTagConfigSetMatchPattern(match_pattern=match_pattern,
+                                                                                  custom_match_object=self.custom_match_object,
+                                                                                  terminal_vt100_obj=self.terminal_vt100_obj,
+                                                                                  start_index=self.start_index,
+                                                                                  output_recv_content=self.output_recv_content,
+                                                                                  tag_config_name=tag_config_name)
+                tag_config_set_pool.submit(tag_config_set_match_pattern_obj.set)
+        # tag_config_set_pool.shutdown(wait=False)
+
+
+class CustomTagConfigSetMatchPattern:
+    def __init__(self, match_pattern="", custom_match_object=None, terminal_vt100_obj=None, start_index="",
+                 output_recv_content="", tag_config_name=""):
+        self.match_pattern = match_pattern
+        self.custom_match_object = custom_match_object
+        self.terminal_vt100_obj = terminal_vt100_obj
+        self.start_index = start_index
+        self.output_recv_content = output_recv_content
+        self.tag_config_name = tag_config_name
+
+    def set(self):
+        ret = re.finditer(self.match_pattern, self.output_recv_content, re.I)
+        # tag_config_set_pool = ThreadPoolExecutor(max_workers=1000)
+        # with ThreadPoolExecutor(max_workers=10000) as tag_config_set_pool:
+        for ret_item in ret:
+            # print(f"CustomTagConfigSetMatchObject.set: 匹配到了{match_pattern}")
+            start_index, end_index = ret_item.span()
+            start_index_count = "+" + str(start_index) + "c"
+            end_index_count = "+" + str(end_index) + "c"
+            try:
+                self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{self.tag_config_name}", self.start_index + start_index_count,
+                                                                     self.start_index + end_index_count)
+            except tkinter.TclError as e:
+                print("CustomTagConfigSetMatchObjectRetItem.set:", e)
+            # set_match_item_obj = CustomTagConfigSetMatchObjectRetItem(ret_item=ret_item, start_index=self.start_index,
+            #                                                          terminal_vt100_obj=self.terminal_vt100_obj,
+            #                                                          tag_config_name=self.tag_config_name)
+        # tag_config_set_pool.submit(set_match_item_obj.set)
+        # tag_config_set_pool.shutdown(wait=False)
 
 
 class CustomTagConfigSetMatchObjectRetItem:
-    def __init__(self, ret_item=None, start_index="1.0", custom_match_object=None,
-                 terminal_vt100_obj=None, tag_config_name="", font_type=FONT_TYPE_NORMAL):
+    def __init__(self, ret_item=None, start_index="1.0", terminal_vt100_obj=None, tag_config_name=""):
         self.ret_item = ret_item
         self.start_index = start_index
-        self.custom_match_object = custom_match_object
         self.terminal_vt100_obj = terminal_vt100_obj
         self.tag_config_name = tag_config_name
-        self.font_type = font_type
 
     def set(self):
         start_index, end_index = self.ret_item.span()
@@ -10670,28 +10731,12 @@ class CustomTagConfigSetMatchObjectRetItem:
             #                                                        self.start_index + end_index_count))
             self.terminal_vt100_obj.terminal_normal_text.tag_add(f"{self.tag_config_name}", self.start_index + start_index_count,
                                                                  self.start_index + end_index_count)
-            self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.tag_config_name}",
-                                                                    foreground=self.custom_match_object.foreground,
-                                                                    backgroun=self.custom_match_object.backgroun,
-                                                                    underline=self.custom_match_object.underline,
-                                                                    underlinefg=self.custom_match_object.underlinefg,
-                                                                    overstrike=self.custom_match_object.overstrike,
-                                                                    overstrikefg=self.custom_match_object.overstrikefg)
-            if self.font_type == FONT_TYPE_NORMAL:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.tag_config_name}",
-                                                                        font=self.terminal_vt100_obj.terminal_font_normal)
-            elif self.font_type == FONT_TYPE_BOLD:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.tag_config_name}",
-                                                                        font=self.terminal_vt100_obj.terminal_font_bold)
-            elif self.font_type == FONT_TYPE_ITALIC:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.tag_config_name}",
-                                                                        font=self.terminal_vt100_obj.terminal_font_italic)
-            elif self.font_type == FONT_TYPE_BOLD_ITALIC:
-                self.terminal_vt100_obj.terminal_normal_text.tag_config(f"{self.tag_config_name}",
-                                                                        font=self.terminal_vt100_obj.terminal_font_bold_italic)
+            self.ret_item = None
+            self.terminal_vt100_obj = None
         except tkinter.TclError as e:
             print("CustomTagConfigSetMatchObjectRetItem.set:", e)
-            return
+            self.ret_item = None
+            self.terminal_vt100_obj = None
 
 
 if __name__ == '__main__':
