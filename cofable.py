@@ -2351,6 +2351,8 @@ class GlobalInfo:
     def exit_division_terminal_window(self):
         if self.division_terminal_window is not None:
             for host_session_record_obj in self.division_terminal_window.host_session_record_obj_list:
+                cofable_stop_thread_silently(host_session_record_obj.recv_vt100_output_data_thread)
+                cofable_stop_thread_silently(host_session_record_obj.send_user_input_data_thread)
                 if host_session_record_obj.terminal_backend_obj.ssh_invoke_shell is not None:
                     try:
                         host_session_record_obj.terminal_backend_obj.ssh_invoke_shell.close()  # 如果已经关闭了，则再次关闭会抛出EOFError异常
@@ -2358,12 +2360,10 @@ class GlobalInfo:
                         print(err)
                 if host_session_record_obj.terminal_backend_obj.ssh_client is not None:
                     host_session_record_obj.terminal_backend_obj.ssh_client.close()
-                cofable_stop_thread_silently(host_session_record_obj.parse_received_vt100_data_thread)
-                cofable_stop_thread_silently(host_session_record_obj.set_custom_color_tag_config_thread)
-                host_session_record_obj.process_received_pool.shutdown(wait=False)
                 cofable_stop_thread_silently(host_session_record_obj.terminal_backend_run_thread)
-                cofable_stop_thread_silently(host_session_record_obj.recv_vt100_output_data_thread)
-                cofable_stop_thread_silently(host_session_record_obj.send_user_input_data_thread)
+                cofable_stop_thread_silently(host_session_record_obj.set_custom_color_tag_config_thread)
+                cofable_stop_thread_silently(host_session_record_obj.parse_received_vt100_data_thread)
+                host_session_record_obj.process_received_pool.shutdown(wait=False)
             time.sleep(0.1)
             self.division_terminal_window.pop_window.quit()
 
