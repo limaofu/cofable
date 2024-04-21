@@ -1514,10 +1514,14 @@ class LaunchInspectionJob:
         with open(file_name, 'a', encoding='utf8') as file_obj:  # 追加，不存在则新建
             for ssh_operator_output_obj in ssh_operator_output_obj_list:
                 if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_INVOKE_SHELL:
-                    file_obj.write('\n'.join(ssh_operator_output_obj.invoke_shell_output_bytes.decode("utf8").split('\r\n')))
+                    # invoke_shell输出信息为vt100数据，每次write到文件前先解析一下
+                    # 解析后的普通字符串，已将'\r\n'替换为了'\n'    block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
+                    plain_text = Vt100ToPlaintext(vt100_data_bytes=ssh_operator_output_obj.invoke_shell_output_bytes).parse()
+                    file_obj.write(plain_text)
                     if len(ssh_operator_output_obj.interactive_output_bytes_list) != 0:
                         for interactive_output_bytes in ssh_operator_output_obj.interactive_output_bytes_list:
-                            file_obj.write('\n'.join(interactive_output_bytes.decode("utf8").split('\r\n')))
+                            plain_text2 = Vt100ToPlaintext(vt100_data_bytes=interactive_output_bytes).parse()
+                            file_obj.write(plain_text2)
                 if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_EXEC_COMMAND:
                     for exec_command_stderr_line in ssh_operator_output_obj.exec_command_stderr_line_list:
                         file_obj.write(exec_command_stderr_line)
@@ -1720,6 +1724,119 @@ class LaunchInspectionJob:
         job_record_obj.job_state = self.job_state
         job_record_obj.unduplicated_host_job_status_obj_list = self.unduplicated_host_job_status_obj_list
         job_record_obj.save()  # 保存巡检作业情况到数据库，这里不是保存每台主机的巡检命令巡出，而是每台主机的巡检完成情况
+
+
+class Vt100ToPlaintext:
+    def __init__(self, vt100_data_bytes=b''):
+        self.vt100_data_bytes = vt100_data_bytes
+        self.plain_text_block_list = []
+
+    def parse(self):
+        vt100_data_bytes_split_list = self.vt100_data_bytes.split(b'\033')
+        vt100_data_bytes_split_list_new = [x for x in vt100_data_bytes_split_list if x]  # 新列表不含空元素
+        if len(vt100_data_bytes_split_list_new) == 0:
+            print(f"Vt100ToPlaintext.parse: 本次接收到的信息拆分后列表为空")
+            return ""
+            # ★★★★★★ 对一次recv接收后的信息拆分后的每个属性块进行解析，普通输出模式 ★★★★★★
+        for block_bytes in vt100_data_bytes_split_list_new:
+            block_str = block_bytes.decode("utf8").replace("\r\n", "\n")
+            # ★匹配 [m 或 [0m  -->清除所有属性
+            match_pattern = r'^\[0{,1}m'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                # 在self.terminal_text里输出解析后的内容
+                new_block_str = block_str[ret.end():]
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                if len(new_block_str) > 0:
+                    self.plain_text_block_list.append(new_block_str)
+                continue
+            # ★匹配 [01m 到 [08m  [01;34m  [01;34;42m   -->字体风格
+            match_pattern = r'^\[([0-9]{1,2};){,3}[0-9]{1,2}m'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                new_block_str = block_str[ret.end():]
+                # output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
+                self.plain_text_block_list.append(new_block_str)
+                continue
+            # ★匹配 [C  [8C  -->[数字C  向右移动vt100_cursor（text_cursor光标在本轮for循环结束后，一次recv处理完成后，再显示）
+            match_pattern = r'^\[[0-9]*C'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                new_block_str = block_str[ret.end():]
+                # output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1].replace("\0", "")
+                # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
+                self.plain_text_block_list.append(new_block_str)
+                continue
+            # ★匹配 [K  -->从当前vt100_cursor光标位置向右清除到本行行尾所有内容
+            match_pattern = r'^\[K'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                # 有时匹配了控制序列后，在其末尾还会有回退符，这里得再匹配一次
+                new_block_str = block_str[ret.end():]
+                self.plain_text_block_list.append(new_block_str)
+                continue
+            # ★匹配 [H  -->vt100_cursor光标回到屏幕开头，复杂清屏，一般vt100光标回到开头后，插入的内容会覆盖原界面的内容，未覆盖到的内容还得继续展示
+            match_pattern = r'^\[H'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: 匹配到了 {match_pattern}")
+                continue
+            # ★匹配 [42D  -->vt100_cursor光标左移42格，一般vt100光标回到当前行开头后，插入的内容会覆盖同行相应位置的内容，
+            # 未覆盖的地方不动它，不折行，不产生新行
+            match_pattern = r'^\[[0-9]*D'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                # 匹配到之后，可能 block_bytes[ret.end():] 是新的内容，要覆盖同一行相应长度的字符
+                # need to copy_current_page_move_cursor_to_head_and_cover_content
+                new_block_str = block_str[ret.end():]
+                # output_block_control_seq = block_str[ret.start() + 1:ret.end() - 1]
+                # print("TerminalFrontend.process_received_bytes_on_normal_mode ★匹配 [数字D -->光标左移n格，复杂清屏",
+                #       block_str.encode("utf8"))
+                self.plain_text_block_list.append(new_block_str)
+                continue
+            # ★匹配 [J  -->清空屏幕，一般和[H一起出现
+            match_pattern = r'^\[J'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: ★单独匹配到了 {match_pattern}")
+                continue
+            # ★匹配  b'\x08'  -->回退符，向左移动光标
+            match_pattern = b'\x08'
+            ret = re.search(match_pattern, block_bytes)
+            if ret is not None:
+                continue
+            # ★匹配  b'\x07'  -->响铃
+            match_pattern = b'\x07'
+            ret = re.search(match_pattern, block_bytes)
+            if ret is not None:
+                continue
+            # ★匹配  b'\x0d'  --> '\r'
+            match_pattern = '^\\r'
+            new_block_str = block_str.replace("\r\n", "\n")
+            ret = re.search(match_pattern, new_block_str)
+            if ret is not None:
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode 普通输出模式: ★单独匹配到了 {match_pattern}")
+                self.plain_text_block_list.append(new_block_str)
+                continue
+            # ★匹配 [6;26H  -->光标移动到指定行列，普通模式暂不处理这个，直接在当前位置插入剩下的普通字符
+            match_pattern = r'^\[\d{1,};\d{1,}H'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode: 匹配到了 {match_pattern}")
+                # 匹配到之后，可能 block_bytes[ret.end():] 没有其他内容了，要覆盖的内容在接下来的几轮循环
+                # 如果有内容，那就输出呗
+                new_block_str = block_str[ret.end():]
+                if len(new_block_str) > 0:
+                    self.plain_text_block_list.append(new_block_str)
+                continue
+            # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
+            # print("TerminalFrontend.process_received_bytes_on_normal_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
+            self.plain_text_block_list.append(block_str)
+        return "".join(self.plain_text_block_list)
 
 
 class InspectionJobRecord:
@@ -8254,17 +8371,20 @@ class StartInspectionTemplateInFrame:
             print(file_path)
             # 保存巡检命令及输出结果
             with open(file_path.name, "a", encoding="utf8") as fileobj:  # 追加，不存在则新建
+                # 不同的巡检代码块输出结果 都是保存在同一个文件里
                 for inspection_code_block_oid in self.inspection_template_obj.inspection_code_block_oid_list:
                     # <SSHOperatorOutput>对象列表，一行命令执行后的所有输出信息都保存在一个<SSHOperatorOutput>对象里
                     code_exec_output_obj_list = self.global_info.load_inspection_job_log_for_host(self.current_inspection_job_obj.oid,
                                                                                                   host_job_status_obj.host_oid,
                                                                                                   inspection_code_block_oid)
                     inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
-                    fileobj.write(f"\n################{inspection_code_block_obj.name} 巡检命令详情 ################↓\n")
+                    fileobj.write(f"\n#巡检代码块 {inspection_code_block_obj.name} 执行详情如下（本行为软件打印日志，不是巡检命令输出内容）\n")
                     for output_obj in code_exec_output_obj_list:
-                        fileobj.write('\n'.join(output_obj.invoke_shell_output_bytes.decode("utf8").split('\r\n')))
-                        for interactive_output in output_obj.interactive_output_bytes_list:
-                            fileobj.write('\n'.join(interactive_output.decode("utf8").split('\r\n')))
+                        plain_text = Vt100ToPlaintext(vt100_data_bytes=output_obj.invoke_shell_output_bytes).parse()
+                        fileobj.write(plain_text)
+                        for interactive_output_bytes in output_obj.interactive_output_bytes_list:
+                            plain_text2 = Vt100ToPlaintext(vt100_data_bytes=interactive_output_bytes).parse()
+                            fileobj.write(plain_text2)
         pop_window.focus_force()  # 使子窗口获得焦点
 
     @staticmethod
@@ -8661,11 +8781,13 @@ class ViewInspectionJobInFrame:
                                                                                                   host_job_status_obj.host_oid,
                                                                                                   inspection_code_block_oid)
                     inspection_code_block_obj = self.global_info.get_inspection_code_block_by_oid(inspection_code_block_oid)
-                    fileobj.write(f"\n################{inspection_code_block_obj.name} 巡检命令详情 ################↓\n")
+                    fileobj.write(f"\n#巡检代码块 {inspection_code_block_obj.name} 执行详情如下（本行为软件打印日志，不是巡检命令输出内容）\n")
                     for output_obj in code_exec_output_obj_list:
-                        fileobj.write('\n'.join(output_obj.invoke_shell_output_bytes.decode("utf8").split('\r\n')))
-                        for interactive_output in output_obj.interactive_output_bytes_list:
-                            fileobj.write('\n'.join(interactive_output.decode("utf8").split('\r\n')))
+                        plain_text = Vt100ToPlaintext(vt100_data_bytes=output_obj.invoke_shell_output_bytes).parse()
+                        fileobj.write(plain_text)
+                        for interactive_output_bytes in output_obj.interactive_output_bytes_list:
+                            plain_text2 = Vt100ToPlaintext(vt100_data_bytes=interactive_output_bytes).parse()
+                            fileobj.write(plain_text2)
         pop_window.focus_force()  # 使子窗口获得焦点
 
     @staticmethod
