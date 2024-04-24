@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-21
+# update: 2024-04-24
 
 """
 开发日志：
@@ -96,6 +96,7 @@ from concurrent.futures import ThreadPoolExecutor
 import paramiko
 import pyglet
 import pyperclip
+import openpyxl
 
 # import schedule
 
@@ -496,7 +497,7 @@ class Host:
     """
 
     def __init__(self, name='default', description='default', project_oid='default', address='default',
-                 ssh_port=22, telnet_port=23, last_modify_timestamp=0, oid=None, create_timestamp=None,
+                 port=22, last_modify_timestamp=0.0, oid=None, create_timestamp=None,
                  login_protocol=LOGIN_PROTOCOL_SSH, first_auth_method=FIRST_AUTH_METHOD_PRIKEY,
                  custome_tag_config_scheme_oid='', global_info=None):
         if oid is None:
@@ -511,8 +512,7 @@ class Host:
         else:
             self.create_timestamp = create_timestamp
         self.address = address  # ip address or domain name # <str>
-        self.ssh_port = ssh_port  # <int>
-        self.telnet_port = telnet_port  # <int>
+        self.port = port  # <int>
         self.last_modify_timestamp = last_modify_timestamp  # <float>
         self.login_protocol = login_protocol
         self.first_auth_method = first_auth_method
@@ -539,8 +539,7 @@ class Host:
                         "project_oid varchar(36),",
                         "create_timestamp double,",
                         "address varchar(256),",
-                        "ssh_port int,",
-                        "telnet_port int,",
+                        "port int,",
                         "last_modify_timestamp double,",
                         "login_protocol int,"
                         "first_auth_method int,",
@@ -556,8 +555,7 @@ class Host:
                         "project_oid,",
                         "create_timestamp,",
                         "address,",
-                        "ssh_port,",
-                        "telnet_port,",
+                        "port,",
                         "last_modify_timestamp,",
                         "login_protocol,",
                         "first_auth_method,",
@@ -568,8 +566,7 @@ class Host:
                         f"'{self.project_oid}',",
                         f"{self.create_timestamp},",
                         f"'{self.address}',",
-                        f"{self.ssh_port},",
-                        f"{self.telnet_port},",
+                        f"{self.port},",
                         f"{self.last_modify_timestamp},"
                         f"{self.login_protocol},"
                         f"{self.first_auth_method},",
@@ -582,8 +579,7 @@ class Host:
                         f"project_oid='{self.project_oid}',",
                         f"create_timestamp={self.create_timestamp},",
                         f"address='{self.address}',",
-                        f"ssh_port={self.ssh_port},",
-                        f"telnet_port={self.telnet_port},",
+                        f"port={self.port},",
                         f"last_modify_timestamp={self.last_modify_timestamp},"
                         f"login_protocol={self.login_protocol},"
                         f"first_auth_method={self.first_auth_method},",
@@ -617,7 +613,7 @@ class Host:
         sqlite_conn.close()  # 关闭数据库连接
 
     def update(self, name=None, description=None, project_oid=None, address=None,
-               ssh_port=None, telnet_port=None, last_modify_timestamp=None, create_timestamp=None,
+               port=None, last_modify_timestamp=None, create_timestamp=None,
                login_protocol=None, first_auth_method=None, custome_tag_config_scheme_oid=None, global_info=None):
         if name is not None:
             self.name = name
@@ -627,10 +623,8 @@ class Host:
             self.project_oid = project_oid
         if address is not None:
             self.address = address
-        if ssh_port is not None:
-            self.ssh_port = ssh_port
-        if telnet_port is not None:
-            self.telnet_port = telnet_port
+        if port is not None:
+            self.port = port
         if last_modify_timestamp is not None:
             self.last_modify_timestamp = last_modify_timestamp
         else:
@@ -1357,7 +1351,7 @@ class LaunchInspectionJob:
             else:
                 auth_method = AUTH_METHOD_SSH_KEY
             # 一个<SSHOperator>对象操作一个<InspectionCodeBlock>巡检代码块的所有命令
-            ssh_operator = SSHOperator(hostname=host_obj.address, port=host_obj.ssh_port, username=cred.username,
+            ssh_operator = SSHOperator(hostname=host_obj.address, port=host_obj.port, username=cred.username,
                                        password=cred.password, private_key=cred.private_key, auth_method=auth_method,
                                        command_list=inspection_code_block_obj.code_list, timeout=LOGIN_AUTH_TIMEOUT,
                                        host_job_status_obj=host_job_status_obj)
@@ -1447,7 +1441,7 @@ class LaunchInspectionJob:
                 ssh_client = paramiko.client.SSHClient()
                 ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
                 try:
-                    ssh_client.connect(hostname=host.address, port=host.ssh_port, username=cred.username,
+                    ssh_client.connect(hostname=host.address, port=host.port, username=cred.username,
                                        password=cred.password,
                                        timeout=LOGIN_AUTH_TIMEOUT)
                 except paramiko.AuthenticationException as e:
@@ -1465,7 +1459,7 @@ class LaunchInspectionJob:
                     # print("not a valid RSA private key file")
                     raise e
                 try:
-                    ssh_client.connect(hostname=host.address, port=host.ssh_port, username=cred.username,
+                    ssh_client.connect(hostname=host.address, port=host.port, username=cred.username,
                                        pkey=pri_key,
                                        timeout=LOGIN_AUTH_TIMEOUT)
                 except paramiko.AuthenticationException as e:
@@ -2631,12 +2625,11 @@ class GlobalInfo:
             obj = Host(oid=obj_info_tuple[0], name=obj_info_tuple[1], description=obj_info_tuple[2],
                        project_oid=obj_info_tuple[3], create_timestamp=obj_info_tuple[4],
                        address=obj_info_tuple[5],
-                       ssh_port=obj_info_tuple[6],
-                       telnet_port=obj_info_tuple[7],
-                       last_modify_timestamp=obj_info_tuple[8],
-                       login_protocol=obj_info_tuple[9],
-                       first_auth_method=obj_info_tuple[10],
-                       custome_tag_config_scheme_oid=obj_info_tuple[11],
+                       port=int(obj_info_tuple[6]),
+                       last_modify_timestamp=float(obj_info_tuple[7]),
+                       login_protocol=int(obj_info_tuple[8]),
+                       first_auth_method=int(obj_info_tuple[9]),
+                       custome_tag_config_scheme_oid=obj_info_tuple[10],
                        global_info=self)
             obj_list.append(obj)
         sqlite_cursor.close()
@@ -3712,7 +3705,7 @@ class MainWindow:
         self.menu_bar.add_cascade(label="Help", menu=menu_help)
         # 1级子菜单添加2级子菜单（功能按钮）
         menu_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file_of_menu_bar_init)
-        menu_settings.add_command(label="配色方案设置", command=self.click_menu_settings_scheme_of_menu_bar_init)
+        menu_settings.add_command(label="终端配色方案设置", command=self.click_menu_settings_scheme_of_menu_bar_init)
         menu_settings.add_command(label="vt100终端设置", command=self.click_menu_settings_vt100_of_menu_bar_init, background="#aaaaaa")
         menu_tools.add_command(label="工具")
         menu_help.add_command(label="About", command=self.click_menu_about_of_menu_bar_init)
@@ -3954,7 +3947,7 @@ class MainWindow:
     def create_resource_of_nav_frame_r_page(self, resource_type):
         """
         ★★★★★ 创建资源-页面 ★★★★★
-        在 资源选项卡-主页面 点击“创建资源”时，进入此界面（更新资源选项卡-主页面）
+        在 资源选项卡-主页面 点击“创建资源”时，进入此界面（创建资源选项卡-主页面）
         :return:
         """
         # 更新导航框架2
@@ -3976,6 +3969,37 @@ class MainWindow:
         # ★创建“保存”按钮
         save_obj = SaveResourceInMainWindow(create_obj.resource_info_dict, self.global_info, resource_type)
         button_save = tkinter.Button(self.nav_frame_r, text="保存", command=save_obj.save)
+        button_save.place(x=10, y=self.height - 40, width=50, height=25)
+        # ★创建“取消”按钮
+        button_cancel = tkinter.Button(self.nav_frame_r, text="取消",
+                                       command=lambda: self.nav_frame_r_resource_top_page_display(resource_type))  # 返回资源选项卡主界面
+        button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
+
+    def load_resource_of_nav_frame_r_page(self, resource_type):
+        """
+        ★★★★★ 导入资源-页面 ★★★★★
+        在 资源选项卡-主页面 点击“导入资源”时，进入此界面（导入资源选项卡-主页面）
+        :return:
+        """
+        # 更新导航框架2
+        self.nav_frame_r.__setitem__("bg", "green")
+        nav_frame_r_widget_dict = {}
+        # 在框架2中添加canvas-frame滚动框
+        self.clear_tkinter_widget(self.nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar_normal"] = tkinter.Scrollbar(self.nav_frame_r)
+        nav_frame_r_widget_dict["scrollbar_normal"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        nav_frame_r_widget_dict["canvas"] = tkinter.Canvas(self.nav_frame_r, yscrollcommand=nav_frame_r_widget_dict["scrollbar_normal"].set)
+        nav_frame_r_widget_dict["canvas"].place(x=0, y=0, width=self.nav_frame_r_width - 25, height=self.height - 50)
+        nav_frame_r_widget_dict["scrollbar_normal"].config(command=nav_frame_r_widget_dict["canvas"].yview)
+        nav_frame_r_widget_dict["frame"] = tkinter.Frame(nav_frame_r_widget_dict["canvas"])
+        nav_frame_r_widget_dict["frame"].pack()
+        nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
+        # ★在canvas - frame滚动框内添加 导入资源控件
+        load_obj = LoadResourceInFrame(nav_frame_r_widget_dict, self.global_info, resource_type)
+        load_obj.show()
+        # ★创建“确定”按钮
+        # save_obj = SaveResourceInMainWindow(create_obj.resource_info_dict, self.global_info, resource_type)
+        button_save = tkinter.Button(self.nav_frame_r, text="确定", command=load_obj.save)
         button_save.place(x=10, y=self.height - 40, width=50, height=25)
         # ★创建“取消”按钮
         button_cancel = tkinter.Button(self.nav_frame_r, text="取消",
@@ -4063,15 +4087,19 @@ class MainWindow:
             frame_bottom_of_nav_frame_r_page.grid_propagate(False)
             frame_bottom_of_nav_frame_r_page.pack_propagate(False)
             frame_bottom_of_nav_frame_r_page.grid(row=1, column=0)
-            # 在 frame_top_of_nav_frame_r_page 中添加功能按钮
+            # 在 frame_top_of_nav_frame_r_page 中添加 功能按钮
             button_create_resource = tkinter.Button(frame_top_of_nav_frame_r_page, text=text_create,
                                                     command=lambda: self.create_resource_of_nav_frame_r_page(resource_type))
             button_create_resource.pack(padx=self.padx, side=tkinter.LEFT)
             button_load_resource = tkinter.Button(frame_top_of_nav_frame_r_page, text=text_load,
-                                                  command=lambda: self.create_resource_of_nav_frame_r_page(resource_type))
+                                                  command=lambda: self.load_resource_of_nav_frame_r_page(resource_type))
             button_load_resource.pack(padx=self.padx, side=tkinter.LEFT)
-            button_other = tkinter.Button(frame_top_of_nav_frame_r_page, text="其他")
+            button_other = tkinter.Button(frame_top_of_nav_frame_r_page, text="导出")
             button_other.pack(padx=self.padx, side=tkinter.LEFT)
+            entry_search = tkinter.Entry(frame_top_of_nav_frame_r_page, width=20)
+            entry_search.pack(padx=self.padx, side=tkinter.LEFT)
+            button_search = tkinter.Button(frame_top_of_nav_frame_r_page, text="查找")
+            button_search.pack(padx=self.padx, side=tkinter.LEFT)
             # 在 frame_bottom_of_nav_frame_r_page 中列出资源列表
             self.list_resource_of_nav_frame_r_bottom_page(resource_type)
         else:
@@ -4356,57 +4384,48 @@ class CreateResourceInFrame:
                                            textvariable=self.resource_info_dict["sv_address"])
         entry_host_address.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_address.grid(row=4, column=1, padx=self.padx, pady=self.pady)
-        # ★host-ssh_port
-        label_host_ssh_port = tkinter.Label(self.top_frame_widget_dict["frame"], text="ssh_port")
-        label_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_host_ssh_port.grid(row=5, column=0, padx=self.padx, pady=self.pady)
-        self.resource_info_dict["sv_ssh_port"] = tkinter.StringVar()
-        entry_host_ssh_port = tkinter.Entry(self.top_frame_widget_dict["frame"],
-                                            textvariable=self.resource_info_dict["sv_ssh_port"])
-        entry_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        entry_host_ssh_port.grid(row=5, column=1, padx=self.padx, pady=self.pady)
-        # ★host-telnet_port
-        label_host_telnet_port = tkinter.Label(self.top_frame_widget_dict["frame"], text="telnet_port")
-        label_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_host_telnet_port.grid(row=6, column=0, padx=self.padx, pady=self.pady)
-        self.resource_info_dict["sv_telnet_port"] = tkinter.StringVar()
-        entry_host_telnet_port = tkinter.Entry(self.top_frame_widget_dict["frame"],
-                                               textvariable=self.resource_info_dict["sv_telnet_port"])
-        entry_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        entry_host_telnet_port.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # ★host-port
+        label_host_port = tkinter.Label(self.top_frame_widget_dict["frame"], text="port")
+        label_host_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        label_host_port.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_port"] = tkinter.StringVar()
+        entry_host_port = tkinter.Entry(self.top_frame_widget_dict["frame"],
+                                        textvariable=self.resource_info_dict["sv_port"])
+        entry_host_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        entry_host_port.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★host-login_protocol
         label_host_login_protocol = tkinter.Label(self.top_frame_widget_dict["frame"], text="远程登录类型")
         label_host_login_protocol.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_host_login_protocol.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        label_host_login_protocol.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         login_protocol_name_list = ["ssh", "telnet"]
         self.resource_info_dict["combobox_login_protocol"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                           values=login_protocol_name_list,
                                                                           state="readonly")
-        self.resource_info_dict["combobox_login_protocol"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_login_protocol"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★host-first_auth_method
         label_host_first_auth_method = tkinter.Label(self.top_frame_widget_dict["frame"], text="优先认证类型")
         label_host_first_auth_method.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_host_first_auth_method.grid(row=8, column=0, padx=self.padx, pady=self.pady)
+        label_host_first_auth_method.grid(row=7, column=0, padx=self.padx, pady=self.pady)
         first_auth_method_name_list = ["priKey", "password"]
         self.resource_info_dict["combobox_first_auth_method"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                              values=first_auth_method_name_list,
                                                                              state="readonly")
-        self.resource_info_dict["combobox_first_auth_method"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_first_auth_method"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★host-custom_scheme 终端配色方案
         label_host_custom_scheme = tkinter.Label(self.top_frame_widget_dict["frame"], text="终端配色方案")
         label_host_custom_scheme.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_host_custom_scheme.grid(row=9, column=0, padx=self.padx, pady=self.pady)
+        label_host_custom_scheme.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         custom_scheme_name_list = []
         for scheme in self.global_info.custome_tag_config_scheme_obj_list:
             custom_scheme_name_list.append(scheme.name)
         self.resource_info_dict["combobox_custom_scheme"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                          values=custom_scheme_name_list,
                                                                          state="readonly")
-        self.resource_info_dict["combobox_custom_scheme"].grid(row=9, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_custom_scheme"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★host-凭据列表
         label_credential_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据列表")
         label_credential_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_credential_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
+        label_credential_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -4418,7 +4437,7 @@ class CreateResourceInFrame:
             self.resource_info_dict["listbox_credential"].insert(tkinter.END, cred.name)  # 添加item选项
         self.resource_info_dict["listbox_credential"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_credential"].yview)
-        frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
 
     def create_host_group(self):
         # ★创建-host_group
@@ -5088,9 +5107,9 @@ class CreateResourceInFrame:
                                          text="斜体: " + "\n" + is_italic)
             tag_config_name = uuid.uuid4().__str__()  # <str>
             text_demo.tag_add(f"{tag_config_name}", "1.0", tkinter.END)
-            text_demo.tag_config(f"{tag_config_name}",
+            text_demo.tag_config(tagName=f"{tag_config_name}",
                                  foreground=match_obj.foreground,
-                                 backgroun=match_obj.backgroun,
+                                 background=match_obj.backgroun,
                                  underline=match_obj.underline,
                                  underlinefg=match_obj.underlinefg,
                                  overstrike=match_obj.overstrike,
@@ -5365,48 +5384,58 @@ class ListResourceInFrame:
             resource_display_frame_title = "★★ 配色方案列表 ★★"
             resource_obj_list = self.global_info.custome_tag_config_scheme_obj_list
         else:
-            print("unknown resource type")
+            print("ListResourceInFrame.show: unknown resource type")
             resource_display_frame_title = "★★ 项目列表 ★★"
             resource_obj_list = self.global_info.project_obj_list
         # 列出资源
+        # 复选框
+        var_selected_all = tkinter.BooleanVar()
+        checkbutton_selected_all = tkinter.Checkbutton(self.top_frame_widget_dict["frame"], variable=var_selected_all)
+        checkbutton_selected_all.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         label_display_resource = tkinter.Label(self.top_frame_widget_dict["frame"],
                                                text=resource_display_frame_title + "    数量: " + str(len(resource_obj_list)))
-        label_display_resource.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        label_display_resource.grid(row=0, column=1, columnspan=4, padx=self.padx, pady=self.pady)
         label_display_resource.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        print(f"ListResourceInFrame.show: {resource_display_frame_title}")
         index = 0
         for obj in resource_obj_list:
-            print(obj.name)
+            # print(obj.name)
+            # 复选框
+            var_selected = tkinter.BooleanVar()
+            checkbutton_selected = tkinter.Checkbutton(self.top_frame_widget_dict["frame"], variable=var_selected)
+            checkbutton_selected.grid(row=index + 1, column=0, padx=self.padx, pady=self.pady)
+            # 序号及名称
             label_index = tkinter.Label(self.top_frame_widget_dict["frame"], text=str(index + 1) + " : ")
             label_index.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-            label_index.grid(row=index + 1, column=0, padx=self.padx, pady=self.pady)
+            label_index.grid(row=index + 1, column=1, padx=self.padx, pady=self.pady)
             label_name = tkinter.Label(self.top_frame_widget_dict["frame"], text=obj.name)
             label_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-            label_name.grid(row=index + 1, column=1, padx=self.padx, pady=self.pady)
+            label_name.grid(row=index + 1, column=2, padx=self.padx, pady=self.pady, sticky='w')  # 资源名称 左对齐
             # 查看对象信息
             view_obj = ViewResourceInFrame(self.top_frame_widget_dict, self.global_info, obj,
                                            self.resource_type)
             button_view = tkinter.Button(self.top_frame_widget_dict["frame"], text="查看", command=view_obj.show)
             button_view.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-            button_view.grid(row=index + 1, column=2, padx=self.padx, pady=self.pady)
+            button_view.grid(row=index + 1, column=3, padx=self.padx, pady=self.pady)
             # 编辑对象信息
             edit_obj = EditResourceInFrame(self.top_frame_widget_dict, self.global_info, obj,
                                            self.resource_type)
             button_edit = tkinter.Button(self.top_frame_widget_dict["frame"], text="编辑", command=edit_obj.show)
             button_edit.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-            button_edit.grid(row=index + 1, column=3, padx=self.padx, pady=self.pady)
+            button_edit.grid(row=index + 1, column=4, padx=self.padx, pady=self.pady)
             # 删除对象
             delete_obj = DeleteResourceInFrame(self.top_frame_widget_dict, self.global_info, obj,
                                                self.resource_type, call_back_class_obj=self,
                                                call_back_class=CALL_BACK_CLASS_LIST_RESOURCE)
             button_delete = tkinter.Button(self.top_frame_widget_dict["frame"], text="删除", command=delete_obj.show)
             button_delete.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-            button_delete.grid(row=index + 1, column=4, padx=self.padx, pady=self.pady)
+            button_delete.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
             # ★巡检模板-start
             if self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
                 start_obj = StartInspectionTemplateInFrame(self.global_info, obj)
                 button_start = tkinter.Button(self.top_frame_widget_dict["frame"], text="Start", command=start_obj.start)
                 button_start.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-                button_start.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
+                button_start.grid(row=index + 1, column=6, padx=self.padx, pady=self.pady)
             # ★Host-open_terminal
             if self.resource_type == RESOURCE_TYPE_HOST:
                 # 打开单独式终端
@@ -5414,7 +5443,7 @@ class ListResourceInFrame:
                 button_open_terminal2 = tkinter.Button(self.top_frame_widget_dict["frame"], text="打开终端2",
                                                        command=open_division_terminal_obj.open_session)
                 button_open_terminal2.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-                button_open_terminal2.grid(row=index + 1, column=5, padx=self.padx, pady=self.pady)
+                button_open_terminal2.grid(row=index + 1, column=6, padx=self.padx, pady=self.pady)
             index += 1
         # 信息控件添加完毕
         self.top_frame_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
@@ -5612,6 +5641,9 @@ class ViewResourceInFrame:
         # ★host-address
         host_address = "address".ljust(self.view_width, " ") + ": " + self.resource_obj.address + "\n"
         obj_info_text.insert(tkinter.END, host_address)
+        # ★host-port
+        host_port = "port".ljust(self.view_width, " ") + ": " + str(self.resource_obj.port) + "\n"
+        obj_info_text.insert(tkinter.END, host_port)
         # ★host-login_protocol
         login_protocol_name_list = ["ssh", "telnet"]
         host_login_protocol = "远程登录类型".ljust(self.view_width - 6, " ") + ": " + login_protocol_name_list[
@@ -5630,12 +5662,6 @@ class ViewResourceInFrame:
             custom_scheme_name = custom_scheme.name
         host_custom_scheme = "终端配色方案".ljust(self.view_width - 6, " ") + ": " + custom_scheme_name + "\n"
         obj_info_text.insert(tkinter.END, host_custom_scheme)
-        # ★host-ssh_port
-        host_ssh_port = "ssh_port".ljust(self.view_width, " ") + ": " + str(self.resource_obj.ssh_port) + "\n"
-        obj_info_text.insert(tkinter.END, host_ssh_port)
-        # ★host-telnet_port
-        host_telnet_port = "ssh_port".ljust(self.view_width, " ") + ": " + str(self.resource_obj.telnet_port) + "\n"
-        obj_info_text.insert(tkinter.END, host_telnet_port)
         # ★host-create_timestamp
         host_create_timestamp = "create_time".ljust(self.view_width, " ") + ": " \
                                 + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.resource_obj.create_timestamp)) + "\n"
@@ -6076,9 +6102,9 @@ class ViewResourceInFrame:
                                          text="斜体: " + "\n" + is_italic)
             tag_config_name = uuid.uuid4().__str__()  # <str>
             text_demo.tag_add(f"{tag_config_name}", "1.0", tkinter.END)
-            text_demo.tag_config(f"{tag_config_name}",
+            text_demo.tag_config(tagName=f"{tag_config_name}",
                                  foreground=match_obj.foreground,
-                                 backgroun=match_obj.backgroun,
+                                 background=match_obj.backgroun,
                                  underline=match_obj.underline,
                                  underlinefg=match_obj.underlinefg,
                                  overstrike=match_obj.overstrike,
@@ -6413,50 +6439,40 @@ class EditResourceInFrame:
         entry_host_address.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_address.insert(0, self.resource_obj.address)  # 显示初始值，可编辑
         entry_host_address.grid(row=4, column=1, padx=self.padx, pady=self.pady)
-        # ★host-ssh_port
-        label_host_ssh_port = tkinter.Label(self.top_frame_widget_dict["frame"], text="ssh_port")
-        label_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_host_ssh_port.grid(row=5, column=0, padx=self.padx, pady=self.pady)
-        self.resource_info_dict["sv_ssh_port"] = tkinter.StringVar()
-        entry_host_ssh_port = tkinter.Entry(self.top_frame_widget_dict["frame"],
-                                            textvariable=self.resource_info_dict["sv_ssh_port"])
-        entry_host_ssh_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        entry_host_ssh_port.insert(0, self.resource_obj.ssh_port)  # 显示初始值，可编辑
-        entry_host_ssh_port.grid(row=5, column=1, padx=self.padx, pady=self.pady)
-        # ★host-telnet_port
-        label_host_telnet_port = tkinter.Label(self.top_frame_widget_dict["frame"], text="telnet_port")
-        label_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_host_telnet_port.grid(row=6, column=0, padx=self.padx, pady=self.pady)
-        self.resource_info_dict["sv_telnet_port"] = tkinter.StringVar()
-        entry_host_telnet_port = tkinter.Entry(self.top_frame_widget_dict["frame"],
-                                               textvariable=self.resource_info_dict["sv_telnet_port"])
-        entry_host_telnet_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        entry_host_telnet_port.insert(0, self.resource_obj.telnet_port)  # 显示初始值，可编辑
-        entry_host_telnet_port.grid(row=6, column=1, padx=self.padx, pady=self.pady)
+        # ★host-port
+        label_host_port = tkinter.Label(self.top_frame_widget_dict["frame"], text="port")
+        label_host_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        label_host_port.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["sv_port"] = tkinter.StringVar()
+        entry_host_port = tkinter.Entry(self.top_frame_widget_dict["frame"],
+                                        textvariable=self.resource_info_dict["sv_port"])
+        entry_host_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        entry_host_port.insert(0, self.resource_obj.port)  # 显示初始值，可编辑
+        entry_host_port.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★host-login_protocol
         label_host_login_protocol = tkinter.Label(self.top_frame_widget_dict["frame"], text="远程登录类型")
         label_host_login_protocol.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_host_login_protocol.grid(row=7, column=0, padx=self.padx, pady=self.pady)
+        label_host_login_protocol.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         login_protocol_name_list = ["ssh", "telnet"]
         self.resource_info_dict["combobox_login_protocol"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                           values=login_protocol_name_list,
                                                                           state="readonly")
         self.resource_info_dict["combobox_login_protocol"].current(self.resource_obj.login_protocol)
-        self.resource_info_dict["combobox_login_protocol"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_login_protocol"].grid(row=6, column=1, padx=self.padx, pady=self.pady)
         # ★host-first_auth_method
         label_host_first_auth_method = tkinter.Label(self.top_frame_widget_dict["frame"], text="优先认证类型")
         label_host_first_auth_method.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_host_first_auth_method.grid(row=8, column=0, padx=self.padx, pady=self.pady)
+        label_host_first_auth_method.grid(row=7, column=0, padx=self.padx, pady=self.pady)
         first_auth_method_name_list = ["priKey", "password"]
         self.resource_info_dict["combobox_first_auth_method"] = ttk.Combobox(self.top_frame_widget_dict["frame"],
                                                                              values=first_auth_method_name_list,
                                                                              state="readonly")
         self.resource_info_dict["combobox_first_auth_method"].current(self.resource_obj.first_auth_method)
-        self.resource_info_dict["combobox_first_auth_method"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_first_auth_method"].grid(row=7, column=1, padx=self.padx, pady=self.pady)
         # ★host-custom_scheme 终端配色方案
         label_host_custom_scheme = tkinter.Label(self.top_frame_widget_dict["frame"], text="终端配色方案")
         label_host_custom_scheme.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_host_custom_scheme.grid(row=9, column=0, padx=self.padx, pady=self.pady)
+        label_host_custom_scheme.grid(row=8, column=0, padx=self.padx, pady=self.pady)
         custom_scheme_name_list = []
         current_scheme_index = 0
         index = 0
@@ -6469,11 +6485,11 @@ class EditResourceInFrame:
                                                                          values=custom_scheme_name_list,
                                                                          state="readonly")
         self.resource_info_dict["combobox_custom_scheme"].current(current_scheme_index)
-        self.resource_info_dict["combobox_custom_scheme"].grid(row=9, column=1, padx=self.padx, pady=self.pady)
+        self.resource_info_dict["combobox_custom_scheme"].grid(row=8, column=1, padx=self.padx, pady=self.pady)
         # ★host-凭据列表
         label_credential_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据列表")
         label_credential_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
-        label_credential_list.grid(row=10, column=0, padx=self.padx, pady=self.pady)
+        label_credential_list.grid(row=9, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
@@ -6489,9 +6505,9 @@ class EditResourceInFrame:
                 self.resource_info_dict["listbox_credential"].select_set(cred_index)
         self.resource_info_dict["listbox_credential"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_credential"].yview)
-        frame.grid(row=10, column=1, padx=self.padx, pady=self.pady)
+        frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
         # ★★更新row_index
-        self.current_row_index = 10
+        self.current_row_index = 9
 
     def edit_host_group(self):
         # ★创建-host_group
@@ -7236,9 +7252,9 @@ class EditResourceInFrame:
                                          text="斜体: " + "\n" + is_italic)
             tag_config_name = uuid.uuid4().__str__()  # <str>
             text_demo.tag_add(f"{tag_config_name}", "1.0", tkinter.END)
-            text_demo.tag_config(f"{tag_config_name}",
+            text_demo.tag_config(tagName=f"{tag_config_name}",
                                  foreground=match_obj.foreground,
-                                 backgroun=match_obj.backgroun,
+                                 background=match_obj.backgroun,
                                  underline=match_obj.underline,
                                  underlinefg=match_obj.underlinefg,
                                  overstrike=match_obj.overstrike,
@@ -7403,18 +7419,12 @@ class UpdateResourceInFrame:
         else:
             project_oid = self.global_info.project_obj_list[combobox_project_current].oid
         host_address = self.resource_info_dict["sv_address"].get()
-        host_ssh_port_str = self.resource_info_dict["sv_ssh_port"].get()
-        # ★ssh_port
-        if host_ssh_port_str != "" and host_ssh_port_str.isdigit():
-            host_ssh_port = int(host_ssh_port_str)
+        host_port_str = self.resource_info_dict["sv_port"].get()
+        # ★port
+        if host_port_str != "" and host_port_str.isdigit():
+            host_port = int(host_port_str)
         else:
-            host_ssh_port = 22
-        # ★telnet_port
-        host_telnet_port_str = self.resource_info_dict["sv_telnet_port"].get()
-        if host_telnet_port_str != "" and host_telnet_port_str.isdigit():
-            host_telnet_port = int(host_telnet_port_str)
-        else:
-            host_telnet_port = 23
+            host_port = 22
         # ★login_protocol
         if self.resource_info_dict["combobox_login_protocol"].current() == -1:
             host_login_protocol = 0
@@ -7447,7 +7457,7 @@ class UpdateResourceInFrame:
         else:
             self.resource_obj.update(name=host_name, description=host_description, project_oid=project_oid,
                                      address=host_address,
-                                     ssh_port=host_ssh_port, telnet_port=host_telnet_port,
+                                     port=host_port,
                                      login_protocol=host_login_protocol,
                                      first_auth_method=host_first_auth_method,
                                      custome_tag_config_scheme_oid=host_custom_scheme.oid,
@@ -7800,18 +7810,12 @@ class SaveResourceInMainWindow:
         else:
             project_oid = self.global_info.project_obj_list[combobox_project_current].oid
         host_address = self.resource_info_dict["sv_address"].get()
-        host_ssh_port_str = self.resource_info_dict["sv_ssh_port"].get()
-        # ★ssh_port
-        if host_ssh_port_str != "" and host_ssh_port_str.isdigit():
-            host_ssh_port = int(host_ssh_port_str)
+        host_port_str = self.resource_info_dict["sv_port"].get()
+        # ★port
+        if host_port_str != "" and host_port_str.isdigit():
+            host_port = int(host_port_str)
         else:
-            host_ssh_port = 22
-        # ★telnet_port
-        host_telnet_port_str = self.resource_info_dict["sv_telnet_port"].get()
-        if host_telnet_port_str != "" and host_telnet_port_str.isdigit():
-            host_telnet_port = int(host_telnet_port_str)
-        else:
-            host_telnet_port = 23
+            host_port = 22
         # ★login_protocol
         if self.resource_info_dict["combobox_login_protocol"].current() == -1:
             host_login_protocol = 0  # LOGIN_PROTOCOL_SSH
@@ -7840,7 +7844,7 @@ class SaveResourceInMainWindow:
         else:
             host = Host(name=host_name, description=host_description, project_oid=project_oid,
                         address=host_address,
-                        ssh_port=host_ssh_port, telnet_port=host_telnet_port,
+                        port=host_port,
                         login_protocol=host_login_protocol,
                         first_auth_method=host_first_auth_method,
                         custome_tag_config_scheme_oid=host_custom_scheme.oid,
@@ -8015,6 +8019,149 @@ class SaveResourceInMainWindow:
             self.global_info.main_window.click_menu_settings_scheme_of_menu_bar_init()
             return
         self.resource_info_dict["pop_window"].focus_force()
+
+
+class LoadResourceInFrame:
+    def __init__(self, top_frame_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
+        self.top_frame_widget_dict = top_frame_widget_dict
+        self.global_info = global_info
+        self.resource_type = resource_type
+        self.padx = 2
+        self.pady = 2
+
+    def proces_mouse_scroll_of_top_frame(self, event):
+        if event.delta > 0:
+            self.top_frame_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+        else:
+            self.top_frame_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+
+    def update_top_frame(self):
+        # 更新Frame的尺寸
+        self.top_frame_widget_dict["frame"].update_idletasks()
+        self.top_frame_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.top_frame_widget_dict["frame"].winfo_width(),
+                          self.top_frame_widget_dict["frame"].winfo_height()))
+        self.top_frame_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        self.top_frame_widget_dict["frame"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        # 滚动条移到最开头
+        self.top_frame_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+
+    def show(self):
+        if self.resource_type == RESOURCE_TYPE_PROJECT:
+            self.show_project()
+        elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
+            self.show_credential()
+        elif self.resource_type == RESOURCE_TYPE_HOST:
+            self.show_host()
+        elif self.resource_type == RESOURCE_TYPE_HOST_GROUP:
+            self.show_host_group()
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+            self.show_inspection_code_block()
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
+            self.show_inspection_template()
+        else:
+            print("LoadResourceInFrame.show: resource_type is not supported")
+        self.update_top_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
+
+    def show_project(self):
+        print("LoadResourceInFrame.show_project: 暂不支持导入 project")
+
+    def show_credential(self):
+        print("LoadResourceInFrame.show_credential: 暂不支持导入 credential")
+
+    def show_host(self):
+        # ★导入-host
+        label_load_host = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 导入-host ★★")
+        label_load_host.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        label_load_host.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        # ★打开文件 按钮
+        load_button = tkinter.Button(self.top_frame_widget_dict["frame"], text="打开文件", bg="pink")
+        load_button.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        load_button.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        # ★下载模板文件 按钮
+        download_demo_xlsx_button = tkinter.Button(self.top_frame_widget_dict["frame"], text="下载模板文件", bg="pink",
+                                                   command=self.download_demo_xlsx_host)
+        download_demo_xlsx_button.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        download_demo_xlsx_button.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+
+    def show_host_group(self):
+        print("LoadResourceInFrame.show_host_group: 暂不支持导入 host_group")
+
+    def show_inspection_code_block(self):
+        print("LoadResourceInFrame.show_inspection_code_block: 暂不支持导入 inspection_code_block")
+
+    def show_inspection_template(self):
+        print("LoadResourceInFrame.show_inspection_template: 暂不支持导入 inspection_template")
+
+    def download_demo_xlsx_host(self):
+        file_path = filedialog.asksaveasfile(title="保存模板", filetypes=[("xlsx files", "*.xlsx"), ("All files", "*.*")],
+                                             defaultextension=".xlsx")
+        if not file_path:
+            print("未选择文件")
+        else:
+            print(file_path)
+            # 保存模板
+            workbook = openpyxl.Workbook()  # 创建一个工作簿对象
+            sheet1 = workbook.active  # 获取当前激活的工作表对象
+            sheet1.title = "导入-host-信息"
+            data_headline = ['name', 'description', 'address', 'port', 'login_protocol', 'first_auth_method',
+                             'credential', 'username', 'password', 'private_key']
+            data_descline = ['主机名称【★必填，这一行为说明信息，正式填写主机信息时请删除本行】', '描述信息【选填】',
+                             '主机地址，可填写ip或域名【★必填】', '端口号【选填，缺省时使用相应远程协议的默认端口，ssh为22，telnet为23】',
+                             '登录协议，可写ssh或telnet【选填，缺省为ssh】',
+                             '优先认证方式，可填写password或priKey【选填，缺省为priKey，若无密钥信息则也会去使用密码登录】',
+                             '主机使用的登录认证凭据【选填，★如果不填写或无匹配的凭据，则根据账号密码自动生成一个凭据（名称同主机名+cred_auto）】',
+                             '登录主机时使用的用户名【★必填】', '登录主机时使用的密码【选填，★密码和密钥二选一填写1个，2个都写也可】',
+                             '登录主机时使用的密钥文件内容【选填，★密码和密钥二选一填写1个，2个都写也可】']
+            pri_key_demo = """-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEAmO45WkTkOcCZAObUN0JpD7hV7K4/YZHavKRKXwC+ZqtSN/FZ
+Y6PLoucPOVr21FmyPYEcn125jInmzBcNupNd08zNI5bs/Z1AfCmSpCCcHCOF8mbK
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+MhuwjQKBgGupIt4/eDuRoBvEBiIJqOi1qxEsatykFmOo9gQUCTIf3Dr/xNMrJDNG
+a2J9wo3fn+J9dbu6iDTRKREcaTyUyvtOfsXaVHUsteSxHHx2Epo41mbfNJEOCqJi
+Sd2nMDLWL5NL2pbSqb25kbFbH2uPmAwqffDIeKf00//ZJ6sh3P3j
+-----END RSA PRIVATE KEY-----
+"""
+            data_demoline = ['host-0001', 'description-info', '10.99.1.1', '22', 'ssh', 'password',
+                             '', 'root', '123456xx', pri_key_demo]
+            sheet1.append(data_headline)
+            sheet1.append(data_descline)
+            sheet1.append(data_demoline)
+            workbook.save(file_path.name)  # 保存工作簿到文件，若文件已存在，则覆盖
+
+    def save(self):
+        if self.resource_type == RESOURCE_TYPE_PROJECT:
+            self.save_project()
+        elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
+            self.save_credential()
+        elif self.resource_type == RESOURCE_TYPE_HOST:
+            self.save_host()
+        elif self.resource_type == RESOURCE_TYPE_HOST_GROUP:
+            self.save_host_group()
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+            self.save_inspection_code_block()
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
+            self.save_inspection_template()
+        else:
+            print("LoadResourceInFrame.save: resource_type is not supported")
+
+    def save_project(self):
+        print("LoadResourceInFrame.save_project: 暂不支持导入 project")
+
+    def save_credential(self):
+        print("LoadResourceInFrame.save_credential: 暂不支持导入 credential")
+
+    def save_host(self):
+        pass
+
+    def save_host_group(self):
+        print("LoadResourceInFrame.save_host_group: 暂不支持导入 host_group")
+
+    def save_inspection_code_block(self):
+        print("LoadResourceInFrame.save_inspection_code_block: 暂不支持导入 inspection_code_block")
+
+    def save_inspection_template(self):
+        print("LoadResourceInFrame.save_inspection_template: 暂不支持导入 inspection_template")
 
 
 class StartInspectionTemplateInFrame:
@@ -9108,10 +9255,10 @@ class TerminalFrontend:
                                                       width=text_width, height=text_height, borderwidth=0,
                                                       font=self.terminal_font_normal, bg=self.bg_color, fg=self.fg_color,
                                                       wrap=tkinter.NONE, spacing1=0, spacing2=0, spacing3=0)
-        self.terminal_normal_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
+        self.terminal_normal_text.tag_config(tagName="default", foreground=self.fg_color, background=self.bg_color,
                                              font=self.terminal_font_normal,
                                              spacing1=0, spacing2=0, spacing3=0)
-        self.terminal_application_text.tag_config("default", foreground=self.fg_color, backgroun=self.bg_color,
+        self.terminal_application_text.tag_config(tagName="default", foreground=self.fg_color, background=self.bg_color,
                                                   font=self.terminal_font_normal,
                                                   spacing1=0, spacing2=0, spacing3=0)
         # self.vt100_cursor_normal = Vt100Cursor(index="1.0", text_obj=self.terminal_application_text)
@@ -10217,7 +10364,7 @@ class TerminalBackend:
                 ssh_client = paramiko.client.SSHClient()
                 ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接host_key不在know_hosts文件里的主机
                 try:
-                    ssh_client.connect(hostname=host.address, port=host.ssh_port, username=cred.username,
+                    ssh_client.connect(hostname=host.address, port=host.port, username=cred.username,
                                        password=cred.password,
                                        timeout=LOGIN_AUTH_TIMEOUT)
                 except paramiko.AuthenticationException as e:
@@ -10235,7 +10382,7 @@ class TerminalBackend:
                     # print("not a valid RSA private key file")
                     raise e
                 try:
-                    ssh_client.connect(hostname=host.address, port=host.ssh_port, username=cred.username,
+                    ssh_client.connect(hostname=host.address, port=host.port, username=cred.username,
                                        pkey=pri_key,
                                        timeout=LOGIN_AUTH_TIMEOUT)
                 except paramiko.AuthenticationException as e:
@@ -10254,13 +10401,13 @@ class TerminalBackend:
         try:
             if cred.cred_type == CRED_TYPE_SSH_PASS:
                 print("TerminalBackend.create_invoke_shell : 使用ssh_password密码登录")
-                self.ssh_client.connect(hostname=self.host_obj.address, port=self.host_obj.ssh_port, username=cred.username,
+                self.ssh_client.connect(hostname=self.host_obj.address, port=self.host_obj.port, username=cred.username,
                                         password=cred.password, timeout=LOGIN_AUTH_TIMEOUT)
             elif cred.cred_type == CRED_TYPE_SSH_KEY:
                 prikey_string_io = io.StringIO(cred.private_key)
                 pri_key = paramiko.RSAKey.from_private_key(prikey_string_io)
                 print("TerminalBackend.create_invoke_shell : 使用ssh_priKey密钥登录")
-                self.ssh_client.connect(hostname=self.host_obj.address, port=self.host_obj.ssh_port, username=cred.username,
+                self.ssh_client.connect(hostname=self.host_obj.address, port=self.host_obj.port, username=cred.username,
                                         pkey=pri_key, timeout=LOGIN_AUTH_TIMEOUT)
             else:
                 pass
@@ -10283,7 +10430,7 @@ class TerminalBackend:
                 # 从用户输入字符队列中取出最先输入的字符 ★非阻塞★ 队列中无内容时弹出 _queue.Empty报错，这里之所以用非阻塞，是因为要判断self.is_closed
                 user_cmd = self.user_input_byte_queue.get(block=False)
                 self.ssh_invoke_shell.send(user_cmd)  # 发送命令，一行命令（不过滤命令前后的空白字符，发送的是utf8编码后的bytes）
-            except queue.Empty as err:
+            except queue.Empty:
                 # print("user_input_byte_queue队列中无内容", err)
                 time.sleep(0.01)
                 continue
@@ -10388,14 +10535,6 @@ class Vt100OutputBlockNormal:
                                                      backgroun=self.fg_color)
             else:
                 continue
-        # if not already_set_font:
-        #     # output_block_font_normal = font.Font(size=self.terminal_vt100_obj.font_size, family=self.terminal_vt100_obj.font_family)
-        #     self.terminal_vt100_obj.terminal_application_text.tag_config(f"{self.output_block_tag_config_name}",
-        #                                                             font=self.terminal_vt100_obj.terminal_font_normal)
-        # print("Vt100OutputBlock.set_tag_config_font_and_color_normal start_index ",
-        #       self.terminal_vt100_obj.terminal_application_text.index(self.start_index))
-        # print("Vt100OutputBlock.set_tag_config_font_and_color_normal end_index ",
-        #       self.terminal_vt100_obj.terminal_application_text.index(self.end_index))
         self.terminal_normal_text.tag_add(f"{self.output_block_tag_config_name}",
                                           self.start_index,
                                           self.end_index)
