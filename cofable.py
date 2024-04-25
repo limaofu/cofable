@@ -4298,11 +4298,10 @@ class ExportResourceToXlsx:
             print("ListResourceInFrame.show: unknown resource type")
 
     def export_project_to_xlsx_file(self):
-        for var_selected in self.batch_resource_operator.var_selected_list:
-            print(var_selected.get())
+        print("ExportResourceXlsx.export_project_to_xlsx_file: 暂不支持导出 project")
 
     def export_credential_to_xlsx_file(self):
-        pass
+        print("ExportResourceXlsx.export_credential_to_xlsx_file: 暂不支持导出 credential")
 
     def export_host_to_xlsx_file(self):
         file_path = filedialog.asksaveasfile(title="保存模板", filetypes=[("xlsx files", "*.xlsx"), ("All files", "*.*")],
@@ -4323,24 +4322,24 @@ class ExportResourceToXlsx:
                 if var_selected.get():
                     resource_obj = self.global_info.host_obj_list[obj_index]
                     credential_name = "credential"
-                    username = "username"
-                    password = "password"
-                    private_key = "private_key"
+                    credential_username = "username"
+                    credential_password = "password"
+                    credential_private_key = "private_key"
                     data_line = [resource_obj.name, resource_obj.description, resource_obj.address, resource_obj.port,
                                  resource_obj.login_protocol, resource_obj.first_auth_method, credential_name,
-                                 username, password, private_key]
+                                 credential_username, credential_password, credential_private_key]
                     sheet1.append(data_line)
                 obj_index += 1
             workbook.save(file_path.name)  # 保存工作簿到文件，若文件已存在，则覆盖
 
     def export_host_group_to_xlsx_file(self):
-        pass
+        print("ExportResourceXlsx.export_host_group_to_xlsx_file: 暂不支持导出 host_group")
 
     def export_inspection_code_block_to_xlsx_file(self):
-        pass
+        print("ExportResourceXlsx.export_inspection_code_block_to_xlsx_file: 暂不支持导出 inspection_code_block")
 
     def export_inspection_template_to_xlsx_file(self):
-        pass
+        print("ExportResourceXlsx.export_inspection_template_to_xlsx_file: 暂不支持导出 inspection_template")
 
 
 class CreateResourceInFrame:
