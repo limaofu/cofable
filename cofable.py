@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-24
+# update: 2024-04-25
 
 """
 开发日志：
@@ -2394,7 +2394,8 @@ class GlobalInfo:
 
     def create_builtin_custome_tag_config_scheme(self):
         self.create_builtin_custome_tag_config_scheme_linux()
-        self.create_builtin_custome_tag_config_scheme_huawei()
+        self.create_builtin_custome_tag_config_scheme_mouwei()
+        self.create_builtin_custome_tag_config_scheme_cisco()
 
     def create_builtin_custome_tag_config_scheme_linux(self):
         project_obj = self.get_project_by_name("default")
@@ -2402,6 +2403,7 @@ class GlobalInfo:
             project_oid = project_obj.oid
         else:
             project_oid = "None"
+        # 需要确保各scheme的oid不冲突
         scheme_linux = CustomTagConfigScheme(name="linux", description="system builtin scheme for linux device",
                                              oid="7d285a2c-cf94-4012-9846-19ac7ac070e1",
                                              project_oid=project_oid,
@@ -2441,19 +2443,20 @@ class GlobalInfo:
         scheme_linux.save()
         self.custome_tag_config_scheme_obj_list.append(scheme_linux)
 
-    def create_builtin_custome_tag_config_scheme_huawei(self):
+    def create_builtin_custome_tag_config_scheme_mouwei(self):
         project_obj = self.get_project_by_name("default")
         if project_obj is not None:
             project_oid = project_obj.oid
         else:
             project_oid = "None"
-        scheme_huawei = CustomTagConfigScheme(name="huawei", description="system builtin scheme for huawei network device",
+        # 需要确保各scheme的oid不冲突
+        scheme_mouwei = CustomTagConfigScheme(name="mouwei", description="system builtin scheme for mouwei network device",
                                               oid="7d285a2c-cf94-4012-9846-19ac7ac070e2",
                                               project_oid=project_oid,
                                               global_info=self)
         # ★ 日期 时间  前景色-蓝色 #52a3f6
         match_pattern_disk_size_net_speed = [r'\b\d{4}-\d{2}-\d{2}\b', r'\b\d{2}:\d{2}:\d{2}\b']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed),
                               foreground="#52a3f6", backgroun="#323232"))
         # ★ ip-mac地址 前景色-紫色
@@ -2461,21 +2464,21 @@ class GlobalInfo:
                                      r'[^:]([0-9a-f]{4}:){2}[0-9a-f]{4}[^:]',
                                      r'([0-9a-f]{2}-){5}[0-9a-f]{2}',
                                      r'[^-]([0-9a-f]{4}-){2}[0-9a-f]{4}[^-]']  # ipv6暂未匹配
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_ip_mac_addr), foreground="#ff4dff"))
         # ★ 错误，禁止，关闭等词语 前景色-红色
         match_pattern_error_disable = [r'\bdown\b', r'\berror\b', r'\bdisable\b', r'\bdisabled\b']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_error_disable), foreground="red"))
         # ★ 完成，成功，开启等词语 前景色-绿色 #18ed92
         match_pattern_completed_enable = [r'\bcomplete\b', r'\bcompleted\b', r'\bdone\b', r'\bfinish\b', r'\bfinished\b',
                                           r'\bsucceed\b', r'\bsuccess\b', r'\bsuccessful\b', r'\bsuccessfully\b',
                                           r'\benable\b', r'\benabled\b', r'\bok\b', r'\bup\b']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_completed_enable), foreground="#18ed92"))
         # ★ 默认，未知等词语 前景色-棕 #ba7131
         match_pattern_default_unknown = [r'\bdefault\b', r'\bunknow\b', r'\bunknown\b']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_default_unknown), foreground="#ba7131"))
         # ★ 数字+大小（G,M,K），表示磁盘大小，网络大小 前景色-青色
         match_pattern_disk_size_net_speed = [r'\b(\d{1,}\.){,1}\d{1,}T[b]{,1}\b',
@@ -2483,24 +2486,24 @@ class GlobalInfo:
                                              r'\b(\d{1,}\.){,1}\d{1,}M[i]{,1}[b]{,1}\b',
                                              r'\b(\d{1,}\.){,1}\d{1,}K[i]{,1}[b]{,1}\b',
                                              r'\b\d{1,}[" "]{,1}byte[s]{,1}']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed), foreground="cyan"))
         # ★ 数字+ packets  表示网络发包数量 前景色-黄色 #e2ed14
         match_pattern_disk_size_net_speed = [r'\b\d{1,}[" "]{,1}packet[s]{,1}']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed), foreground="#e2ed14"))
         # ★ 数字%  前景色-绿色 #6bb520
         match_pattern_disk_size_net_speed = [r'\b\d{1,}[" "]{,1}\%']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed), foreground="#6bb520"))
         # ★ yes,true,all 前景色-绿 #7ffd01
         match_pattern_yes_true = [r'\byes\b', r'\btrue\b', r'\ball\b', r'\btagged\b']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_yes_true), foreground="#7ffd01"))
         # ★ no,false,none,null 前景色-棕 #fcc560
         match_pattern_no_false = [r'\bno\b', r'\bfalse\b', r'\bnone\b', r'\bnul\b', r'\bnull\b', r'\buntagged\b',
                                   r'\bunassigned\b', r'\bN/A\b']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_no_false), foreground="#fcc560"))
         # ★ 匹配网口名称+序号 前景色-青色
         match_pattern_interface_number = [r'\bmeth[" "]{,1}(\d{1,3}/){2,}\d{1,3}\b',
@@ -2510,26 +2513,117 @@ class GlobalInfo:
                                           r'\bvlan(if){,1}[" "]{,1}\d{1,4}\b',
                                           r'\bnull[" "]{,1}\d{1,4}\b',
                                           r'\b(in){,1}loop(back){,1}[" "]{,1}\d{1,4}\b']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_interface_number), foreground="cyan"))
         # ★ 匹配 关键字 前景色-青 #0095d3
         match_pattern_key_words = [r'\binterface[^:]\b',
                                    r'\baaa\b',
                                    r'\breturn\b']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_key_words), foreground="#0095d3"))
         # ★ 匹配 undo 前景色-红 下划线
         match_pattern_undo = [r'\bundo\b']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_undo), foreground="red", underline=True,
                               underlinefg="pink"))
         # ★ 匹配 shutdown 前景色-棕 #a34826 粗体
         match_pattern_shutdown = [r'\bshutdown\b', r'\bdrop\b']
-        scheme_huawei.custom_match_object_list.append(
+        scheme_mouwei.custom_match_object_list.append(
             CustomMatchObject(match_pattern_lines="\n".join(match_pattern_shutdown), foreground="#a34826",
                               bold=True))
-        scheme_huawei.save()
-        self.custome_tag_config_scheme_obj_list.append(scheme_huawei)
+        scheme_mouwei.save()
+        self.custome_tag_config_scheme_obj_list.append(scheme_mouwei)
+
+    def create_builtin_custome_tag_config_scheme_cisco(self):
+        project_obj = self.get_project_by_name("default")
+        if project_obj is not None:
+            project_oid = project_obj.oid
+        else:
+            project_oid = "None"
+        # 需要确保各scheme的oid不冲突
+        scheme_cisco = CustomTagConfigScheme(name="cisco", description="system builtin scheme for cisco network device",
+                                             oid="7d285a2c-cf94-4012-9846-19ac7ac070e3",
+                                             project_oid=project_oid,
+                                             global_info=self)
+        # ★ 日期 时间  前景色-蓝色 #52a3f6
+        match_pattern_disk_size_net_speed = [r'\b\d{4}-\d{2}-\d{2}\b', r'\b\d{2}:\d{2}:\d{2}\b']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed),
+                              foreground="#52a3f6", backgroun="#323232"))
+        # ★ ip-mac地址 前景色-紫色
+        match_pattern_ip_mac_addr = [r'(\d{1,3}\.){3}\d{1,3}', r'([0-9a-f]{2}:){5}[0-9a-f]{2}',
+                                     r'[^:]([0-9a-f]{4}:){2}[0-9a-f]{4}[^:]',
+                                     r'([0-9a-f]{2}-){5}[0-9a-f]{2}',
+                                     r'[^-]([0-9a-f]{4}-){2}[0-9a-f]{4}[^-]']  # ipv6暂未匹配
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_ip_mac_addr), foreground="#ff4dff"))
+        # ★ 错误，禁止，关闭等词语 前景色-红色
+        match_pattern_error_disable = [r'\bdown\b', r'\berror\b', r'\bdisable\b', r'\bdisabled\b']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_error_disable), foreground="red"))
+        # ★ 完成，成功，开启等词语 前景色-绿色 #18ed92
+        match_pattern_completed_enable = [r'\bcomplete\b', r'\bcompleted\b', r'\bdone\b', r'\bfinish\b', r'\bfinished\b',
+                                          r'\bsucceed\b', r'\bsuccess\b', r'\bsuccessful\b', r'\bsuccessfully\b',
+                                          r'\benable\b', r'\benabled\b', r'\bok\b', r'\bup\b']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_completed_enable), foreground="#18ed92"))
+        # ★ 默认，未知等词语 前景色-棕 #ba7131
+        match_pattern_default_unknown = [r'\bdefault\b', r'\bunknow\b', r'\bunknown\b']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_default_unknown), foreground="#ba7131"))
+        # ★ 数字+大小（G,M,K），表示磁盘大小，网络大小 前景色-青色
+        match_pattern_disk_size_net_speed = [r'\b(\d{1,}\.){,1}\d{1,}T[b]{,1}\b',
+                                             r'\b(\d{1,}\.){,1}\d{1,}G[i]{,1}[b]{,1}\b',
+                                             r'\b(\d{1,}\.){,1}\d{1,}M[i]{,1}[b]{,1}\b',
+                                             r'\b(\d{1,}\.){,1}\d{1,}K[i]{,1}[b]{,1}\b',
+                                             r'\b\d{1,}[" "]{,1}byte[s]{,1}']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed), foreground="cyan"))
+        # ★ 数字+ packets  表示网络发包数量 前景色-黄色 #e2ed14
+        match_pattern_disk_size_net_speed = [r'\b\d{1,}[" "]{,1}packet[s]{,1}']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed), foreground="#e2ed14"))
+        # ★ 数字%  前景色-绿色 #6bb520
+        match_pattern_disk_size_net_speed = [r'\b\d{1,}[" "]{,1}\%']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_disk_size_net_speed), foreground="#6bb520"))
+        # ★ yes,true,all 前景色-绿 #7ffd01
+        match_pattern_yes_true = [r'\byes\b', r'\btrue\b', r'\ball\b', r'\btagged\b']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_yes_true), foreground="#7ffd01"))
+        # ★ no,false,none,null 前景色-棕 #fcc560
+        match_pattern_no_false = [r'\bno\b', r'\bfalse\b', r'\bnone\b', r'\bnul\b', r'\bnull\b', r'\buntagged\b',
+                                  r'\bunassigned\b', r'\bN/A\b']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_no_false), foreground="#fcc560"))
+        # ★ 匹配网口名称+序号 前景色-青色
+        match_pattern_interface_number = [r'\bmeth[" "]{,1}(\d{1,3}/){2,}\d{1,3}\b',
+                                          r'\bGigabitEthernet[" "]{,1}(\d{1,3}/){2,}\d{1,3}\b',
+                                          r'\bGe[" "]{,1}(\d{1,3}/){2,}\d{1,3}\b',
+                                          r'\bEthernet[" "]{,1}(\d{1,3}/){2,}\d{1,3}\b',
+                                          r'\bvlan(if){,1}[" "]{,1}\d{1,4}\b',
+                                          r'\bnull[" "]{,1}\d{1,4}\b',
+                                          r'\b(in){,1}loop(back){,1}[" "]{,1}\d{1,4}\b']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_interface_number), foreground="cyan"))
+        # ★ 匹配 关键字 前景色-青 #0095d3
+        match_pattern_key_words = [r'\binterface[^:]\b',
+                                   r'\baaa\b',
+                                   r'\breturn\b']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_key_words), foreground="#0095d3"))
+        # ★ 匹配 undo 前景色-红 下划线
+        match_pattern_undo = [r'\bundo\b']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_undo), foreground="red", underline=True,
+                              underlinefg="pink"))
+        # ★ 匹配 shutdown 前景色-棕 #a34826 粗体
+        match_pattern_shutdown = [r'\bshutdown\b', r'\bdrop\b']
+        scheme_cisco.custom_match_object_list.append(
+            CustomMatchObject(match_pattern_lines="\n".join(match_pattern_shutdown), foreground="#a34826",
+                              bold=True))
+        scheme_cisco.save()
+        self.custome_tag_config_scheme_obj_list.append(scheme_cisco)
 
     def load_project_from_dbfile(self):
         """
@@ -4006,7 +4100,7 @@ class MainWindow:
                                        command=lambda: self.nav_frame_r_resource_top_page_display(resource_type))  # 返回资源选项卡主界面
         button_cancel.place(x=110, y=self.height - 40, width=50, height=25)
 
-    def list_resource_of_nav_frame_r_bottom_page(self, resource_type):
+    def list_resource_of_nav_frame_r_bottom_page(self, resource_type, batch_resource_operator=None):
         """
         ★★★★★ 列出资源-页面 ★★★★★
         :return:
@@ -4027,7 +4121,8 @@ class MainWindow:
         nav_frame_r_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
         nav_frame_r_widget_dict["canvas"].create_window((0, 0), window=nav_frame_r_widget_dict["frame"], anchor='nw')
         # 在canvas-frame滚动框内添加资源列表控件
-        list_obj = ListResourceInFrame(nav_frame_r_widget_dict, self.global_info, resource_type)
+        list_obj = ListResourceInFrame(nav_frame_r_widget_dict, self.global_info, resource_type,
+                                       batch_resource_operator=batch_resource_operator)
         list_obj.show()
 
     def nav_frame_r_resource_top_page_display(self, resource_type):
@@ -4094,16 +4189,28 @@ class MainWindow:
             button_load_resource = tkinter.Button(frame_top_of_nav_frame_r_page, text=text_load,
                                                   command=lambda: self.load_resource_of_nav_frame_r_page(resource_type))
             button_load_resource.pack(padx=self.padx, side=tkinter.LEFT)
-            button_other = tkinter.Button(frame_top_of_nav_frame_r_page, text="导出")
-            button_other.pack(padx=self.padx, side=tkinter.LEFT)
+            button_export_resource = tkinter.Button(frame_top_of_nav_frame_r_page, text="导出", state=tkinter.DISABLED)
+            button_export_resource.pack(padx=self.padx, side=tkinter.LEFT)
+            button_delete_resource = tkinter.Button(frame_top_of_nav_frame_r_page, text="删除", state=tkinter.DISABLED)
+            button_delete_resource.pack(padx=self.padx, side=tkinter.LEFT)
             entry_search = tkinter.Entry(frame_top_of_nav_frame_r_page, width=20)
             entry_search.pack(padx=self.padx, side=tkinter.LEFT)
-            button_search = tkinter.Button(frame_top_of_nav_frame_r_page, text="查找")
-            button_search.pack(padx=self.padx, side=tkinter.LEFT)
+            button_search_resource = tkinter.Button(frame_top_of_nav_frame_r_page, text="查找")
+            button_search_resource.pack(padx=self.padx, side=tkinter.LEFT)
+            batch_resource_operator = BatchResourceOperator(button_create_resource=button_create_resource,
+                                                            button_export_resource=button_export_resource,
+                                                            button_delete_resource=button_delete_resource,
+                                                            button_search_resource=button_search_resource)
+            button_export_resource.configure(command=lambda: self.export_resource_to_xlsx(batch_resource_operator, resource_type))
             # 在 frame_bottom_of_nav_frame_r_page 中列出资源列表
-            self.list_resource_of_nav_frame_r_bottom_page(resource_type)
+            self.list_resource_of_nav_frame_r_bottom_page(resource_type, batch_resource_operator)
         else:
             self.list_inspection_job_of_nav_frame_r_page()
+
+    def export_resource_to_xlsx(self, batch_resource_operator, resource_type):
+        export_resource_to_xlsx_obj = ExportResourceToXlsx(batch_resource_operator=batch_resource_operator,
+                                                           resource_type=resource_type, global_info=self.global_info)
+        export_resource_to_xlsx_obj.export_resource_to_xlsx_file()
 
     def list_inspection_job_of_nav_frame_r_page(self):
         # 更新导航框架2
@@ -4154,6 +4261,86 @@ class MainWindow:
         print("MainWindow: 退出了主程序")
         # self.window_obj.destroy()
         self.window_obj.quit()
+
+
+class BatchResourceOperator:
+    def __init__(self, button_create_resource=None, button_export_resource=None,
+                 button_delete_resource=None, button_search_resource=None):
+        self.button_create_resource = button_create_resource
+        self.button_export_resource = button_export_resource
+        self.button_delete_resource = button_delete_resource
+        self.button_search_resource = button_search_resource
+        self.var_selected_list = None
+
+
+class ExportResourceToXlsx:
+    def __init__(self, batch_resource_operator=None, resource_type=RESOURCE_TYPE_PROJECT, global_info=None):
+        self.batch_resource_operator = batch_resource_operator
+        self.resource_type = resource_type
+        self.global_info = global_info
+
+    def export_resource_to_xlsx_file(self):
+        if self.resource_type == RESOURCE_TYPE_PROJECT:
+            self.export_project_to_xlsx_file()
+        elif self.resource_type == RESOURCE_TYPE_CREDENTIAL:
+            self.export_credential_to_xlsx_file()
+        elif self.resource_type == RESOURCE_TYPE_HOST:
+            self.export_host_to_xlsx_file()
+        elif self.resource_type == RESOURCE_TYPE_HOST_GROUP:
+            self.export_host_group_to_xlsx_file()
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+            self.export_inspection_code_block_to_xlsx_file()
+        elif self.resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
+            self.export_inspection_template_to_xlsx_file()
+        elif self.resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
+            self.export_project_to_xlsx_file()
+        else:
+            print("ListResourceInFrame.show: unknown resource type")
+
+    def export_project_to_xlsx_file(self):
+        for var_selected in self.batch_resource_operator.var_selected_list:
+            print(var_selected.get())
+
+    def export_credential_to_xlsx_file(self):
+        pass
+
+    def export_host_to_xlsx_file(self):
+        file_path = filedialog.asksaveasfile(title="保存模板", filetypes=[("xlsx files", "*.xlsx"), ("All files", "*.*")],
+                                             defaultextension=".xlsx")
+        if not file_path:
+            print("未选择文件")
+        else:
+            print(file_path)
+            # 保存模板
+            workbook = openpyxl.Workbook()  # 创建一个工作簿对象
+            sheet1 = workbook.active  # 获取当前激活的工作表对象
+            sheet1.title = "导出-host-信息"
+            data_headline = ['name', 'description', 'address', 'port', 'login_protocol', 'first_auth_method',
+                             'credential', 'username', 'password', 'private_key']
+            sheet1.append(data_headline)
+            obj_index = 0
+            for var_selected in self.batch_resource_operator.var_selected_list:
+                if var_selected.get():
+                    resource_obj = self.global_info.host_obj_list[obj_index]
+                    credential_name = "credential"
+                    username = "username"
+                    password = "password"
+                    private_key = "private_key"
+                    data_line = [resource_obj.name, resource_obj.description, resource_obj.address, resource_obj.port,
+                                 resource_obj.login_protocol, resource_obj.first_auth_method, credential_name,
+                                 username, password, private_key]
+                    sheet1.append(data_line)
+                obj_index += 1
+            workbook.save(file_path.name)  # 保存工作簿到文件，若文件已存在，则覆盖
+
+    def export_host_group_to_xlsx_file(self):
+        pass
+
+    def export_inspection_code_block_to_xlsx_file(self):
+        pass
+
+    def export_inspection_template_to_xlsx_file(self):
+        pass
 
 
 class CreateResourceInFrame:
@@ -5346,12 +5533,14 @@ class ListResourceInFrame:
     在主窗口的查看资源界面，添加用于显示资源信息的控件
     """
 
-    def __init__(self, top_frame_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT):
+    def __init__(self, top_frame_widget_dict=None, global_info=None, resource_type=RESOURCE_TYPE_PROJECT, batch_resource_operator=None):
         self.top_frame_widget_dict = top_frame_widget_dict  # 在 top_frame_widget_dict["frame"]里添加组件，用于列出资源列表
         self.global_info = global_info
         self.resource_type = resource_type
         self.padx = 2
         self.pady = 2
+        self.batch_resource_operator = batch_resource_operator
+        self.var_selected_list = []
 
     def proces_mouse_scroll_of_top_frame(self, event):
         if event.delta > 0:
@@ -5388,9 +5577,10 @@ class ListResourceInFrame:
             resource_display_frame_title = "★★ 项目列表 ★★"
             resource_obj_list = self.global_info.project_obj_list
         # 列出资源
-        # 复选框
+        # 复选框-选择所有资源
         var_selected_all = tkinter.BooleanVar()
-        checkbutton_selected_all = tkinter.Checkbutton(self.top_frame_widget_dict["frame"], variable=var_selected_all)
+        checkbutton_selected_all = tkinter.Checkbutton(self.top_frame_widget_dict["frame"], variable=var_selected_all,
+                                                       command=lambda: self.selected_all_resource_obj(var_selected_all))
         checkbutton_selected_all.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         label_display_resource = tkinter.Label(self.top_frame_widget_dict["frame"],
                                                text=resource_display_frame_title + "    数量: " + str(len(resource_obj_list)))
@@ -5400,10 +5590,12 @@ class ListResourceInFrame:
         index = 0
         for obj in resource_obj_list:
             # print(obj.name)
-            # 复选框
+            # 复选框-单个资源
             var_selected = tkinter.BooleanVar()
-            checkbutton_selected = tkinter.Checkbutton(self.top_frame_widget_dict["frame"], variable=var_selected)
+            checkbutton_selected = tkinter.Checkbutton(self.top_frame_widget_dict["frame"], variable=var_selected,
+                                                       command=self.judge_after_checkbutton_clicked)
             checkbutton_selected.grid(row=index + 1, column=0, padx=self.padx, pady=self.pady)
+            self.var_selected_list.append(var_selected)
             # 序号及名称
             label_index = tkinter.Label(self.top_frame_widget_dict["frame"], text=str(index + 1) + " : ")
             label_index.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
@@ -5446,11 +5638,41 @@ class ListResourceInFrame:
                 button_open_terminal2.grid(row=index + 1, column=6, padx=self.padx, pady=self.pady)
             index += 1
         # 信息控件添加完毕
+        if self.batch_resource_operator is not None:
+            self.batch_resource_operator.var_selected_list = self.var_selected_list
         self.top_frame_widget_dict["frame"].update_idletasks()  # 更新Frame的尺寸
         self.top_frame_widget_dict["canvas"].configure(
             scrollregion=(0, 0, self.top_frame_widget_dict["frame"].winfo_width(), self.top_frame_widget_dict["frame"].winfo_height()))
         self.top_frame_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         self.top_frame_widget_dict["frame"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+
+    def selected_all_resource_obj(self, var_selected_all):
+        if var_selected_all.get():
+            for var_selected in self.var_selected_list:
+                var_selected.set(True)
+                if self.batch_resource_operator is not None:
+                    self.batch_resource_operator.button_export_resource.config(state=tkinter.ACTIVE)
+                    self.batch_resource_operator.button_delete_resource.config(state=tkinter.ACTIVE)
+        else:
+            for var_selected in self.var_selected_list:
+                var_selected.set(False)
+                if self.batch_resource_operator is not None:
+                    self.batch_resource_operator.button_export_resource.config(state=tkinter.DISABLED)
+                    self.batch_resource_operator.button_delete_resource.config(state=tkinter.DISABLED)
+
+    def judge_after_checkbutton_clicked(self):
+        if self.batch_resource_operator is None:
+            return
+        sum_of_selected_resource_obj = 0
+        for var_selected in self.var_selected_list:
+            if var_selected.get():
+                sum_of_selected_resource_obj += 1
+        if sum_of_selected_resource_obj > 0:
+            self.batch_resource_operator.button_export_resource.config(state=tkinter.ACTIVE)
+            self.batch_resource_operator.button_delete_resource.config(state=tkinter.ACTIVE)
+        else:
+            self.batch_resource_operator.button_export_resource.config(state=tkinter.DISABLED)
+            self.batch_resource_operator.button_delete_resource.config(state=tkinter.DISABLED)
 
 
 class ViewResourceInFrame:
