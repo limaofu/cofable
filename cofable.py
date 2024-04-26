@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # coding=utf-8
 # module name: cofable
-# external_dependencies:  cofnet (https://github.com/limaofu/cofnet)  &  paramiko  &  schedule  &  pyglet
+# external_dependencies: paramiko, pyglet, pyperclip, openpyxl, schedule
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-25
+# update: 2024-04-26
 
 """
-开发日志：
-★. 执行命令时进行判断回复                                                           2024年1月23日 基本完成
+【开发日志】
+★. 执行命令时进行判断回复                                                             2024年1月23日 基本完成
 ★. 登录凭据的选择与多次尝试各同类凭据（当同类型凭据有多个时），只选择第一个能成功登录的cred     2024年1月23日 完成
-★. ssh密码登录，ssh密钥登录                                                        2024年1月23日 完成
-★. 所有输出整理到txt文件                                                           2024年1月24日 完成
+★. ssh密码登录，ssh密钥登录                                                          2024年1月23日 完成
+★. 所有输出整理到txt文件                                                             2024年1月24日 完成
 ★. 所有输出根据模板设置，确认是否自动保存到txt文件以及文件名风格                           2024年3月4日 完成
-★. 使用多线程，每台主机用一个线程去巡检，并发几个线程                                    2024年1月25日 完成
-★. 巡检作业执行完成情况的统计，执行完成，连接超时，认证失败                               2024年1月28日 基本完成
-★. 程序运行后，所有类的对象都要分别加载到一个全局列表里                                  已完成
-★. 巡检命令输出保存到数据库                                                         2024年1月27日 基本完成
-★. 定时/周期触发巡检模板作业                                                        2024年3月14日 定时的已完成
+★. 使用多线程，每台主机用一个线程去巡检，并发几个线程                                     2024年1月25日 完成
+★. 巡检作业执行完成情况的统计，执行完成，连接超时，认证失败                                2024年1月28日 基本完成
+★. 程序运行后，所有类的对象都要分别加载到一个全局列表里                                   已完成
+★. 巡检命令输出保存到数据库                                                          2024年1月27日 基本完成
+★. 定时/周期触发巡检模板作业                                                         2024年3月14日 定时的已完成
 ★. 本次作业命令输出与最近一次（上一次）输出做对比
 ★. 巡检命令输出做基础信息提取与判断并触发告警，告警如何通知人类用户？
 ★. Credential密钥保存时，会有换行符，sql语句不支持，需要修改，已将密钥字符串转为base64      2024年2月25日 完成
@@ -26,8 +26,8 @@
 ★. 巡检命令中有sleep N 之类的命令时，要判断是否完成，根据shell提示符进行判断
 ★. 编辑或创建巡检代码时，要求能设置每条命令的 交互回复及其他细节                           已完成
 ★. 没有创建项目时，就创建其他资源，要生成默认的项目，名为default的项目                     2024年3月7日 完成
-★. shell通道设置字符界面宽度及长度                                                  2024年3月8日 完成
-★. 输出巡检实时状态，及进度展示                                                      2024年3月15日 完成
+★. shell通道设置字符界面宽度及长度                                                    2024年3月8日 完成
+★. 输出巡检实时状态，及进度展示                                                       2024年3月15日 完成
 ★. 更新资源名称时，要检查新名称是否和已存在的同类资源名称重复                              2024年3月15日 完成
 ★. 巡检前进行ping检测及tcp端口连通检测
 ★. 查看历史巡检作业日志时，如果巡检模板已更改，则显示的是更改后对应的输出，而不是更改前的，这个需要改进，
@@ -38,19 +38,20 @@
 ★. 主机命令在线批量执行，在“主机组”界面，对这一组主机在线下发命令
 ★. 首次登录后，对输出进行判断，有的设备首次登录后会要求改密码，或者长时间未登录的设备要求修改密码
 ★. 不同巡检线程都去读写sqlite3数据库文件时，报错了，得加个锁                               2024年3月23日 完成
-★. 在vt100终端里实现了 光标的左右移动及插入/删除字符                                     2024年3月23日 完成
-★. 实现 vt100终端的 普通输出 与 应用输出模式的切换                                      2024年3月27日 完成
+★. 在vt100终端里实现了 光标的左右移动及插入/删除字符                                      2024年3月23日 完成
+★. 实现 vt100终端的 普通输出 与 应用输出模式的切换                                       2024年3月27日 完成
 ★. 实现 复制会话日志到文件，以及在会话中查找字符串                                        2024年3月29日 完成
 ★. 根据字体大小，获取单个字（半角）的宽高大小，方便调整Text的宽度及高度                      2024年3月30日 完成
 ★. 支持设置主机的字符集，如utf8,gbk等  默认使用utf8
 ★. 在向Terminal终端会话粘贴内容时，如果内容有多行，需要弹出确认框，用户确认才发送要粘贴的内容    2024年4月3日 完成
 ★. 支持用户自定义高亮字符设置（着色方案），支持正则表达式匹配并设置显示样式，每台主机可单独设置着色方案    2024年4月6日 完成
-★. 优化了vt100输出显示逻辑，先输出内容，后上色（系统自带的颜色属性）                        2024年4月9日 完成
+★. 优化了vt100输出显示逻辑，先输出内容，后上色（系统自带的颜色属性）                         2024年4月9日 完成
 ★. 修复了tkinter.Text组件的索引操作错误导致的闪退问题，以及引入结束线程机制，防止内存泄露      2024年4月12日 完成
 ★. 处理用户自定义配色方案时，需要使用多线程，速度才够快                                    2024年4月16日 完成
-★. 优化输出逻辑，提升显示速度，如 TerminalFrontend.app_mode_print_all 这个函数          2024年4月17日 完成
+★. 优化输出逻辑，提升显示速度，如 TerminalFrontend.app_mode_print_all 这个函数           2024年4月17日 完成
+★. 主机资源支持导出到xlsx表格文件，也支持从xlsx导入主机资源                                2024年4月26日 完成
 
-资源操作逻辑：
+【资源操作逻辑】
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
 ★列出-资源列表     ListResourceInFrame.show()
 ★列出-作业列表     ListInspectionJobInFrame.show()
@@ -58,7 +59,7 @@
 ★编辑-资源        EditResourceInFrame.show()    →  UpdateResourceInFrame.update()
 ★删除-资源        DeleteResourceInFrame.show()
 
-巡检流程：
+【巡检流程】
 ★列出-巡检模板列表   ListResourceInFrame.show
                    触发↓
 ★启动-巡检模板      StartInspectionTemplateInFrame.start()  →  StartInspectionTemplateInFrame.show_inspection_job_status()
@@ -70,8 +71,13 @@
                   ViewInspectionJobInFrame.show_inspection_job_status()
                                             ↓点击单台主机
                   ViewInspectionJobInFrame.view_inspection_host_item()
+
+【在windows下构建成exe程序】
+> cd cofable项目目录/venv/Scripts>
+cofable项目目录/venv/Scripts> pyinstaller.exe -F --add-data ../../builtin_resource;builtin_resource ../../cofable.py -n cofable-xxx.exe
 """
 
+# internal dependencies:
 import io
 import os
 import threading
@@ -92,7 +98,7 @@ from tkinter import font
 from tkinter import colorchooser
 from multiprocessing.dummy import Pool as ThreadPool
 from concurrent.futures import ThreadPoolExecutor
-# external_dependencies:
+# external dependencies:
 import paramiko
 import pyglet
 import pyperclip
@@ -100,7 +106,7 @@ import openpyxl
 
 # import schedule
 
-# Here we go, 全局常量
+# Global Constant:
 COF_TRUE = 1
 COF_FALSE = 0
 COF_YES = 1
@@ -122,8 +128,8 @@ EXECUTION_METHOD_NONE = 0
 EXECUTION_METHOD_AT = 1
 EXECUTION_METHOD_CROND = 2
 EXECUTION_METHOD_AFTER = 3
-CODE_POST_WAIT_TIME_DEFAULT = 0.2  # 命令发送后等待的时间，秒，这里不能为0
-MAX_INTERACTIVE_COUNT = 5000  # 最大交互处理次数，在 SSHOperator.process_code_interactive()里使用
+CODE_POST_WAIT_TIME_DEFAULT = 0.2  # 命令发送后等待的时间，秒，这里不能为0（如果设置得太小，则可能收不到本次命令的回复消息）
+MAX_INTERACTIVE_COUNT = 5000  # 最大交互处理次数，在 SSHOperator.process_code_interactive()里使用，防止交互时进入死循环
 MAX_EXEC_WAIT_COUNT = 10000  # 判断巡检线程超时最大等待次数，此参数乘以CODE_POST_WAIT_TIME_DEFAULT为等待超时时间
 LOGIN_AUTH_TIMEOUT = 30  # 登录等待超时，秒
 CODE_EXEC_METHOD_INVOKE_SHELL = 0
@@ -1350,7 +1356,7 @@ class LaunchInspectionJob:
                 auth_method = AUTH_METHOD_SSH_PASS
             else:
                 auth_method = AUTH_METHOD_SSH_KEY
-            # 一个<SSHOperator>对象操作一个<InspectionCodeBlock>巡检代码块的所有命令
+            # 一个<SSHOperator>对象操作一个<InspectionCodeBlock>巡检代码块的所有命令，这种做法决定了每执行一个巡检代码块都要登录一次主机，后续需要优化一下
             ssh_operator = SSHOperator(hostname=host_obj.address, port=host_obj.port, username=cred.username,
                                        password=cred.password, private_key=cred.private_key, auth_method=auth_method,
                                        command_list=inspection_code_block_obj.code_list, timeout=LOGIN_AUTH_TIMEOUT,
@@ -1389,7 +1395,7 @@ class LaunchInspectionJob:
                 self.save_ssh_operator_invoke_shell_output_to_sqlite(ssh_operator.output_list, host_obj, inspection_code_block_obj)
             inspection_code_block_index += 1
         if host_job_status_obj.exec_timeout == COF_NO and host_job_status_obj.find_credential_status == FIND_CREDENTIAL_STATUS_SUCCEED:
-            host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_COMPLETED  # 全部完成，没有超时的，没有验证失败的
+            host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_COMPLETED  # 全部完成（没有超时的，没有验证失败的）
         print("LaunchInspectionJob.create_ssh_operator_invoke_shell: 目标主机",
               f"{host_obj.name} 已巡检完成，远程方式: ssh <<<<<<<<<<<<<<<<<<")
 
@@ -1689,10 +1695,10 @@ class LaunchInspectionJob:
         sqlite_conn.close()  # 关闭数据库连接
 
     def start_job(self):
-        print("开始巡检任务 ############################################################")
+        print("LaunchInspectionJob.start_job: 开始巡检任务 ##########################################")
         self.job_state = INSPECTION_JOB_EXEC_STATE_STARTED
         if self.inspection_template is None:
-            print("巡检模板对象为空，结束本次任务")
+            print("LaunchInspectionJob.start_job: 巡检模板对象为空，结束本次任务")
             self.job_state = INSPECTION_JOB_EXEC_STATE_FAILED
             return
         self.start_time = time.time()
@@ -1703,15 +1709,15 @@ class LaunchInspectionJob:
                                              unduplicated_host_job_status_obj_list=self.unduplicated_host_job_status_obj_list,
                                              start_time=self.start_time, end_time=self.end_time, global_info=self.global_info)
         self.global_info.inspection_job_record_obj_list.insert(0, job_record_obj)
-        print("巡检模板名称：", self.inspection_template.name)
+        # print("巡检模板名称：", self.inspection_template.name)
         thread_pool = ThreadPool(processes=self.inspection_template.forks)  # 创建线程池，线程数量由<InspectionTemplate>.forks决定
         thread_pool.map(self.operator_job_thread, range(len(self.unduplicated_host_oid_list)))  # ★★线程池调用巡检作业函数★★
         thread_pool.close()
         thread_pool.join()  # 会等待所有线程完成: self.operator_job_thread()
         self.end_time = time.time()
-        print("巡检任务完成 ############################################################")
-        print(f"巡检并发数为{self.inspection_template.forks}")
-        print("用时 {:<6.4f} 秒".format(self.end_time - self.start_time))
+        print("LaunchInspectionJob.start_job: 巡检任务完成 ##########################################")
+        print(f"LaunchInspectionJob.start_job: 巡检并发数为{self.inspection_template.forks}")
+        print("LaunchInspectionJob.start_job: 用时 {:<6.4f} 秒".format(self.end_time - self.start_time))
         # 将作业信息保存到数据库，从数据库读取出来时，不可重构为一个<LaunchInspectionJob>对象，只可重构为<InspectionJobRecord>对象
         self.judge_completion_of_job()  # 先判断作业完成情况
         job_record_obj.end_time = self.end_time
@@ -3344,6 +3350,12 @@ class GlobalInfo:
                 return credential
         return None
 
+    def get_credential_by_name(self, name):
+        for credential in self.credential_obj_list:
+            if credential.name == name:
+                return credential
+        return None
+
     def get_host_by_oid(self, oid):
         for host in self.host_obj_list:
             if host.oid == oid:
@@ -4304,33 +4316,50 @@ class ExportResourceToXlsx:
         print("ExportResourceXlsx.export_credential_to_xlsx_file: 暂不支持导出 credential")
 
     def export_host_to_xlsx_file(self):
-        file_path = filedialog.asksaveasfile(title="保存模板", filetypes=[("xlsx files", "*.xlsx"), ("All files", "*.*")],
-                                             defaultextension=".xlsx")
-        if not file_path:
-            print("未选择文件")
-        else:
-            print(file_path)
-            # 保存模板
-            workbook = openpyxl.Workbook()  # 创建一个工作簿对象
-            sheet1 = workbook.active  # 获取当前激活的工作表对象
-            sheet1.title = "导出-host-信息"
-            data_headline = ['name', 'description', 'address', 'port', 'login_protocol', 'first_auth_method',
-                             'credential', 'username', 'password', 'private_key']
-            sheet1.append(data_headline)
-            obj_index = 0
-            for var_selected in self.batch_resource_operator.var_selected_list:
-                if var_selected.get():
-                    resource_obj = self.global_info.host_obj_list[obj_index]
-                    credential_name = "credential"
-                    credential_username = "username"
-                    credential_password = "password"
-                    credential_private_key = "private_key"
-                    data_line = [resource_obj.name, resource_obj.description, resource_obj.address, resource_obj.port,
-                                 resource_obj.login_protocol, resource_obj.first_auth_method, credential_name,
-                                 credential_username, credential_password, credential_private_key]
-                    sheet1.append(data_line)
-                obj_index += 1
-            workbook.save(file_path.name)  # 保存工作簿到文件，若文件已存在，则覆盖
+        try:
+            file_path = filedialog.asksaveasfile(title="保存模板", filetypes=[("xlsx files", "*.xlsx"), ("All files", "*.*")],
+                                                 defaultextension=".xlsx")
+            if not file_path:
+                print("未选择文件")
+            else:
+                print(file_path)
+                # 保存模板
+                workbook = openpyxl.Workbook()  # 创建一个工作簿对象
+                sheet1 = workbook.active  # 获取当前激活的工作表对象
+                sheet1.title = "导出-host-信息"
+                data_headline = ['name', 'description', 'address', 'port', 'login_protocol', 'first_auth_method',
+                                 'credential', 'username', 'password', 'private_key']
+                sheet1.append(data_headline)
+                obj_index = 0
+                for var_selected in self.batch_resource_operator.var_selected_list:
+                    if var_selected.get():
+                        resource_obj = self.global_info.host_obj_list[obj_index]
+                        if len(resource_obj.credential_oid_list) == 0:
+                            credential_name = ""
+                            credential_username = ""
+                            credential_password = ""
+                            credential_private_key = ""
+                        else:
+                            first_credential = self.global_info.get_credential_by_oid(resource_obj.credential_oid_list[0])
+                            if first_credential is not None:
+                                credential_name = first_credential.name
+                                credential_username = first_credential.username
+                                credential_password = first_credential.password
+                                credential_private_key = first_credential.private_key
+                            else:
+                                credential_name = ""
+                                credential_username = ""
+                                credential_password = ""
+                                credential_private_key = ""
+                        data_line = [resource_obj.name, resource_obj.description, resource_obj.address, resource_obj.port,
+                                     resource_obj.login_protocol, resource_obj.first_auth_method, credential_name,
+                                     credential_username, credential_password, credential_private_key]
+                        sheet1.append(data_line)
+                    obj_index += 1
+                workbook.save(file_path.name)  # 保存工作簿到文件，若文件已存在，则覆盖
+        except PermissionError as err:
+            # print(err)
+            messagebox.showerror("Error", err.__str__())
 
     def export_host_group_to_xlsx_file(self):
         print("ExportResourceXlsx.export_host_group_to_xlsx_file: 暂不支持导出 host_group")
@@ -8249,6 +8278,15 @@ class LoadResourceInFrame:
         self.resource_type = resource_type
         self.padx = 2
         self.pady = 2
+        self.project_obj_list = []
+        self.credential_obj_list = []
+        self.host_obj_list = []
+        self.host_group_obj_list = []
+        self.inspection_code_block_obj_list = []
+        self.inspection_template_obj_list = []
+        self.inspection_job_record_obj_list = []
+        self.launch_template_trigger_obj_list = []
+        self.custome_tag_config_scheme_obj_list = []
 
     def proces_mouse_scroll_of_top_frame(self, event):
         if event.delta > 0:
@@ -8296,7 +8334,8 @@ class LoadResourceInFrame:
         label_load_host.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_load_host.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★打开文件 按钮
-        load_button = tkinter.Button(self.top_frame_widget_dict["frame"], text="打开文件", bg="pink")
+        load_button = tkinter.Button(self.top_frame_widget_dict["frame"], text="打开文件", bg="pink",
+                                     command=self.open_resource_xlsx_file_host)
         load_button.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         load_button.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         # ★下载模板文件 按钮
@@ -8314,41 +8353,118 @@ class LoadResourceInFrame:
     def show_inspection_template(self):
         print("LoadResourceInFrame.show_inspection_template: 暂不支持导入 inspection_template")
 
+    def open_resource_xlsx_file_host(self):
+        try:
+            file_path = filedialog.askopenfilename(filetypes=[("xlsx files", "*.xlsx"), ("All files", "*.*")])
+            if not file_path:
+                print("未选择文件")
+            else:
+                # print(file_path)
+                workbook = openpyxl.load_workbook(file_path)
+                sheet1 = workbook.worksheets[0]  # 根据表序号获取表格，第1个表格
+                for line_index in range(sheet1.max_row - 1):
+                    name = sheet1.cell(row=line_index + 2, column=1).value  # ★表格的行和列从1开始编号，这里从第二行开始读取（第1行为列标题）
+                    if name is not None:
+                        name_strip = name.strip()
+                    else:
+                        messagebox.showerror("Error", f"主机名称不能为空，第{line_index + 2}行")
+                        return
+                    project_name = sheet1.cell(row=line_index + 2, column=2).value
+                    if project_name is not None:
+                        project_name_strip = project_name.strip()
+                    else:
+                        project_name_strip = "default"
+                    project_obj = self.global_info.get_project_by_name(project_name_strip)
+                    if project_obj is not None:
+                        project_oid = project_obj.oid
+                    else:
+                        project_oid = self.global_info.get_project_by_name("default").oid  # 这里要确保系统有名为"default"的项目对象
+                    description = sheet1.cell(row=line_index + 2, column=3).value
+                    address = sheet1.cell(row=line_index + 2, column=4).value
+                    port = int(sheet1.cell(row=line_index + 2, column=5).value)
+                    login_protocol_name = sheet1.cell(row=line_index + 2, column=6).value
+                    if login_protocol_name.strip().lower() == "ssh":
+                        login_protocol = LOGIN_PROTOCOL_SSH
+                    elif login_protocol_name.strip().lower() == "telnet":
+                        login_protocol = LOGIN_PROTOCOL_TELNET
+                    else:
+                        login_protocol = LOGIN_PROTOCOL_SSH
+                    first_auth_method_name = sheet1.cell(row=line_index + 2, column=7).value
+                    if first_auth_method_name.strip().lower() == "password" or first_auth_method_name.strip().lower() == "passwd":
+                        first_auth_method = FIRST_AUTH_METHOD_PASSWORD
+                    elif first_auth_method_name.strip().lower() == "prikey":
+                        first_auth_method = FIRST_AUTH_METHOD_PRIKEY
+                    else:
+                        first_auth_method = FIRST_AUTH_METHOD_PRIKEY
+                    credential_name = sheet1.cell(row=line_index + 2, column=8).value.strip()
+                    credential_obj = self.global_info.get_credential_by_name(credential_name)
+                    if credential_obj is None:
+                        # 根据凭据名称，找不到已创建的凭据，则需要根据提供的账号密码，产生一个新的凭据，凭据名称同这个credential_name
+                        if len(credential_name) == 0:
+                            new_credential_obj_name = name_strip + "-[AUTO_GENERATED]"
+                        else:
+                            new_credential_obj_name = credential_name
+                        new_credential_obj_desription = f"根据导入的主机列表清单自动生成的凭据对象，导入主机名: {name_strip}"
+                        new_credential_obj_username = sheet1.cell(row=line_index + 2, column=9).value.strip()
+                        new_credential_obj_password = sheet1.cell(row=line_index + 2, column=10).value.strip()
+                        new_credential_obj_private_key = sheet1.cell(row=line_index + 2, column=11).value.strip()
+                        new_credential_obj = Credential(name=new_credential_obj_name, description=new_credential_obj_desription,
+                                                        username=new_credential_obj_username, password=new_credential_obj_password,
+                                                        private_key=new_credential_obj_private_key, global_info=self.global_info)
+                        self.credential_obj_list.append(new_credential_obj)
+                    else:
+                        new_credential_obj = credential_obj
+                    # 创建Host对象
+                    host_obj = Host(name=name_strip, description=description, address=address, port=port, login_protocol=login_protocol,
+                                    first_auth_method=first_auth_method, project_oid=project_oid, global_info=self.global_info)
+                    host_obj.add_credential(new_credential_obj)
+                    self.host_obj_list.append(host_obj)
+                    line_index += 1
+                # for index, row in enumerate(sheet1.iter_rows(values_only=True), 2):
+                #     data = list(row)
+                #     print(f"第{index}行: ", data)
+        except PermissionError as err:
+            # print(err)
+            messagebox.showerror("Error", err.__str__())
+
     def download_demo_xlsx_host(self):
-        file_path = filedialog.asksaveasfile(title="保存模板", filetypes=[("xlsx files", "*.xlsx"), ("All files", "*.*")],
-                                             defaultextension=".xlsx")
-        if not file_path:
-            print("未选择文件")
-        else:
-            print(file_path)
-            # 保存模板
-            workbook = openpyxl.Workbook()  # 创建一个工作簿对象
-            sheet1 = workbook.active  # 获取当前激活的工作表对象
-            sheet1.title = "导入-host-信息"
-            data_headline = ['name', 'description', 'address', 'port', 'login_protocol', 'first_auth_method',
-                             'credential', 'username', 'password', 'private_key']
-            data_descline = ['主机名称【★必填，这一行为说明信息，正式填写主机信息时请删除本行】', '描述信息【选填】',
-                             '主机地址，可填写ip或域名【★必填】', '端口号【选填，缺省时使用相应远程协议的默认端口，ssh为22，telnet为23】',
-                             '登录协议，可写ssh或telnet【选填，缺省为ssh】',
-                             '优先认证方式，可填写password或priKey【选填，缺省为priKey，若无密钥信息则也会去使用密码登录】',
-                             '主机使用的登录认证凭据【选填，★如果不填写或无匹配的凭据，则根据账号密码自动生成一个凭据（名称同主机名+cred_auto）】',
-                             '登录主机时使用的用户名【★必填】', '登录主机时使用的密码【选填，★密码和密钥二选一填写1个，2个都写也可】',
-                             '登录主机时使用的密钥文件内容【选填，★密码和密钥二选一填写1个，2个都写也可】']
-            pri_key_demo = """-----BEGIN RSA PRIVATE KEY-----
-MIIEowIBAAKCAQEAmO45WkTkOcCZAObUN0JpD7hV7K4/YZHavKRKXwC+ZqtSN/FZ
-Y6PLoucPOVr21FmyPYEcn125jInmzBcNupNd08zNI5bs/Z1AfCmSpCCcHCOF8mbK
+        try:
+            file_path = filedialog.asksaveasfile(title="保存模板", filetypes=[("xlsx files", "*.xlsx"), ("All files", "*.*")],
+                                                 defaultextension=".xlsx")
+            if not file_path:
+                print("未选择文件")
+            else:
+                print(file_path)
+                # 保存模板
+                workbook = openpyxl.Workbook()  # 创建一个工作簿对象
+                sheet1 = workbook.active  # 获取当前激活的工作表对象
+                sheet1.title = "导入-host-信息"
+                data_headline = ['name', 'project', 'description', 'address', 'port', 'login_protocol', 'first_auth_method',
+                                 'credential', 'username', 'password', 'private_key']
+                data_descline = ['主机名称【★必填，这一行为说明信息，正式填写主机信息时请删除本行】',
+                                 '所属项目名称【选填★缺省或找不到指定的项目时，默认设为default】', '描述信息【选填】',
+                                 '主机地址，可填写ip或域名【★必填】', '端口号【选填，缺省时使用相应远程协议的默认端口，ssh为22，telnet为23】',
+                                 '登录协议，可写ssh或telnet【选填，缺省为ssh】',
+                                 '优先认证方式，可填写password或priKey【选填，缺省为priKey，若无密钥信息则也会去使用密码登录】',
+                                 '主机使用的登录认证凭据【选填，★如果不填写或无匹配的凭据，则根据账号密码自动生成一个凭据（凭据名同本单元格的值）】',
+                                 # 若本单元格（credential）内容为空，则自动生成的凭据名称为: 主机名-[AUTO_GENERATED]
+                                 '登录主机时使用的用户名【★必填】', '登录主机时使用的密码【选填，★密码和密钥二选一填写1个，2个都写也可】',
+                                 '登录主机时使用的密钥文件内容【选填，★密码和密钥二选一填写1个，2个都写也可】']
+                pri_key_demo = """-----BEGIN RSA PRIVATE KEY-----
 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-MhuwjQKBgGupIt4/eDuRoBvEBiIJqOi1qxEsatykFmOo9gQUCTIf3Dr/xNMrJDNG
-a2J9wo3fn+J9dbu6iDTRKREcaTyUyvtOfsXaVHUsteSxHHx2Epo41mbfNJEOCqJi
-Sd2nMDLWL5NL2pbSqb25kbFbH2uPmAwqffDIeKf00//ZJ6sh3P3j
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 -----END RSA PRIVATE KEY-----
 """
-            data_demoline = ['host-0001', 'description-info', '10.99.1.1', '22', 'ssh', 'password',
-                             '', 'root', '123456xx', pri_key_demo]
-            sheet1.append(data_headline)
-            sheet1.append(data_descline)
-            sheet1.append(data_demoline)
-            workbook.save(file_path.name)  # 保存工作簿到文件，若文件已存在，则覆盖
+                data_demoline = ['demo_host-0001', 'default-project', 'description-info', '10.99.1.1', '22', 'ssh', 'password',
+                                 '', 'root', '123456xx', pri_key_demo]
+                sheet1.append(data_headline)
+                sheet1.append(data_descline)
+                sheet1.append(data_demoline)
+                workbook.save(file_path.name)  # 保存工作簿到文件，若文件已存在，则覆盖
+        except PermissionError as err:
+            # print(err)
+            messagebox.showerror("Error", err.__str__())
 
     def save(self):
         if self.resource_type == RESOURCE_TYPE_PROJECT:
@@ -8373,7 +8489,12 @@ Sd2nMDLWL5NL2pbSqb25kbFbH2uPmAwqffDIeKf00//ZJ6sh3P3j
         print("LoadResourceInFrame.save_credential: 暂不支持导入 credential")
 
     def save_host(self):
-        pass
+        for credential_obj in self.credential_obj_list:
+            credential_obj.save()
+            self.global_info.credential_obj_list.append(credential_obj)
+        for host_obj in self.host_obj_list:
+            host_obj.save()
+            self.global_info.host_obj_list.append(host_obj)
 
     def save_host_group(self):
         print("LoadResourceInFrame.save_host_group: 暂不支持导入 host_group")
@@ -8711,9 +8832,11 @@ class StartInspectionTemplateInFrame:
             label_inspection_code_block_name.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
             code_exec_log_text = tkinter.Text(master=frame, height=20)  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
             for output_obj in code_exec_output_obj_list:
-                code_exec_log_text.insert(tkinter.END, output_obj.invoke_shell_output_bytes.decode("utf8"))
-                for interactive_output in output_obj.interactive_output_bytes_list:
-                    code_exec_log_text.insert(tkinter.END, interactive_output.decode("utf8"))
+                plain_text = Vt100ToPlaintext(vt100_data_bytes=output_obj.invoke_shell_output_bytes).parse()
+                code_exec_log_text.insert(tkinter.END, plain_text)
+                for interactive_output_bytes in output_obj.interactive_output_bytes_list:
+                    plain_text2 = Vt100ToPlaintext(vt100_data_bytes=interactive_output_bytes).parse()
+                    code_exec_log_text.insert(tkinter.END, plain_text2)
             # 显示info Text文本框
             code_exec_log_text.grid(row=7 + index * 2 + 1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
             index += 1
@@ -9114,9 +9237,11 @@ class ViewInspectionJobInFrame:
             label_inspection_code_block_name.grid(row=7 + index * 2, column=0, padx=self.padx, pady=self.pady)
             code_exec_log_text = tkinter.Text(master=frame, height=20)  # 创建多行文本框，用于显示资源信息，需要绑定滚动条
             for output_obj in code_exec_output_obj_list:
-                code_exec_log_text.insert(tkinter.END, output_obj.invoke_shell_output_bytes.decode("utf8"))
-                for interactive_output in output_obj.interactive_output_bytes_list:
-                    code_exec_log_text.insert(tkinter.END, interactive_output.decode("utf8"))
+                plain_text = Vt100ToPlaintext(vt100_data_bytes=output_obj.invoke_shell_output_bytes).parse()
+                code_exec_log_text.insert(tkinter.END, plain_text)
+                for interactive_output_bytes in output_obj.interactive_output_bytes_list:
+                    plain_text2 = Vt100ToPlaintext(vt100_data_bytes=interactive_output_bytes).parse()
+                    code_exec_log_text.insert(tkinter.END, plain_text2)
             # 显示info Text文本框
             code_exec_log_text.grid(row=7 + index * 2 + 1, column=0, columnspan=2, padx=self.padx, pady=self.pady)
             index += 1
