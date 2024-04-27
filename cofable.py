@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-26
+# update: 2024-04-27
 
 """
 【开发日志】
@@ -50,6 +50,7 @@
 ★. 处理用户自定义配色方案时，需要使用多线程，速度才够快                                    2024年4月16日 完成
 ★. 优化输出逻辑，提升显示速度，如 TerminalFrontend.app_mode_print_all 这个函数           2024年4月17日 完成
 ★. 主机资源支持导出到xlsx表格文件，也支持从xlsx导入主机资源                                2024年4月26日 完成
+★. 修改了主机登录认证凭据结构，之前是所有凭据都保存在Host.credential_oid_list里，现在改为单个登录认证凭据  2024年4月27日 完成
 
 【资源操作逻辑】
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -505,7 +506,7 @@ class Host:
     def __init__(self, name='default', description='default', project_oid='default', address='default',
                  port=22, last_modify_timestamp=0.0, oid=None, create_timestamp=None,
                  login_protocol=LOGIN_PROTOCOL_SSH, first_auth_method=FIRST_AUTH_METHOD_PRIKEY,
-                 custome_tag_config_scheme_oid='', global_info=None):
+                 login_credential_oid='', custome_tag_config_scheme_oid='', global_info=None):
         if oid is None:
             self.oid = uuid.uuid4().__str__()  # <str>
         else:
@@ -522,12 +523,13 @@ class Host:
         self.last_modify_timestamp = last_modify_timestamp  # <float>
         self.login_protocol = login_protocol
         self.first_auth_method = first_auth_method
-        self.credential_oid_list = []  # 元素为 Credential对象的cred_oid
+        # self.credential_oid_list = []  # 元素为 Credential对象的cred_oid
+        self.login_credential_oid = login_credential_oid  # 登录目标主机时使用的账号密码凭据
         self.custome_tag_config_scheme_oid = custome_tag_config_scheme_oid  # <str> 为<CustomeTagConfigScheme>对象的oid
         self.global_info = global_info
 
-    def add_credential(self, credential_object):  # 每台主机都会绑定一个或多个不同类型的登录/访问认证凭据
-        self.credential_oid_list.append(credential_object.oid)
+    def add_credential(self, credential_object):  # 每台主机只会绑定一个登录认证凭据
+        self.login_credential_oid = credential_object.oid
 
     def save(self):
         sqlite_conn = sqlite3.connect(self.global_info.sqlite3_dbfile_name)  # 连接数据库文件
@@ -549,6 +551,7 @@ class Host:
                         "last_modify_timestamp double,",
                         "login_protocol int,"
                         "first_auth_method int,",
+                        "login_credential_oid varchar(36),",
                         "custome_tag_config_scheme_oid varchar(36) )"]
             sqlite_cursor.execute(" ".join(sql_list))
         # 开始插入数据
@@ -565,6 +568,7 @@ class Host:
                         "last_modify_timestamp,",
                         "login_protocol,",
                         "first_auth_method,",
+                        "login_credential_oid,",
                         "custome_tag_config_scheme_oid ) values",
                         f"('{self.oid}',",
                         f"'{self.name}',",
@@ -576,6 +580,7 @@ class Host:
                         f"{self.last_modify_timestamp},"
                         f"{self.login_protocol},"
                         f"{self.first_auth_method},",
+                        f"'{self.login_credential_oid}',",
                         f"'{self.custome_tag_config_scheme_oid}' )"]
             sqlite_cursor.execute(" ".join(sql_list))
         else:  # ★★ 若查询到有此项记录，则更新此项记录 ★★
@@ -589,31 +594,12 @@ class Host:
                         f"last_modify_timestamp={self.last_modify_timestamp},"
                         f"login_protocol={self.login_protocol},"
                         f"first_auth_method={self.first_auth_method},",
+                        f"login_credential_oid='{self.login_credential_oid}',",
                         f"custome_tag_config_scheme_oid='{self.custome_tag_config_scheme_oid}'",
                         "where",
                         f"oid='{self.oid}'"]
             sqlite_cursor.execute(" ".join(sql_list))
-        # ★查询是否有名为'tb_host_credential_oid_list'的表★
-        sql = 'SELECT * FROM sqlite_master WHERE \
-                "type"="table" and "tbl_name"="tb_host_include_credential_oid_list"'
-        sqlite_cursor.execute(sql)
-        result = sqlite_cursor.fetchall()  # fetchall()从结果中获取所有记录，返回一个list，元素为<tuple>（即查询到的结果）
-        print("exist tables: ", result)
-        if len(result) == 0:  # 若未查询到有此表，则创建此表
-            sql = "create table tb_host_include_credential_oid_list  (host_oid varchar(36), credential_oid varchar(36) );"
-            sqlite_cursor.execute(sql)
-        # 开始插入数据
-        sql = f"delete from tb_host_include_credential_oid_list where host_oid='{self.oid}'"
-        sqlite_cursor.execute(sql)  # ★先清空Host所有的凭据，再重新插入（既可用于新建，又可用于更新）
-        for cred_oid in self.credential_oid_list:
-            sql = f"select * from tb_host_include_credential_oid_list where host_oid='{self.oid}' and credential_oid='{cred_oid}'"
-            sqlite_cursor.execute(sql)
-            if len(sqlite_cursor.fetchall()) == 0:  # 若未查询到有此项记录，则创建此项记录
-                sql_list = [f"insert into tb_host_include_credential_oid_list (host_oid,",
-                            "credential_oid ) values ",
-                            f"('{self.oid}',",
-                            f"'{cred_oid}' )"]
-                sqlite_cursor.execute(" ".join(sql_list))
+        # ★查询是否有名为'tb_host_credential_oid_list'的表★  这个废弃了
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
@@ -1387,7 +1373,8 @@ class LaunchInspectionJob:
                     host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_PART_COMPLETED
                     break
             if len(ssh_operator.output_list) != 0:
-                # 如果ssh_operator.run_invoke_shell() 有输出信息，则判断是否需要输出信息保存到文件
+                # 如果ssh_operator.run_invoke_shell() 有输出信息，则判断是否需要输出信息保存到文件，
+                # 这里是一个巡检代码块的输出单独保存在一个文件里，如果一台主机有多个巡检代码块，则可能会产生多个文件，得看文件名是如何命令的
                 if self.inspection_template.save_output_to_file == COF_YES:
                     self.save_ssh_operator_output_to_file(ssh_operator.output_list, host_obj,
                                                           self.inspection_template.output_file_name_style)
@@ -1411,14 +1398,7 @@ class LaunchInspectionJob:
         host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_STARTED
         host_job_status_obj.start_time = time.time()  # 开始计时
         if host_obj.login_protocol == LOGIN_PROTOCOL_SSH:
-            try:
-                cred = self.find_ssh_credential(host_obj)  # 查找可用的登录凭据，这里会登录一次目标主机
-            except Exception as e:
-                print("LaunchInspectionJob.operator_job_thread: 查找可用的凭据错误，", e)
-                host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_FAILED  # 无可用凭据，就退出巡检线程了，宣告失败
-                host_job_status_obj.find_credential_status = FIND_CREDENTIAL_STATUS_FAILED
-                host_job_status_obj.end_time = time.time()  # 结束计时
-                return
+            cred = self.global_info.get_credential_by_oid(host_obj.login_credential_oid)
             if cred is None:
                 print("LaunchInspectionJob.operator_job_thread: Credential is None, Could not find correct credential")
                 host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_FAILED  # 无可用凭据，就退出巡检线程了，宣告失败
@@ -1510,7 +1490,7 @@ class LaunchInspectionJob:
             file_name = os.path.join(timestamp_date, file_namex)
         else:
             file_name = host.name + '.log'
-        # 一台主机的所有巡检命令输出信息都保存在一个文件里
+        # 一台主机的 一个巡检代码块 里的所有巡检命令输出信息都保存在一个文件里，如果有多个巡检代码且文件名相同，则会保存在同一个文件里
         with open(file_name, 'a', encoding='utf8') as file_obj:  # 追加，不存在则新建
             for ssh_operator_output_obj in ssh_operator_output_obj_list:
                 if ssh_operator_output_obj.code_exec_method == CODE_EXEC_METHOD_INVOKE_SHELL:
@@ -2729,13 +2709,14 @@ class GlobalInfo:
                        last_modify_timestamp=float(obj_info_tuple[7]),
                        login_protocol=int(obj_info_tuple[8]),
                        first_auth_method=int(obj_info_tuple[9]),
-                       custome_tag_config_scheme_oid=obj_info_tuple[10],
+                       login_credential_oid=obj_info_tuple[10],
+                       custome_tag_config_scheme_oid=obj_info_tuple[11],
                        global_info=self)
             obj_list.append(obj)
         sqlite_cursor.close()
         sqlite_conn.commit()  # 保存，提交
         sqlite_conn.close()  # 关闭数据库连接
-        self.load_host_include_credential_from_dbfile(obj_list)
+        # self.load_host_include_credential_from_dbfile(obj_list)  # 这个废弃了
         return obj_list
 
     def load_host_include_credential_from_dbfile(self, host_list):
@@ -3536,14 +3517,14 @@ class GlobalInfo:
         if len(result) != 0:  # 若查询到有此表，才删除相应数据
             sql = f"delete from tb_host where oid='{obj.oid}'"
             sqlite_cursor.execute(sql)
-        # ★查询是否有名为'tb_host_include_credential_oid_list'的表★
-        sql = 'SELECT * FROM sqlite_master WHERE \
-                    "type"="table" and "tbl_name"="tb_host_include_credential_oid_list"'
-        sqlite_cursor.execute(sql)
-        result = sqlite_cursor.fetchall()
-        if len(result) != 0:  # 若查询到有此表，才删除相应数据
-            sql = f"delete from tb_host_include_credential_oid_list where host_oid='{obj.oid}'"
-            sqlite_cursor.execute(sql)
+        # ★查询是否有名为'tb_host_include_credential_oid_list'的表★ 已废弃
+        # sql = 'SELECT * FROM sqlite_master WHERE \
+        #             "type"="table" and "tbl_name"="tb_host_include_credential_oid_list"'
+        # sqlite_cursor.execute(sql)
+        # result = sqlite_cursor.fetchall()
+        # if len(result) != 0:  # 若查询到有此表，才删除相应数据
+        #     sql = f"delete from tb_host_include_credential_oid_list where host_oid='{obj.oid}'"
+        #     sqlite_cursor.execute(sql)
         sqlite_cursor.close()
         sqlite_conn.commit()
         sqlite_conn.close()
@@ -4644,7 +4625,7 @@ class CreateResourceInFrame:
         frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
-        self.resource_info_dict["listbox_credential"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
+        self.resource_info_dict["listbox_credential"] = tkinter.Listbox(frame, selectmode="single", bg="white", bd=2, cursor="arrow",
                                                                         yscrollcommand=list_scrollbar.set, selectbackground='pink',
                                                                         selectforeground='black', exportselection=False,
                                                                         selectborderwidth=2, activestyle='dotbox', height=6)
@@ -5924,14 +5905,13 @@ class ViewResourceInFrame:
         host_last_modify_timestamp = "last_modify_time".ljust(self.view_width, " ") + ": " \
                                      + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_modify_timestamp)) + "\n"
         obj_info_text.insert(tkinter.END, host_last_modify_timestamp)
-        # ★host-凭据列表
-        obj_info_text.insert(tkinter.END, "\n" + "凭据列表".ljust(self.view_width - 4, " ") + ": " + "\n")
-        for cred_oid in self.resource_obj.credential_oid_list:  # ★凡是有根据oid查找资源对象的，都要处理None的情况
-            cred_obj = self.global_info.get_credential_by_oid(cred_oid)
-            if cred_obj is not None:
-                obj_info_text.insert(tkinter.END, "".ljust(self.view_width + 2, " ") + cred_obj.name + "\n")
-            else:
-                obj_info_text.insert(tkinter.END, "".ljust(self.view_width + 2, " ") + cred_oid + " Unknown!\n")
+        # ★host-login_credential_oid
+        obj_info_text.insert(tkinter.END, "\n" + "登录凭据".ljust(self.view_width - 4, " ") + ": ")
+        cred_obj = self.global_info.get_credential_by_oid(self.resource_obj.login_credential_oid)
+        if cred_obj is not None:
+            obj_info_text.insert(tkinter.END, cred_obj.name)
+        else:
+            obj_info_text.insert(tkinter.END, self.resource_obj.login_credential_oid + " Unknown!")
         # 显示info Text文本框
         obj_info_text.pack()
         # ★★添加“返回主机列表”按钮★★
@@ -6743,16 +6723,16 @@ class EditResourceInFrame:
         frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
         list_scrollbar = tkinter.Scrollbar(frame)  # 创建窗口滚动条
         list_scrollbar.pack(side="right", fill="y")  # 设置窗口滚动条位置
-        self.resource_info_dict["listbox_credential"] = tkinter.Listbox(frame, selectmode="multiple", bg="white", bd=2, cursor="arrow",
+        self.resource_info_dict["listbox_credential"] = tkinter.Listbox(frame, selectmode="single", bg="white", bd=2, cursor="arrow",
                                                                         yscrollcommand=list_scrollbar.set, selectbackground='pink',
                                                                         selectforeground='black', exportselection=False,
                                                                         selectborderwidth=2, activestyle='dotbox', height=6)
         for cred in self.global_info.credential_obj_list:
             self.resource_info_dict["listbox_credential"].insert(tkinter.END, cred.name)  # 添加item选项
-        for cred_oid in self.resource_obj.credential_oid_list:  # 设置已选择项★★★
-            cred_index = self.global_info.get_credential_obj_index_of_list_by_oid(cred_oid)
-            if cred_index is not None:
-                self.resource_info_dict["listbox_credential"].select_set(cred_index)
+        # 设置已选择项★★★
+        cred_index = self.global_info.get_credential_obj_index_of_list_by_oid(self.resource_obj.login_credential_oid)
+        if cred_index is not None:
+            self.resource_info_dict["listbox_credential"].select_set(cred_index)
         self.resource_info_dict["listbox_credential"].pack(side="left")
         list_scrollbar.config(command=self.resource_info_dict["listbox_credential"].yview)
         frame.grid(row=9, column=1, padx=self.padx, pady=self.pady)
@@ -7692,8 +7672,8 @@ class UpdateResourceInFrame:
             host_custom_scheme_index = self.resource_info_dict["combobox_custom_scheme"].current()
         host_custom_scheme = self.global_info.custome_tag_config_scheme_obj_list[host_custom_scheme_index]
         # 先更新host的credential_oid_list
-        self.resource_obj.credential_oid_list = []
         for selected_credential_index in self.resource_info_dict["listbox_credential"].curselection():  # host对象添加凭据列表
+            # 最多只加1个凭据，如果未选择任何凭据，则不添加
             self.resource_obj.add_credential(self.global_info.credential_obj_list[selected_credential_index])
         # 更新-host-对象本身
         if host_name == '':
@@ -8100,6 +8080,7 @@ class SaveResourceInMainWindow:
                         custome_tag_config_scheme_oid=host_custom_scheme.oid,
                         global_info=self.global_info)
             for selected_credential_index in self.resource_info_dict["listbox_credential"].curselection():  # host对象添加凭据列表
+                # 最多只加1个凭据，如果未选择任何凭据，则不添加
                 host.add_credential(self.global_info.credential_obj_list[selected_credential_index])
             host.save()  # 保存资源对象
             self.global_info.host_obj_list.append(host)
@@ -8417,7 +8398,7 @@ class LoadResourceInFrame:
                     # 创建Host对象
                     host_obj = Host(name=name_strip, description=description, address=address, port=port, login_protocol=login_protocol,
                                     first_auth_method=first_auth_method, project_oid=project_oid, global_info=self.global_info)
-                    host_obj.add_credential(new_credential_obj)
+                    host_obj.login_credential_oid = new_credential_obj.oid
                     self.host_obj_list.append(host_obj)
                     line_index += 1
                 # for index, row in enumerate(sheet1.iter_rows(values_only=True), 2):
@@ -8534,7 +8515,6 @@ class StartInspectionTemplateInFrame:
         if result:
             print(f"StartInspectionTemplateInFrame.start: 开始启动巡检作业: {self.inspection_template_obj.name}")
             inspect_job_name = "job@" + self.inspection_template_obj.name + "@" + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-            # template_project_name=self.global_info.get_project_by_oid(self.inspection_template_obj.project_oid)
             self.current_inspection_job_obj = LaunchInspectionJob(name=inspect_job_name,
                                                                   project_oid=self.inspection_template_obj.project_oid,
                                                                   inspection_template=self.inspection_template_obj,
@@ -10668,11 +10648,15 @@ class TerminalBackend:
         self.recv_vt100_output_data_thread = None
 
     def run(self):
-        cred = self.find_credential_by_login_protocol()
+        cred = self.global_info.get_credential_by_oid(self.host_obj.login_credential_oid)
         if cred is None:
             self.vt100_receive_byte_queue.put("TerminalBackend.run 未找到可用凭据，退出TerminalBackend.run()函数".encode("utf8"))
             return
-        self.create_invoke_shell(cred)
+        try:
+            self.create_invoke_shell(cred)
+        except paramiko.ssh_exception.AuthenticationException as err:
+            print("TerminalBackend.run: capture a exception: ", err)
+            return
         self.recv_vt100_output_data_thread = threading.Thread(target=self.recv_vt100_output_data)
         self.recv_vt100_output_data_thread.start()
         self.send_user_input_data_thread = threading.Thread(target=self.send_user_input_data)
@@ -11348,6 +11332,7 @@ class CustomTagConfigSetMatchObjectRetItem:
 
 if __name__ == '__main__':
     # 创建全局信息类，用于存储所有资源类的对象，（若未指定数据库文件名称，则默认为"cofable_default.db"）
+    # 本程序终端窗口使用字体为 JetBrainsMono开源等宽字体，下载地址： https://www.jetbrains.com/lp/mono/
     builtin_font_file_path1 = os.path.join(os.path.dirname(__file__), "builtin_resource", "JetBrainsMono-Regular.ttf")
     global_info_obj = GlobalInfo(builtin_font_file_path=builtin_font_file_path1)
     print("当前程序路径:", __file__)
