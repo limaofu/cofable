@@ -4195,6 +4195,7 @@ class MainWindow:
                                                             button_delete_resource=button_delete_resource,
                                                             button_search_resource=button_search_resource)
             button_export_resource.configure(command=lambda: self.export_resource_to_xlsx(batch_resource_operator, resource_type))
+            button_delete_resource.configure(command=lambda: self.batch_delete_resource(batch_resource_operator, resource_type))
             # 在 frame_bottom_of_nav_frame_r_page 中列出资源列表
             self.list_resource_of_nav_frame_r_bottom_page(resource_type, batch_resource_operator)
         else:
@@ -4204,6 +4205,54 @@ class MainWindow:
         export_resource_to_xlsx_obj = ExportResourceToXlsx(batch_resource_operator=batch_resource_operator,
                                                            resource_type=resource_type, global_info=self.global_info)
         export_resource_to_xlsx_obj.export_resource_to_xlsx_file()
+
+    def batch_delete_resource(self, batch_resource_operator, resource_type):
+        result = messagebox.askyesno("批量删除资源", f"是否批量删除选中的资源对象？")
+        # messagebox.askyesno()参数1为弹窗标题，参数2为弹窗内容，有2个按钮（是，否），点击"是"时返回True
+        if result:
+            obj_index = 0
+            del_resource_obj_list = []
+            for var_selected in batch_resource_operator.var_selected_list:
+                if var_selected.get():  # 如果这个资源被选中，则删除这个资源对象，未选择的资源对象不删除
+                    if resource_type == RESOURCE_TYPE_PROJECT:
+                        del_resource_obj_list.append(self.global_info.project_obj_list[obj_index])
+                    elif resource_type == RESOURCE_TYPE_CREDENTIAL:
+                        del_resource_obj_list.append(self.global_info.credential_obj_list[obj_index])
+                    elif resource_type == RESOURCE_TYPE_HOST:
+                        del_resource_obj_list.append(self.global_info.host_obj_list[obj_index])
+                    elif resource_type == RESOURCE_TYPE_HOST_GROUP:
+                        del_resource_obj_list.append(self.global_info.host_group_obj_list[obj_index])
+                    elif resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+                        del_resource_obj_list.append(self.global_info.inspection_code_block_obj_list[obj_index])
+                    elif resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
+                        del_resource_obj_list.append(self.global_info.inspection_template_obj_list[obj_index])
+                    elif resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
+                        del_resource_obj_list.append(self.global_info.custome_tag_config_scheme_obj_list[obj_index])
+                    else:
+                        print("MainWindow.batch_delete_resource: unknown resource type")
+                        continue
+                obj_index += 1
+            for del_resource_obj in del_resource_obj_list:
+                if resource_type == RESOURCE_TYPE_PROJECT:
+                    self.global_info.delete_project_obj(del_resource_obj)
+                elif resource_type == RESOURCE_TYPE_CREDENTIAL:
+                    self.global_info.delete_credential_obj(del_resource_obj)
+                elif resource_type == RESOURCE_TYPE_HOST:
+                    self.global_info.delete_host_obj(del_resource_obj)
+                elif resource_type == RESOURCE_TYPE_HOST_GROUP:
+                    self.global_info.delete_host_group_obj(del_resource_obj)
+                elif resource_type == RESOURCE_TYPE_INSPECTION_CODE_BLOCK:
+                    self.global_info.delete_inspection_code_block_obj(del_resource_obj)
+                elif resource_type == RESOURCE_TYPE_INSPECTION_TEMPLATE:
+                    self.global_info.delete_inspection_template_obj(del_resource_obj)
+                elif resource_type == RESOURCE_TYPE_CUSTOM_SCHEME:
+                    self.global_info.delete_custome_tag_config_scheme_obj(del_resource_obj)
+                else:
+                    print("MainWindow.batch_delete_resource: unknown resource type")
+                    continue
+            self.global_info.main_window.nav_frame_r_resource_top_page_display(resource_type)
+        else:
+            print("MainWindow.batch_delete_resource: 用户取消了批量删除资源操作")
 
     def list_inspection_job_of_nav_frame_r_page(self):
         # 更新导航框架2
