@@ -4308,32 +4308,43 @@ class ExportResourceToXlsx:
                 workbook = openpyxl.Workbook()  # 创建一个工作簿对象
                 sheet1 = workbook.active  # 获取当前激活的工作表对象
                 sheet1.title = "导出-host-信息"
-                data_headline = ['name', 'description', 'address', 'port', 'login_protocol', 'first_auth_method',
+                data_headline = ['name', 'project', 'description', 'address', 'port', 'login_protocol', 'first_auth_method',
                                  'credential', 'username', 'password', 'private_key']
                 sheet1.append(data_headline)
                 obj_index = 0
                 for var_selected in self.batch_resource_operator.var_selected_list:
-                    if var_selected.get():
+                    if var_selected.get():  # 如果这个资源被选中，则导出这个资源的信息，未选择的资源对象不导出信息
                         resource_obj = self.global_info.host_obj_list[obj_index]
-                        if len(resource_obj.credential_oid_list) == 0:
+                        project_obj = self.global_info.get_project_by_oid(resource_obj.project_oid)
+                        if project_obj is not None:
+                            project_name = project_obj.name
+                        else:
+                            project_name = ""
+                        if resource_obj.login_protocol == LOGIN_PROTOCOL_SSH:
+                            login_protocol_name = "ssh"
+                        elif resource_obj.login_protocol == LOGIN_PROTOCOL_TELNET:
+                            login_protocol_name = "telnet"
+                        else:
+                            login_protocol_name = "ssh"
+                        if resource_obj.first_auth_method == FIRST_AUTH_METHOD_PRIKEY:
+                            first_auth_method_name = "priKey"
+                        elif resource_obj.first_auth_method == FIRST_AUTH_METHOD_PASSWORD:
+                            first_auth_method_name = "password"
+                        else:
+                            first_auth_method_name = "priKey"
+                        login_credential = self.global_info.get_credential_by_oid(resource_obj.login_credential_oid)
+                        if login_credential is not None:
+                            credential_name = login_credential.name
+                            credential_username = login_credential.username
+                            credential_password = login_credential.password
+                            credential_private_key = login_credential.private_key
+                        else:
                             credential_name = ""
                             credential_username = ""
                             credential_password = ""
                             credential_private_key = ""
-                        else:
-                            first_credential = self.global_info.get_credential_by_oid(resource_obj.credential_oid_list[0])
-                            if first_credential is not None:
-                                credential_name = first_credential.name
-                                credential_username = first_credential.username
-                                credential_password = first_credential.password
-                                credential_private_key = first_credential.private_key
-                            else:
-                                credential_name = ""
-                                credential_username = ""
-                                credential_password = ""
-                                credential_private_key = ""
-                        data_line = [resource_obj.name, resource_obj.description, resource_obj.address, resource_obj.port,
-                                     resource_obj.login_protocol, resource_obj.first_auth_method, credential_name,
+                        data_line = [resource_obj.name, project_name, resource_obj.description, resource_obj.address,
+                                     resource_obj.port, login_protocol_name, first_auth_method_name, credential_name,
                                      credential_username, credential_password, credential_private_key]
                         sheet1.append(data_line)
                     obj_index += 1
@@ -8350,6 +8361,9 @@ class LoadResourceInFrame:
                     else:
                         messagebox.showerror("Error", f"主机名称不能为空，第{line_index + 2}行")
                         return
+                    if self.global_info.is_host_name_existed(name):
+                        print(f"LoadResourceInFrame.open_resource_xlsx_file_host: 主机名 {name} 已被使用，第{line_index}行数据不导入")
+                        continue
                     project_name = sheet1.cell(row=line_index + 2, column=2).value
                     if project_name is not None:
                         project_name_strip = project_name.strip()
@@ -8377,18 +8391,33 @@ class LoadResourceInFrame:
                         first_auth_method = FIRST_AUTH_METHOD_PRIKEY
                     else:
                         first_auth_method = FIRST_AUTH_METHOD_PRIKEY
-                    credential_name = sheet1.cell(row=line_index + 2, column=8).value.strip()
+                    credential_name = sheet1.cell(row=line_index + 2, column=8).value
                     credential_obj = self.global_info.get_credential_by_name(credential_name)
                     if credential_obj is None:
                         # 根据凭据名称，找不到已创建的凭据，则需要根据提供的账号密码，产生一个新的凭据，凭据名称同这个credential_name
-                        if len(credential_name) == 0:
+                        if credential_name is None:
                             new_credential_obj_name = name_strip + "-[AUTO_GENERATED]"
                         else:
-                            new_credential_obj_name = credential_name
+                            if len(credential_name.strip()) == 0:
+                                new_credential_obj_name = name_strip + "-[AUTO_GENERATED]"
+                            else:
+                                new_credential_obj_name = credential_name.strip()
                         new_credential_obj_desription = f"根据导入的主机列表清单自动生成的凭据对象，导入主机名: {name_strip}"
-                        new_credential_obj_username = sheet1.cell(row=line_index + 2, column=9).value.strip()
-                        new_credential_obj_password = sheet1.cell(row=line_index + 2, column=10).value.strip()
-                        new_credential_obj_private_key = sheet1.cell(row=line_index + 2, column=11).value.strip()
+                        username = sheet1.cell(row=line_index + 2, column=9).value
+                        if username is None:
+                            new_credential_obj_username = ""
+                        else:
+                            new_credential_obj_username = username.strip()
+                        password = sheet1.cell(row=line_index + 2, column=10).value
+                        if password is None:
+                            new_credential_obj_password = ""
+                        else:
+                            new_credential_obj_password = password.strip()
+                        private_key = sheet1.cell(row=line_index + 2, column=11).value
+                        if private_key is None:
+                            new_credential_obj_private_key = ""
+                        else:
+                            new_credential_obj_private_key = private_key.strip()
                         new_credential_obj = Credential(name=new_credential_obj_name, description=new_credential_obj_desription,
                                                         username=new_credential_obj_username, password=new_credential_obj_password,
                                                         private_key=new_credential_obj_private_key, global_info=self.global_info)
@@ -8476,6 +8505,7 @@ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
         for host_obj in self.host_obj_list:
             host_obj.save()
             self.global_info.host_obj_list.append(host_obj)
+        self.global_info.main_window.nav_frame_r_resource_top_page_display(RESOURCE_TYPE_HOST)
 
     def save_host_group(self):
         print("LoadResourceInFrame.save_host_group: 暂不支持导入 host_group")
