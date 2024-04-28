@@ -5,7 +5,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-27
+# update: 2024-04-28
 
 """
 【开发日志】
@@ -1394,6 +1394,11 @@ class LaunchInspectionJob:
         """
         host_obj = self.global_info.get_host_by_oid(self.unduplicated_host_oid_list[host_index])
         host_job_status_obj = self.unduplicated_host_job_status_obj_list[host_index]
+        if host_obj is None:
+            host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_FAILED
+            host_job_status_obj.start_time = time.time()  # 开始计时
+            host_job_status_obj.end_time = time.time()  # 结束计时
+            return
         print(f"\nLaunchInspectionJob.operator_job_thread >>>>> 目标主机：{host_obj.name} 开始巡检 <<<<<")
         host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_STARTED
         host_job_status_obj.start_time = time.time()  # 开始计时
@@ -3741,10 +3746,10 @@ class MainWindow:
         self.global_info = global_info  # <GlobalInfo>对象
         self.current_project = current_project
         self.about_info_list = ["CofAble，可视化运维巡检工具，个人运维工具中的瑞士军刀",
-                                "版本:  v1.0 dev",
+                                "版本:  v1.0 pre",
                                 "本软件使用GPL-v3.0协议开源",
                                 "作者:  Cof-Lee（李茂福）",
-                                "更新时间: 2024-04-12"]
+                                "更新时间: 2024-04-28"]
         self.padx = 2
         self.pady = 2
         self.view_width = 20
@@ -4469,7 +4474,7 @@ class CreateResourceInFrame:
         label_create_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_project.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★project-名称
-        label_project_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目名称")
+        label_project_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目名称★")
         label_project_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_project_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
@@ -4492,7 +4497,7 @@ class CreateResourceInFrame:
         label_create_credential.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_credential.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★credential-名称
-        label_credential_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据名称")
+        label_credential_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据名称★")
         label_credential_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
@@ -4509,7 +4514,7 @@ class CreateResourceInFrame:
         entry_credential_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_credential_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★credential-所属项目
-        label_credential_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_credential_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目★")
         label_credential_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
@@ -4519,7 +4524,7 @@ class CreateResourceInFrame:
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★credential-凭据类型
-        label_credential_type = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据类型")
+        label_credential_type = tkinter.Label(self.top_frame_widget_dict["frame"], text="凭据类型★")
         label_credential_type.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_type.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         cred_type_name_list = ["ssh_password", "ssh_key", "telnet", "ftp", "registry", "git"]
@@ -4527,7 +4532,7 @@ class CreateResourceInFrame:
                                                                      state="readonly")
         self.resource_info_dict["combobox_cred_type"].grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # ★credential-用户名
-        label_credential_username = tkinter.Label(self.top_frame_widget_dict["frame"], text="username")
+        label_credential_username = tkinter.Label(self.top_frame_widget_dict["frame"], text="username★")
         label_credential_username.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_credential_username.grid(row=5, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_username"] = tkinter.StringVar()
@@ -4605,7 +4610,7 @@ class CreateResourceInFrame:
         label_create_host.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_host.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★host-名称
-        label_host_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机名称")
+        label_host_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机名称★")
         label_host_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
@@ -4622,7 +4627,7 @@ class CreateResourceInFrame:
         entry_host_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★host-所属项目
-        label_host_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_host_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目★")
         label_host_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
@@ -4632,7 +4637,7 @@ class CreateResourceInFrame:
                                                                    state="readonly")
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★host-address
-        label_host_address = tkinter.Label(self.top_frame_widget_dict["frame"], text="address")
+        label_host_address = tkinter.Label(self.top_frame_widget_dict["frame"], text="address★")
         label_host_address.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_address.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_address"] = tkinter.StringVar()
@@ -4650,7 +4655,7 @@ class CreateResourceInFrame:
         entry_host_port.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_port.grid(row=5, column=1, padx=self.padx, pady=self.pady)
         # ★host-login_protocol
-        label_host_login_protocol = tkinter.Label(self.top_frame_widget_dict["frame"], text="远程登录类型")
+        label_host_login_protocol = tkinter.Label(self.top_frame_widget_dict["frame"], text="远程登录类型★")
         label_host_login_protocol.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_login_protocol.grid(row=6, column=0, padx=self.padx, pady=self.pady)
         login_protocol_name_list = ["ssh", "telnet"]
@@ -4701,7 +4706,7 @@ class CreateResourceInFrame:
         label_create_host_group.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_host_group.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★host_group-名称
-        label_host_group_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机组名称")
+        label_host_group_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="主机组名称★")
         label_host_group_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
@@ -4718,7 +4723,7 @@ class CreateResourceInFrame:
         entry_host_group_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_host_group_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★host_group-所属项目
-        label_host_group_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_host_group_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目★")
         label_host_group_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_host_group_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
@@ -4766,7 +4771,7 @@ class CreateResourceInFrame:
         label_create_inspection_code_block.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_inspection_code_block.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★inspection_code_block-名称
-        label_inspection_code_block_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码块名称")
+        label_inspection_code_block_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码块名称★")
         label_inspection_code_block_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
@@ -4784,7 +4789,7 @@ class CreateResourceInFrame:
         entry_inspection_code_block_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_code_block_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_code_block-所属项目
-        label_inspection_code_block_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_inspection_code_block_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目★")
         label_inspection_code_block_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
@@ -4795,7 +4800,7 @@ class CreateResourceInFrame:
         self.resource_info_dict["combobox_project"].grid(row=3, column=1, padx=self.padx, pady=self.pady)
         # ★★★添加巡检代码内容并在treeview里显示★★★
         self.resource_info_dict["one_line_code_obj_list"] = []
-        label_inspection_code_block_code_content = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码内容:")
+        label_inspection_code_block_code_content = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码内容★")
         label_inspection_code_block_code_content.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_code_content.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         button_add_code_list = tkinter.Button(self.top_frame_widget_dict["frame"], text="添加",
@@ -4904,7 +4909,7 @@ class CreateResourceInFrame:
         entry_code_index.insert(0, str(one_line_code_obj.code_index))  # 显示初始值，index不可编辑★
         entry_code_index.grid(row=0, column=1, padx=self.padx, pady=self.pady)
         # OneLineCode-code_content
-        label_code_content = tkinter.Label(pop_window, text="巡检代码内容")
+        label_code_content = tkinter.Label(pop_window, text="巡检代码内容★")
         label_code_content.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         one_line_code_info_dict["sv_code_content"] = tkinter.StringVar()
         entry_code_content = tkinter.Entry(pop_window, textvariable=one_line_code_info_dict["sv_code_content"])
@@ -5010,7 +5015,7 @@ class CreateResourceInFrame:
         label_create_inspection_template.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_inspection_template.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★inspection_template-名称
-        label_inspection_template_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检模板名称")
+        label_inspection_template_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检模板名称★")
         label_inspection_template_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
@@ -5028,7 +5033,7 @@ class CreateResourceInFrame:
         entry_inspection_template_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_inspection_template_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★inspection_template-所属项目
-        label_inspection_template_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_inspection_template_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目★")
         label_inspection_template_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_template_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
@@ -5125,7 +5130,7 @@ class CreateResourceInFrame:
         list_scrollbar.config(command=self.resource_info_dict["listbox_host"].yview)
         frame.grid(row=11, column=1, padx=self.padx, pady=self.pady)
         # ★添加-巡检代码块列表
-        label_inspection_code_block_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码块列表")
+        label_inspection_code_block_list = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检代码块列表★")
         label_inspection_code_block_list.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_inspection_code_block_list.grid(row=12, column=0, padx=self.padx, pady=self.pady)
         frame = tkinter.Frame(self.top_frame_widget_dict["frame"])
@@ -5146,11 +5151,11 @@ class CreateResourceInFrame:
     def create_custom_tag_config_scheme(self):
         self.resource_info_dict["pop_window"] = self.top_frame_widget_dict["pop_window"]
         # ★创建-custom_scheme
-        label_create_custom_scheme = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 创建巡检模板 ★★")
+        label_create_custom_scheme = tkinter.Label(self.top_frame_widget_dict["frame"], text="★★ 创建配色方案 ★★")
         label_create_custom_scheme.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_create_custom_scheme.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         # ★custom_scheme-名称
-        label_custom_scheme_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="巡检模板名称")
+        label_custom_scheme_name = tkinter.Label(self.top_frame_widget_dict["frame"], text="配色方案名称★")
         label_custom_scheme_name.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_custom_scheme_name.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.resource_info_dict["sv_name"] = tkinter.StringVar()
@@ -5168,7 +5173,7 @@ class CreateResourceInFrame:
         entry_custom_scheme_description.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         entry_custom_scheme_description.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         # ★custom_scheme-所属项目
-        label_custom_scheme_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目")
+        label_custom_scheme_project = tkinter.Label(self.top_frame_widget_dict["frame"], text="项目★")
         label_custom_scheme_project.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         label_custom_scheme_project.grid(row=3, column=0, padx=self.padx, pady=self.pady)
         project_obj_name_list = []
@@ -8734,11 +8739,12 @@ class StartInspectionTemplateInFrame:
                 rate_or_progress = 0.0
             else:
                 rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
-            inspection_host_treeview.insert("", index, values=(
-                index, host_obj.name,
-                status_name_list[host_job_status_obj.job_status],
-                "{:.2%}".format(rate_or_progress),
-                time_usage_2))
+            if host_obj is None:
+                inspection_host_treeview.insert("", index, values=(index, "Unknown!", status_name_list[host_job_status_obj.job_status],
+                                                                   "{:.2%}".format(rate_or_progress), time_usage_2))
+            else:
+                inspection_host_treeview.insert("", index, values=(index, host_obj.name, status_name_list[host_job_status_obj.job_status],
+                                                                   "{:.2%}".format(rate_or_progress), time_usage_2))
             index += 1
         inspection_host_treeview.grid(row=6, column=0, columnspan=2, padx=self.padx, pady=self.pady)
         inspection_host_treeview.bind("<<TreeviewSelect>>", lambda event: self.view_inspection_host_item(event, inspection_host_treeview))
@@ -8767,11 +8773,12 @@ class StartInspectionTemplateInFrame:
                 rate_or_progress = 0.0
             else:
                 rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
-            inspection_host_treeview.insert("", index, values=(
-                index, host_obj.name,
-                status_name_list[host_job_status_obj.job_status],
-                "{:.2%}".format(rate_or_progress),
-                time_usage_2))
+            if host_obj is None:
+                inspection_host_treeview.insert("", index, values=(index, "Unknown!", status_name_list[host_job_status_obj.job_status],
+                                                                   "{:.2%}".format(rate_or_progress), time_usage_2))
+            else:
+                inspection_host_treeview.insert("", index, values=(index, host_obj.name, status_name_list[host_job_status_obj.job_status],
+                                                                   "{:.2%}".format(rate_or_progress), time_usage_2))
             index += 1
         # 只有巡检作业未完成时才刷新主机巡检作业状态，完成（包含失败）都不再去更新主机状态
         if self.current_inspection_job_obj.job_state == INSPECTION_JOB_EXEC_STATE_UNKNOWN:
@@ -9140,11 +9147,12 @@ class ViewInspectionJobInFrame:
                 rate_or_progress = 0.0
             else:
                 rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
-            inspection_host_treeview.insert("", index, values=(
-                index, host_obj.name,
-                status_name_list[host_job_status_obj.job_status],
-                "{:.2%}".format(rate_or_progress),
-                time_usage_2))
+            if host_obj is None:
+                inspection_host_treeview.insert("", index, values=(index, "Unknown!", status_name_list[host_job_status_obj.job_status],
+                                                                   "{:.2%}".format(rate_or_progress), time_usage_2))
+            else:
+                inspection_host_treeview.insert("", index, values=(index, host_obj.name, status_name_list[host_job_status_obj.job_status],
+                                                                   "{:.2%}".format(rate_or_progress), time_usage_2))
             index += 1
         inspection_host_treeview.grid(row=6, column=0, columnspan=2, padx=self.padx, pady=self.pady)
         inspection_host_treeview.bind("<<TreeviewSelect>>", lambda event: self.view_inspection_host_item(event, inspection_host_treeview))
@@ -9172,11 +9180,12 @@ class ViewInspectionJobInFrame:
                 rate_or_progress = 0.0
             else:
                 rate_or_progress = host_job_status_obj.current_exec_code_num / host_job_status_obj.sum_of_code_lines
-            inspection_host_treeview.insert("", index, values=(
-                index, host_obj.name,
-                status_name_list[host_job_status_obj.job_status],
-                "{:.2%}".format(rate_or_progress),
-                time_usage_2))
+            if host_obj is None:
+                inspection_host_treeview.insert("", index, values=(index, "Unknown!", status_name_list[host_job_status_obj.job_status],
+                                                                   "{:.2%}".format(rate_or_progress), time_usage_2))
+            else:
+                inspection_host_treeview.insert("", index, values=(index, host_obj.name, status_name_list[host_job_status_obj.job_status],
+                                                                   "{:.2%}".format(rate_or_progress), time_usage_2))
             index += 1
         # 只有巡检作业未完成时才刷新主机巡检作业状态，完成（包含失败）都不再去更新主机状态
         if self.inspection_job_record_obj.job_state == INSPECTION_JOB_EXEC_STATE_UNKNOWN:
