@@ -2,10 +2,11 @@
 # coding=utf-8
 # module name: cofable
 # external_dependencies: paramiko, pyglet, pyperclip, openpyxl, schedule
+# local_dependencies: cofnet.py
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-28
+# update: 2024-04-30
 
 """
 【开发日志】
@@ -106,6 +107,9 @@ import pyperclip
 import openpyxl
 
 # import schedule
+
+# local dependencies:
+import cofnet
 
 # Global Constant:
 COF_TRUE = 1
@@ -2216,6 +2220,7 @@ class GlobalInfo:
         self.main_window = None  # 程序的主窗口，全局只有一个主窗口对象
         self.division_terminal_window = None  # 主机的terminal终端子窗口
         self.multi_terminal_window = None  # 主机组的terminal终端子窗口，终端窗口组
+        self.ip_calculator_tool_window = None  # ip计算器工具的子窗口
         self.font_size_map_list_jetbrains_mono = [(8, 7, 14),
                                                   (9, 7, 16),
                                                   (10, 8, 17),
@@ -2322,6 +2327,14 @@ class GlobalInfo:
 
     def set_sqlite3_dbfile_name(self, file_name):
         self.sqlite3_dbfile_name = file_name
+
+    def show_ip_calculator_tool_window(self):
+        # 如果还未创建IpCalculator对象，则先创建
+        if self.ip_calculator_tool_window is None:
+            self.ip_calculator_tool_window = IpCalculatorTool(global_info=self)
+            self.ip_calculator_tool_window.show()
+        else:
+            self.ip_calculator_tool_window.show()
 
     def open_session_in_division_terminal_window(self, host_oid):
         host_obj = self.get_host_by_oid(host_oid)
@@ -3720,6 +3733,210 @@ class GlobalInfo:
         self.custome_tag_config_scheme_obj_list.remove(obj)
 
 
+class IpCalculatorTool:
+    def __init__(self, global_info=None):
+        self.global_info = global_info
+        self.pop_window = None  # IpCalculatorTool 的主窗口，全局只有一个，在 self.create_init_top_level_window()创建
+        self.screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        self.screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
+        self.pop_win_width = 600
+        self.pop_win_height = 400
+        self.font_family = "JetBrains Mono"  # 程序自带内置字体
+        self.font_name = ''  # <str>
+        self.font_size = 12  # <int>
+        self.text_font = None
+        self.padx = 2  # <int>
+        self.pady = 2  # <int>
+        self.scrollbar_width = 25
+        self.widget_dict = {}  # 存放pop_window上的所有控件
+        self.create_init_top_level_window()
+
+    def create_init_top_level_window(self):
+        # ★★创建IpCalculatorTool窗口★★
+        self.pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)
+        self.pop_window.title("ip计算器-CofAble工具")
+        win_pos_1 = f"{self.pop_win_width}x{self.pop_win_height}+"
+        win_pos_2 = f"{self.screen_width // 2 - int(self.pop_win_width // 2)}+{self.screen_height // 2 - self.pop_win_height // 2}"
+        self.pop_window.geometry(win_pos_1 + win_pos_2)  # 设置子窗口大小及位置，居中
+        # self.global_info.main_window.window_obj.attributes("-disabled", 1)  # 使主窗口关闭响应，无法点击它
+        self.pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
+        # 添加控件
+        self.text_font = font.Font(size=self.font_size, family=self.font_family)
+        label_input_ip = tkinter.Label(self.pop_window, text="输入ip信息★:")  # ip信息为【必填】
+        label_input_ip.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        self.widget_dict["sv_input_ip"] = tkinter.StringVar()
+        entry_input_ip = tkinter.Entry(self.pop_window, textvariable=self.widget_dict["sv_input_ip"], width=48, bg="#e2deff")
+        entry_input_ip.grid(row=0, column=1, columnspan=2, padx=self.padx, pady=self.pady)
+        label_netmask_int = tkinter.Label(self.pop_window, text="掩码位数:")  # 掩码位数为【选填】，在点击“计算”按钮后，会自动调到匹配值
+        label_netmask_int.grid(row=1, column=0, padx=self.padx, pady=self.pady)
+        self.widget_dict["sv_netmask_int"] = tkinter.StringVar()
+        spinbox_netmask_int = tkinter.Spinbox(self.pop_window, from_=0, to=32, increment=1, textvariable=self.widget_dict["sv_netmask_int"],
+                                              width=3, command=self.set_netmask_scale_on_spinbox_change)
+        spinbox_netmask_int.grid(row=1, column=1, padx=self.padx, pady=self.pady)
+        self.widget_dict["netmask_scale"] = tkinter.Scale(self.pop_window, from_=0, to=32, resolution=1, orient="horizontal",
+                                                          showvalue=False, length=200, sliderlength=50)
+        self.widget_dict["netmask_scale"].configure(command=self.set_sv_netmask_int)
+        self.widget_dict["netmask_scale"].grid(row=1, column=2, padx=self.padx, pady=self.pady)
+        button_calculate = tkinter.Button(self.pop_window, text="计算", command=self.calculate)
+        button_calculate.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        button_clear = tkinter.Button(self.pop_window, text="清空", command=self.calculate)
+        button_clear.grid(row=2, column=2, padx=self.padx, pady=self.pady)
+        self.widget_dict["text_ip_base_info"] = tkinter.Text(self.pop_window, width=56, height=10,
+                                                             font=self.text_font, bg="black", fg="white")
+        self.widget_dict["text_ip_base_info"].grid(row=3, column=0, columnspan=3, padx=self.padx, pady=self.pady)
+        button_exit = tkinter.Button(self.pop_window, text="退出", command=self.on_closing_terminal_pop_window)
+        button_exit.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        # 设置Text的前景色tag_config
+        self.widget_dict["text_ip_base_info"].tag_config("ip_address_fg", foreground="#deef5a")
+        self.widget_dict["text_ip_base_info"].tag_config("maskint_fg", foreground="green")
+        self.widget_dict["text_ip_base_info"].tag_config("maskbyte_fg", foreground="#0d64c0")
+        self.widget_dict["text_ip_base_info"].tag_config("hostseg_fg", foreground="pink")
+
+    def set_sv_netmask_int(self, netmask_int: int):
+        # print(type(netmask_int))  # <class 'str'>
+        self.widget_dict["sv_netmask_int"].set(netmask_int)
+        self.calculate(maskint=str(netmask_int))
+
+    def set_netmask_scale_on_spinbox_change(self):
+        netmask_int_str = self.widget_dict["sv_netmask_int"].get()
+        self.widget_dict["netmask_scale"].set(int(netmask_int_str))
+        self.calculate(maskint=netmask_int_str)
+
+    def calculate(self, maskint=None):
+        # maskint如果要赋值，需要赋str类型的值
+        input_ip_str = self.widget_dict["sv_input_ip"].get().strip()
+        if cofnet.is_ip_addr(input_ip_str):  # 输入信息为 纯ip，例如 "10.99.1.3"
+            self.calculate_ip(input_ip_str, maskint=maskint)
+            return
+        if cofnet.is_ip_maskint_addr(input_ip_str):  # 输入信息为 ip/掩码位数，例如 "10.99.1.3/24"
+            self.calculate_ip_maskint(input_ip_str, maskint=maskint)
+            return
+        if cofnet.is_ip_range(input_ip_str):  # 输入信息为 ip-range，例如 "10.99.1.33-55"
+            self.calculate_ip_range(input_ip_str)
+            return
+        if cofnet.is_ip_range_2(input_ip_str):  # 输入信息为 ip-range，例如 "10.99.1.33-10.99.1.55"
+            self.calculate_ip_range2(input_ip_str)
+            return
+        if cofnet.is_cidr(input_ip_str):  # 输入信息为 cidr，例如 "10.99.2.3/24"
+            self.calculate_cidr(input_ip_str)
+            return
+        print(f"您输入的ip地址信息格式不正确 {input_ip_str}")
+
+    def calculate_ip(self, input_ip_str: str, maskint=None):
+        """
+        输入信息为 纯ip，掩码位数
+        输入信息为 纯ip，子网掩码位数（可选）
+        maskint如果要赋值，需要赋str类型的值
+        """
+        if maskint is None:
+            new_maskint = "32"
+        else:
+            new_maskint = maskint
+        self.widget_dict["text_ip_base_info"].delete("1.0", tkinter.END)
+        ip_hex_address = cofnet.ip_to_hex_string(input_ip_str)
+        ip_address = f"ip地址: {input_ip_str}    十六进制表示: {ip_hex_address}\n"
+        ip_int = cofnet.ip_mask_to_int(input_ip_str)
+        ip_int_show = f"ip地址转为整数值: {ip_int}\n"
+        ip_binary_str = cofnet.ip_mask_to_binary_space(input_ip_str)
+        ip_binary_show = f"ip地址二进制表示: {ip_binary_str}\n"
+        maskbyte = cofnet.maskint_to_maskbyte(int(new_maskint))
+        netseg_hex_address = cofnet.ip_to_hex_string(maskbyte)
+        maskbyte_show = f"子网掩码: {maskbyte}    十六进制表示: {netseg_hex_address}\n"
+        ip_netseg = cofnet.get_netseg_byte(input_ip_str, new_maskint)
+        ip_hostseg = cofnet.get_hostseg_int(input_ip_str, new_maskint)
+        ip_netseg_info = f"ip地址对应网络号: {ip_netseg}/{new_maskint}\n"
+        ip_hostseg_info = f"主机号为本网段第 {ip_hostseg} 个ip（从0开始）\n"
+        # 将ip相关信息输出到Text控件中
+        self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_address)
+        start_index1 = "1.6"
+        end_index1 = "1." + str(6 + len(input_ip_str))
+        self.widget_dict["text_ip_base_info"].tag_add("ip_address_fg", start_index1, end_index1)
+        self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_int_show)
+        self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_binary_show)
+        new_maskint_with_space = cofnet.get_maskint_with_space(int(new_maskint))
+        start_index2 = "3.11"
+        end_index2 = "3." + str(11 + new_maskint_with_space)
+        self.widget_dict["text_ip_base_info"].tag_add("maskint_fg", start_index2, end_index2)
+        self.widget_dict["text_ip_base_info"].tag_add("hostseg_fg", end_index2, end_index2 + " lineend")
+        self.widget_dict["text_ip_base_info"].insert(tkinter.END, maskbyte_show)
+        start_index3 = "4.6"
+        end_index3 = "4." + str(6 + len(maskbyte))
+        self.widget_dict["text_ip_base_info"].tag_add("maskbyte_fg", start_index3, end_index3)
+        self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_netseg_info)
+        start_index4 = "5.11"
+        end_index4 = "5." + str(11 + len(ip_netseg))
+        start_index4_2 = "5." + str(12 + len(ip_netseg))
+        end_index4_2 = "5.end"
+        self.widget_dict["text_ip_base_info"].tag_add("maskint_fg", start_index4, end_index4)
+        self.widget_dict["text_ip_base_info"].tag_add("maskbyte_fg", start_index4_2, end_index4_2)
+        self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_hostseg_info)
+        start_index5 = "6.9"
+        end_index5 = "6." + str(9 + len(str(ip_hostseg)))
+        self.widget_dict["text_ip_base_info"].tag_add("hostseg_fg", start_index5, end_index5)
+        # 更新子网掩码滑块及spinbox的值
+        self.widget_dict["sv_netmask_int"].set(int(new_maskint))
+        self.widget_dict["netmask_scale"].set(int(new_maskint))
+
+    def calculate_ip_maskint(self, input_ip_maskint_str, maskint=None):
+        # 输入信息为 ip/掩码位数，例如 "10.99.1.3/24"
+        # maskint如果要赋值，需要赋str类型的值
+        self.widget_dict["text_ip_base_info"].delete("1.0", tkinter.END)
+        ip_maskint_seg_list = input_ip_maskint_str.split("/")
+        input_ip_str = ip_maskint_seg_list[0]
+        if maskint is None:
+            new_maskint = ip_maskint_seg_list[1]
+        else:
+            new_maskint = maskint
+        self.calculate_ip(input_ip_str, new_maskint)
+        # ip_hex_address = cofnet.ip_to_hex_string(input_ip_str)
+        # ip_address = f"ip地址: {input_ip_str}    十六进制表示: {ip_hex_address}\n"
+        # ip_int = cofnet.ip_mask_to_int(input_ip_str)
+        # ip_int_show = f"ip地址转为整数值: {ip_int}\n"
+        # ip_binary_str = cofnet.ip_mask_to_binary_space(input_ip_str)
+        # ip_binary_show = f"ip地址二进制表示: {ip_binary_str}\n"
+        # maskbyte = cofnet.maskint_to_maskbyte(maskint)
+        # maskbyte_show = f"子网掩码: {maskbyte}    掩码位数: {maskint}\n"
+        # ip_netseg = cofnet.get_netseg_byte(input_ip_str, ip_maskint_seg_list[1])
+        # ip_hostseg = cofnet.get_hostseg_int(input_ip_str, ip_maskint_seg_list[1])
+        # ip_netseg_hostseg_info = f"ip地址对应网络号: {ip_netseg}\n主机号为本网段第 {ip_hostseg} 个ip(从全0开始)\n"
+        # self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_address)
+        # self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_int_show)
+        # self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_binary_show)
+        # self.widget_dict["text_ip_base_info"].insert(tkinter.END, maskbyte_show)
+        # self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_netseg_hostseg_info)
+
+    def calculate_ip_range(self, input_ip_str):
+        # 输入信息为 ip-range，例如 "10.99.1.33-55"
+        # 需要计算ip默认所属类型，Class A,B,C,D
+        ip_address = ""
+        maskint = 32
+        maskbyte = "255.255.255.255"
+
+    def calculate_ip_range2(self, input_ip_str):
+        # 输入信息为 ip-range，例如 "10.99.1.33-10.99.1.55"
+        ip_address = ""
+        maskint = 32
+        maskbyte = "255.255.255.255"
+
+    def calculate_cidr(self, input_ip_str):
+        # 输入信息为 cidr，例如 "10.99.2.3/24"
+        ip_address = ""
+        maskint = 32
+        maskbyte = "255.255.255.255"
+
+    def on_closing_terminal_pop_window(self):
+        print("DivisionTerminalWindow.on_closing_terminal_pop_window: 本子窗口隐藏了，并未删除，可再次显示")
+        # self.pop_window.destroy()  # 关闭子窗口
+        self.pop_window.withdraw()  # 隐藏窗口
+        # self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+
+    def show(self):
+        self.pop_window.deiconify()  # 显示终端窗口，使隐藏的窗口再次显示出来
+
+
 class MainWindow:
     """
     CofAble主界面类，包含菜单栏及左右2个frame
@@ -3799,7 +4016,7 @@ class MainWindow:
         menu_file.add_command(label="打开数据库文件", command=self.click_menu_open_db_file_of_menu_bar_init)
         menu_settings.add_command(label="终端配色方案设置", command=self.click_menu_settings_scheme_of_menu_bar_init)
         menu_settings.add_command(label="vt100终端设置", command=self.click_menu_settings_vt100_of_menu_bar_init, background="#aaaaaa")
-        menu_tools.add_command(label="工具")
+        menu_tools.add_command(label="ip计算器", command=self.click_menu_ip_calculator_of_menu_bar_init)
         menu_help.add_command(label="About", command=self.click_menu_about_of_menu_bar_init)
         self.window_obj.config(menu=self.menu_bar)
 
@@ -3916,6 +4133,9 @@ class MainWindow:
         label.__setitem__('text', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
         # 继续调用回调函数更新label
         self.window_obj.after(1000, self.refresh_label_current_time, label)
+
+    def click_menu_ip_calculator_of_menu_bar_init(self):
+        self.global_info.show_ip_calculator_tool_window()
 
     def click_menu_about_of_menu_bar_init(self):
         messagebox.showinfo("About", "\n".join(self.about_info_list))
@@ -9409,8 +9629,8 @@ class DivisionTerminalWindow:
         self.terminal_frame = None
         self.terminal_tools_frame = None
         self.host_session_record_obj_list = []  # 元素为<HostSessionRecord>对象
-        self.create_init_top_level_window()
         self.scrollbar_width = 25
+        self.create_init_top_level_window()
 
     def create_init_top_level_window(self):
         # ★★创建DivisionTerminalWindow窗口★★
@@ -11206,7 +11426,7 @@ class CustomTagConfigScheme:
                         f"last_modify_timestamp={self.last_modify_timestamp}",
                         "where",
                         f"oid='{self.oid}'"]
-            print(" ".join(sql_list))
+            # print(" ".join(sql_list))
             sqlite_cursor.execute(" ".join(sql_list))
         # ★查询是否有名为'tb_custome_tag_config_scheme_include_match_object'的表★
         sql = 'SELECT * FROM sqlite_master WHERE \
