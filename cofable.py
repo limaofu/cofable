@@ -3740,7 +3740,7 @@ class IpCalculatorTool:
         self.screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
         self.screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
         self.pop_win_width = 600
-        self.pop_win_height = 400
+        self.pop_win_height = 480
         self.font_family = "JetBrains Mono"  # 程序自带内置字体
         self.font_name = ''  # <str>
         self.font_size = 12  # <int>
@@ -3772,7 +3772,8 @@ class IpCalculatorTool:
         label_netmask_int = tkinter.Label(self.pop_window, text="掩码位数:")  # 掩码位数为【选填】，在点击“计算”按钮后，会自动调到匹配值
         label_netmask_int.grid(row=1, column=0, padx=self.padx, pady=self.pady)
         self.widget_dict["sv_netmask_int"] = tkinter.StringVar()
-        spinbox_netmask_int = tkinter.Spinbox(self.pop_window, from_=0, to=32, increment=1, textvariable=self.widget_dict["sv_netmask_int"],
+        spinbox_netmask_int = tkinter.Spinbox(self.pop_window, from_=0, to=32, increment=1,
+                                              textvariable=self.widget_dict["sv_netmask_int"],
                                               width=3, command=self.set_netmask_scale_on_spinbox_change)
         spinbox_netmask_int.grid(row=1, column=1, padx=self.padx, pady=self.pady)
         self.widget_dict["netmask_scale"] = tkinter.Scale(self.pop_window, from_=0, to=32, resolution=1, orient="horizontal",
@@ -3783,16 +3784,26 @@ class IpCalculatorTool:
         button_calculate.grid(row=2, column=1, padx=self.padx, pady=self.pady)
         button_clear = tkinter.Button(self.pop_window, text="清空", command=self.calculate)
         button_clear.grid(row=2, column=2, padx=self.padx, pady=self.pady)
-        self.widget_dict["text_ip_base_info"] = tkinter.Text(self.pop_window, width=56, height=10,
+        self.widget_dict["text_ip_base_info"] = tkinter.Text(self.pop_window, width=56, height=6,
                                                              font=self.text_font, bg="black", fg="white")
         self.widget_dict["text_ip_base_info"].grid(row=3, column=0, columnspan=3, padx=self.padx, pady=self.pady)
+        label_other_hostseg = tkinter.Label(self.pop_window, text="本网段其他主机ip:")
+        label_other_hostseg.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         button_exit = tkinter.Button(self.pop_window, text="退出", command=self.on_closing_terminal_pop_window)
-        button_exit.grid(row=5, column=0, padx=self.padx, pady=self.pady)
+        button_exit.grid(row=4, column=1, padx=self.padx, pady=self.pady)
+        self.widget_dict["scrollbar_other_hostseg"] = tkinter.Scrollbar(self.pop_window)
+        self.widget_dict["text_other_hostseg"] = tkinter.Text(self.pop_window, width=56, height=10,
+                                                              font=self.text_font, bg="black", fg="white",
+                                                              yscrollcommand=self.widget_dict["scrollbar_other_hostseg"].set)
+        self.widget_dict["text_other_hostseg"].grid(row=5, column=0, columnspan=3, padx=self.padx, pady=self.pady)
+        self.widget_dict["scrollbar_other_hostseg"].config(command=self.widget_dict["text_other_hostseg"].yview)
+        self.widget_dict["scrollbar_other_hostseg"].grid(row=5, column=3, padx=self.padx, pady=self.pady, sticky="NS")
         # 设置Text的前景色tag_config
         self.widget_dict["text_ip_base_info"].tag_config("ip_address_fg", foreground="#deef5a")
         self.widget_dict["text_ip_base_info"].tag_config("maskint_fg", foreground="green")
         self.widget_dict["text_ip_base_info"].tag_config("maskbyte_fg", foreground="#0d64c0")
         self.widget_dict["text_ip_base_info"].tag_config("hostseg_fg", foreground="pink")
+        self.widget_dict["text_other_hostseg"].tag_config("ip_address_fg", foreground="#deef5a")
 
     def set_sv_netmask_int(self, netmask_int: int):
         # print(type(netmask_int))  # <class 'str'>
@@ -3846,8 +3857,9 @@ class IpCalculatorTool:
         maskbyte_show = f"子网掩码: {maskbyte}    十六进制表示: {netseg_hex_address}\n"
         ip_netseg = cofnet.get_netseg_byte(input_ip_str, new_maskint)
         ip_hostseg = cofnet.get_hostseg_int(input_ip_str, new_maskint)
-        ip_netseg_info = f"ip地址对应网络号: {ip_netseg}/{new_maskint}\n"
-        ip_hostseg_info = f"主机号为本网段第 {ip_hostseg} 个ip（从0开始）\n"
+        host_seg_num = cofnet.get_hostseg_num(int(new_maskint))
+        ip_netseg_info = f"ip地址对应网络号: {ip_netseg}/{new_maskint}  主机号可用ip总量: {host_seg_num}\n"
+        ip_hostseg_info = f"本ip为本网段第 {ip_hostseg + 1} 个ip（第1个ip是主机号为全0的ip）\n"
         # 将ip相关信息输出到Text控件中
         self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_address)
         start_index1 = "1.6"
@@ -3868,7 +3880,7 @@ class IpCalculatorTool:
         start_index4 = "5.11"
         end_index4 = "5." + str(11 + len(ip_netseg))
         start_index4_2 = "5." + str(12 + len(ip_netseg))
-        end_index4_2 = "5.end"
+        end_index4_2 = "5." + str(12 + len(str(new_maskint)))
         self.widget_dict["text_ip_base_info"].tag_add("maskint_fg", start_index4, end_index4)
         self.widget_dict["text_ip_base_info"].tag_add("maskbyte_fg", start_index4_2, end_index4_2)
         self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_hostseg_info)
@@ -3878,6 +3890,33 @@ class IpCalculatorTool:
         # 更新子网掩码滑块及spinbox的值
         self.widget_dict["sv_netmask_int"].set(int(new_maskint))
         self.widget_dict["netmask_scale"].set(int(new_maskint))
+        # 输出同一网段下的所有主机ip
+        self.widget_dict["text_other_hostseg"].delete("1.0", tkinter.END)
+        if host_seg_num > 16384:  # 小于18位掩码时不再显示同网段所有ip
+            self.widget_dict["text_other_hostseg"].insert(tkinter.END, "抱歉，ip数量太多了，这里基于性能考量，不再显示本网段所有ip地址")
+            return
+        head = "序号\tip地址\t备注\n"
+        self.widget_dict["text_other_hostseg"].insert(tkinter.END, head)
+        for i in range(host_seg_num):
+            ip_netseg_int = cofnet.get_netseg_int(input_ip_str, new_maskint)
+            ip_address = cofnet.int32_to_ip(ip_netseg_int + i)
+            if i == ip_hostseg and i == 0:
+                ip_line_info = str(i + 1) + "\t" + ip_address + "\t此ip为您输入的ip（主机号为全0）\n"
+            elif i == ip_hostseg and i == host_seg_num - 1:
+                ip_line_info = str(i + 1) + "\t" + ip_address + "\t此ip为您输入的ip（主机号为全1）\n"
+            elif i == ip_hostseg:
+                ip_line_info = str(i + 1) + "\t" + ip_address + "\t此ip为您输入的ip\n"
+            elif i == 0:
+                ip_line_info = str(i + 1) + "\t" + ip_address + "\t此ip主机号为全0\n"
+            elif i == host_seg_num - 1:
+                ip_line_info = str(i + 1) + "\t" + ip_address + "\t此ip主机号为全1\n"
+            else:
+                ip_line_info = str(i + 1) + "\t" + ip_address + "\n"
+            self.widget_dict["text_other_hostseg"].insert(tkinter.END, ip_line_info)
+            if i == ip_hostseg:
+                start_index = str(i + 2) + "." + str(len(str(i + 2)))
+                end_index = str(i + 2) + "." + str(len(str(i + 2)) + 1 + len(ip_address))
+                self.widget_dict["text_other_hostseg"].tag_add("ip_address_fg", start_index, end_index)
 
     def calculate_ip_maskint(self, input_ip_maskint_str, maskint=None):
         # 输入信息为 ip/掩码位数，例如 "10.99.1.3/24"
