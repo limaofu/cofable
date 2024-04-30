@@ -14,3 +14,6 @@ python3 cofable.py
 <br>
 支持在线批量shell交互，shell终端支持彩色及自定义单词/字符高亮<br>
 ![demo2](not_resource_img/demo2.png)
+<br>
+自带实用工具：ip计算器<br>
+![ip_calc_demo](not_resource_img/ip_calc_demo.png)
