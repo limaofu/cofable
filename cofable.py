@@ -6,7 +6,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-04-30
+# update: 2024-05-01
 
 """
 【开发日志】
@@ -92,6 +92,9 @@ import sched
 import queue
 import struct
 import ctypes
+import random
+import socket
+import array
 import tkinter
 from tkinter import messagebox
 from tkinter import filedialog
@@ -2221,6 +2224,7 @@ class GlobalInfo:
         self.division_terminal_window = None  # 主机的terminal终端子窗口
         self.multi_terminal_window = None  # 主机组的terminal终端子窗口，终端窗口组
         self.ip_calculator_tool_window = None  # ip计算器工具的子窗口
+        self.batch_ping_detector_tool_window = None  # 批量ping检测工具的子窗口
         self.font_size_map_list_jetbrains_mono = [(8, 7, 14),
                                                   (9, 7, 16),
                                                   (10, 8, 17),
@@ -2335,6 +2339,14 @@ class GlobalInfo:
             self.ip_calculator_tool_window.show()
         else:
             self.ip_calculator_tool_window.show()
+
+    def show_batch_ping_detector_tool_window(self):
+        # 如果还未创建BatchPingDetector对象，则先创建
+        if self.batch_ping_detector_tool_window is None:
+            self.batch_ping_detector_tool_window = BatchPingDetector(global_info=self)
+            self.batch_ping_detector_tool_window.show()
+        else:
+            self.batch_ping_detector_tool_window.show()
 
     def open_session_in_division_terminal_window(self, host_oid):
         host_obj = self.get_host_by_oid(host_oid)
@@ -3782,9 +3794,9 @@ class IpCalculatorTool:
         self.widget_dict["netmask_scale"].grid(row=1, column=2, padx=self.padx, pady=self.pady)
         button_calculate = tkinter.Button(self.pop_window, text="计算", command=self.calculate)
         button_calculate.grid(row=2, column=1, padx=self.padx, pady=self.pady)
-        button_clear = tkinter.Button(self.pop_window, text="清空", command=self.calculate)
+        button_clear = tkinter.Button(self.pop_window, text="清空", command=self.clear)
         button_clear.grid(row=2, column=2, padx=self.padx, pady=self.pady)
-        self.widget_dict["text_ip_base_info"] = tkinter.Text(self.pop_window, width=56, height=6,
+        self.widget_dict["text_ip_base_info"] = tkinter.Text(self.pop_window, width=56, height=7,
                                                              font=self.text_font, bg="black", fg="white")
         self.widget_dict["text_ip_base_info"].grid(row=3, column=0, columnspan=3, padx=self.padx, pady=self.pady)
         label_other_hostseg = tkinter.Label(self.pop_window, text="本网段其他主机ip:")
@@ -3792,7 +3804,7 @@ class IpCalculatorTool:
         button_exit = tkinter.Button(self.pop_window, text="退出", command=self.on_closing_terminal_pop_window)
         button_exit.grid(row=4, column=1, padx=self.padx, pady=self.pady)
         self.widget_dict["scrollbar_other_hostseg"] = tkinter.Scrollbar(self.pop_window)
-        self.widget_dict["text_other_hostseg"] = tkinter.Text(self.pop_window, width=56, height=10,
+        self.widget_dict["text_other_hostseg"] = tkinter.Text(self.pop_window, width=56, height=9,
                                                               font=self.text_font, bg="black", fg="white",
                                                               yscrollcommand=self.widget_dict["scrollbar_other_hostseg"].set)
         self.widget_dict["text_other_hostseg"].grid(row=5, column=0, columnspan=3, padx=self.padx, pady=self.pady)
@@ -3803,6 +3815,7 @@ class IpCalculatorTool:
         self.widget_dict["text_ip_base_info"].tag_config("maskint_fg", foreground="green")
         self.widget_dict["text_ip_base_info"].tag_config("maskbyte_fg", foreground="#0d64c0")
         self.widget_dict["text_ip_base_info"].tag_config("hostseg_fg", foreground="pink")
+        self.widget_dict["text_ip_base_info"].tag_config("hostseg_num_fg", foreground="red")
         self.widget_dict["text_other_hostseg"].tag_config("ip_address_fg", foreground="#deef5a")
 
     def set_sv_netmask_int(self, netmask_int: int):
@@ -3814,6 +3827,13 @@ class IpCalculatorTool:
         netmask_int_str = self.widget_dict["sv_netmask_int"].get()
         self.widget_dict["netmask_scale"].set(int(netmask_int_str))
         self.calculate(maskint=netmask_int_str)
+
+    def clear(self):
+        self.widget_dict["sv_input_ip"].set("")
+        self.widget_dict["sv_netmask_int"].set(0)
+        self.widget_dict["netmask_scale"].set(0)
+        self.widget_dict["text_ip_base_info"].delete("1.0", tkinter.END)
+        self.widget_dict["text_other_hostseg"].delete("1.0", tkinter.END)
 
     def calculate(self, maskint=None):
         # maskint如果要赋值，需要赋str类型的值
@@ -3858,8 +3878,9 @@ class IpCalculatorTool:
         ip_netseg = cofnet.get_netseg_byte(input_ip_str, new_maskint)
         ip_hostseg = cofnet.get_hostseg_int(input_ip_str, new_maskint)
         host_seg_num = cofnet.get_hostseg_num(int(new_maskint))
-        ip_netseg_info = f"ip地址对应网络号: {ip_netseg}/{new_maskint}  主机号可用ip总量: {host_seg_num}\n"
-        ip_hostseg_info = f"本ip为本网段第 {ip_hostseg + 1} 个ip（第1个ip是主机号为全0的ip）\n"
+        ip_netseg_hex_address = cofnet.ip_to_hex_string(ip_netseg)
+        ip_netseg_info = f"ip地址对应网络号: {ip_netseg}/{new_maskint}  十六进制表示: {ip_netseg_hex_address}\n"
+        ip_hostseg_info = f"本ip为本网段第 {ip_hostseg + 1} 个ip（第1个ip是主机号为全0的ip）\n主机号可用ip总量: {host_seg_num}\n"
         # 将ip相关信息输出到Text控件中
         self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_address)
         start_index1 = "1.6"
@@ -3887,18 +3908,19 @@ class IpCalculatorTool:
         start_index5 = "6.9"
         end_index5 = "6." + str(9 + len(str(ip_hostseg)))
         self.widget_dict["text_ip_base_info"].tag_add("hostseg_fg", start_index5, end_index5)
+        self.widget_dict["text_ip_base_info"].tag_add("hostseg_num_fg", "7.11", tkinter.END)
         # 更新子网掩码滑块及spinbox的值
         self.widget_dict["sv_netmask_int"].set(int(new_maskint))
         self.widget_dict["netmask_scale"].set(int(new_maskint))
         # 输出同一网段下的所有主机ip
         self.widget_dict["text_other_hostseg"].delete("1.0", tkinter.END)
-        if host_seg_num > 16384:  # 小于18位掩码时不再显示同网段所有ip
+        if host_seg_num > 65536:  # 小于16位掩码时不再显示同网段所有ip
             self.widget_dict["text_other_hostseg"].insert(tkinter.END, "抱歉，ip数量太多了，这里基于性能考量，不再显示本网段所有ip地址")
             return
         head = "序号\tip地址\t备注\n"
         self.widget_dict["text_other_hostseg"].insert(tkinter.END, head)
+        ip_netseg_int = cofnet.get_netseg_int(input_ip_str, new_maskint)
         for i in range(host_seg_num):
-            ip_netseg_int = cofnet.get_netseg_int(input_ip_str, new_maskint)
             ip_address = cofnet.int32_to_ip(ip_netseg_int + i)
             if i == ip_hostseg and i == 0:
                 ip_line_info = str(i + 1) + "\t" + ip_address + "\t此ip为您输入的ip（主机号为全0）\n"
@@ -3929,22 +3951,6 @@ class IpCalculatorTool:
         else:
             new_maskint = maskint
         self.calculate_ip(input_ip_str, new_maskint)
-        # ip_hex_address = cofnet.ip_to_hex_string(input_ip_str)
-        # ip_address = f"ip地址: {input_ip_str}    十六进制表示: {ip_hex_address}\n"
-        # ip_int = cofnet.ip_mask_to_int(input_ip_str)
-        # ip_int_show = f"ip地址转为整数值: {ip_int}\n"
-        # ip_binary_str = cofnet.ip_mask_to_binary_space(input_ip_str)
-        # ip_binary_show = f"ip地址二进制表示: {ip_binary_str}\n"
-        # maskbyte = cofnet.maskint_to_maskbyte(maskint)
-        # maskbyte_show = f"子网掩码: {maskbyte}    掩码位数: {maskint}\n"
-        # ip_netseg = cofnet.get_netseg_byte(input_ip_str, ip_maskint_seg_list[1])
-        # ip_hostseg = cofnet.get_hostseg_int(input_ip_str, ip_maskint_seg_list[1])
-        # ip_netseg_hostseg_info = f"ip地址对应网络号: {ip_netseg}\n主机号为本网段第 {ip_hostseg} 个ip(从全0开始)\n"
-        # self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_address)
-        # self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_int_show)
-        # self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_binary_show)
-        # self.widget_dict["text_ip_base_info"].insert(tkinter.END, maskbyte_show)
-        # self.widget_dict["text_ip_base_info"].insert(tkinter.END, ip_netseg_hostseg_info)
 
     def calculate_ip_range(self, input_ip_str):
         # 输入信息为 ip-range，例如 "10.99.1.33-55"
@@ -3974,6 +3980,285 @@ class IpCalculatorTool:
 
     def show(self):
         self.pop_window.deiconify()  # 显示终端窗口，使隐藏的窗口再次显示出来
+
+
+class BatchPingDetector:
+    def __init__(self, global_info=None):
+        self.global_info = global_info
+        self.pop_window = None  # BatchPingDetector 的主窗口，全局只有一个，在 self.create_init_top_level_window()创建
+        self.screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        self.screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
+        self.pop_win_width = self.global_info.main_window.width
+        self.pop_win_height = self.global_info.main_window.height
+        self.font_family = "JetBrains Mono"  # 程序自带内置字体
+        self.font_name = ''  # <str>
+        self.font_size = 12  # <int>
+        self.text_font = None
+        self.padx = 2  # <int>
+        self.pady = 2  # <int>
+        self.scrollbar_width = 25
+        self.unduplicated_ip_list = []  # 需要检测的目标ip，去重的
+        self.top_frame_height = 240
+        self.bottom_frame_height = self.pop_win_height - self.top_frame_height
+        self.detector_info_widget_dict = {}
+        self.widget_dict = {}  # 存放pop_window上的所有控件
+        self.create_init_top_level_window()
+
+    def create_init_top_level_window(self):
+        # ★★创建BatchPingDetector窗口★★
+        self.pop_window = tkinter.Toplevel(self.global_info.main_window.window_obj)
+        self.pop_window.title("批量ping检测-CofAble工具")
+        win_pos_1 = f"{self.pop_win_width}x{self.pop_win_height}+"
+        win_pos_2 = f"{self.screen_width // 2 - int(self.pop_win_width // 2)}+{self.screen_height // 2 - self.pop_win_height // 2}"
+        self.pop_window.geometry(win_pos_1 + win_pos_2)  # 设置子窗口大小及位置，居中
+        self.pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
+        # 添加控件，整个pop_window分为上下2个frame
+        top_frame = tkinter.Frame(self.pop_window, width=self.pop_win_width, height=self.top_frame_height, bg="pink")
+        bottom_frame = tkinter.Frame(self.pop_window, width=self.pop_win_width, height=self.bottom_frame_height, bg="green")
+        top_frame.grid_propagate(False)
+        top_frame.pack_propagate(False)
+        bottom_frame.grid_propagate(False)
+        bottom_frame.pack_propagate(False)
+        top_frame.grid(row=0, column=0, )
+        bottom_frame.grid(row=1, column=0)
+        self.text_font = font.Font(size=self.font_size, family=self.font_family)
+        label_input_ip = tkinter.Label(top_frame, text="输入ip信息★:")  # ip信息为【必填】
+        label_input_ip.grid(row=0, column=0, padx=self.padx, pady=self.pady)
+        self.widget_dict["scrollbar_input_ip"] = tkinter.Scrollbar(top_frame)
+        self.widget_dict["text_input_ip"] = tkinter.Text(top_frame, width=56, height=6, insertbackground='green',
+                                                         font=self.text_font, bg="black", fg="white",
+                                                         yscrollcommand=self.widget_dict["scrollbar_input_ip"].set)
+        self.widget_dict["text_input_ip"].grid(row=1, column=0, columnspan=3, padx=self.padx, pady=self.pady)
+        self.widget_dict["scrollbar_input_ip"].config(command=self.widget_dict["text_input_ip"].yview)
+        self.widget_dict["scrollbar_input_ip"].grid(row=1, column=3, padx=self.padx, pady=self.pady, sticky="NS")
+
+        label_detect_forks = tkinter.Label(top_frame, text="检测线程数:")  # 检测线程数为【选填】，默认为64
+        label_detect_forks.grid(row=2, column=0, padx=self.padx, pady=self.pady)
+        self.widget_dict["sv_detect_forks"] = tkinter.StringVar()
+        self.widget_dict["sv_detect_forks"].set("128")
+        spinbox_detect_forks = tkinter.Spinbox(top_frame, from_=5, to=512, increment=1,
+                                               textvariable=self.widget_dict["sv_detect_forks"], width=3,
+                                               command=self.set_detect_forks_scale_on_spinbox_change)
+        spinbox_detect_forks.grid(row=2, column=1, padx=self.padx, pady=self.pady)
+        self.widget_dict["detect_forks_scale"] = tkinter.Scale(top_frame, from_=5, to=512, resolution=1, orient="horizontal",
+                                                               showvalue=False, length=200, sliderlength=50)
+        self.widget_dict["detect_forks_scale"].configure(command=self.set_sv_detect_forks)
+        self.widget_dict["detect_forks_scale"].set(128)
+        self.widget_dict["detect_forks_scale"].grid(row=2, column=2, padx=self.padx, pady=self.pady)
+        button_detect = tkinter.Button(top_frame, text="开始检测", command=self.detect)
+        button_detect.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        button_clear = tkinter.Button(top_frame, text="清空", command=self.clear)
+        button_clear.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # 在bottom_frame中添加canvas-frame滚动框
+        self.clear_tkinter_widget(bottom_frame)
+        self.detector_info_widget_dict["scrollbar_normal"] = tkinter.Scrollbar(bottom_frame)
+        self.detector_info_widget_dict["scrollbar_normal"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
+        self.detector_info_widget_dict["canvas"] = tkinter.Canvas(bottom_frame,
+                                                                  yscrollcommand=self.detector_info_widget_dict["scrollbar_normal"].set)
+        self.detector_info_widget_dict["canvas"].place(x=0, y=0, width=int(self.pop_win_width - self.scrollbar_width),
+                                                       height=self.bottom_frame_height)
+        self.detector_info_widget_dict["scrollbar_normal"].config(command=self.detector_info_widget_dict["canvas"].yview)
+        self.detector_info_widget_dict["frame"] = tkinter.Frame(self.detector_info_widget_dict["canvas"])
+        self.detector_info_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
+        self.detector_info_widget_dict["canvas"].create_window((0, 0), window=self.detector_info_widget_dict["frame"], anchor='nw')
+        self.widget_dict["text_input_ip"].focus_force()
+
+    def proces_mouse_scroll_of_top_frame(self, event):
+        if event.delta > 0:
+            self.detector_info_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
+        else:
+            self.detector_info_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
+
+    def update_top_frame(self):
+        # 更新Frame的尺寸
+        self.detector_info_widget_dict["frame"].update_idletasks()
+        self.detector_info_widget_dict["canvas"].configure(
+            scrollregion=(0, 0, self.detector_info_widget_dict["frame"].winfo_width(),
+                          self.detector_info_widget_dict["frame"].winfo_height()))
+        self.detector_info_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        self.detector_info_widget_dict["frame"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        # 滚动条移到最开头
+        self.detector_info_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+
+    @staticmethod
+    def clear_tkinter_widget(root):
+        for widget in root.winfo_children():
+            widget.destroy()
+
+    def detect(self):
+        self.unduplicated_ip_list = []  # 每次检测前都先清空之前的ip信息
+        input_lines = self.widget_dict["text_input_ip"].get("1.0", tkinter.END).strip()
+        detect_forks = self.widget_dict["sv_detect_forks"].get()
+        if detect_forks.isdigit():
+            detect_forks_int = int(detect_forks)
+        else:
+            detect_forks_int = 128
+        print(input_lines)
+        print(detect_forks_int)
+        self.get_unduplicated_ip(input_lines)
+        # 启动检测线程，并在detector_info_frame展示结果
+        # print("BatchPingDetector.detect: 要检测的ip如下:")
+        for ip in self.unduplicated_ip_list:
+            # print(ip)
+            buttonxx = tkinter.Button(self.detector_info_widget_dict["frame"], text=ip)
+            buttonxx.pack()
+        self.update_top_frame()
+
+    def get_unduplicated_ip(self, input_lines):
+        for line in input_lines.split("\n"):
+            if cofnet.is_ip_addr(line):
+                self.unduplicated_ip_list.append(line)
+                continue
+            if cofnet.is_cidr(line):
+                self.add_cidr(line)
+                continue
+            if cofnet.is_ip_range(line):
+                self.add_ip_range(line)
+                continue
+            if cofnet.is_ip_range_2(line):
+                self.add_ip_range_2(line)
+                continue
+            else:
+                print(f"BatchPingDetector.get_unduplicated_ip: 输入的这行信息无法解析为ip: {line}")
+        # ip去重，排序
+        tmp_unduplicated_ip_list = list(set(self.unduplicated_ip_list))
+        tmp_unduplicated_ip_int_list = [cofnet.ip_mask_to_int(ip) for ip in tmp_unduplicated_ip_list]
+        tmp_unduplicated_ip_int_list.sort()
+        self.unduplicated_ip_list = [cofnet.int32_to_ip(ip_int) for ip_int in tmp_unduplicated_ip_int_list]
+
+    def add_cidr(self, cidr):
+        netseg_maskint = cidr.split("/")
+        netseg = netseg_maskint[0]
+        host_seg_num = cofnet.get_hostseg_num(int(netseg_maskint[1]))
+        ip_netseg_int = cofnet.ip_mask_to_int(netseg)
+        for i in range(host_seg_num):
+            ip_address = cofnet.int32_to_ip(ip_netseg_int + i)
+            self.unduplicated_ip_list.append(ip_address)
+
+    def add_ip_range(self, ip_range):
+        start_ip_end_ip = ip_range.split("-")
+        ip_diff = int(start_ip_end_ip[1]) - int(start_ip_end_ip[0].split(".")[3])
+        start_ip_int = cofnet.ip_mask_to_int(start_ip_end_ip[0])
+        for i in range(ip_diff + 1):
+            ip_address = cofnet.int32_to_ip(start_ip_int + i)
+            self.unduplicated_ip_list.append(ip_address)
+
+    def add_ip_range_2(self, ip_range):
+        start_ip_end_ip = ip_range.split("-")
+        start_ip_int = cofnet.ip_mask_to_int(start_ip_end_ip[0])
+        end_ip_int = cofnet.ip_mask_to_int(start_ip_end_ip[1])
+        for i in range(start_ip_int, end_ip_int + 1):
+            ip_address = cofnet.int32_to_ip(i)
+            self.unduplicated_ip_list.append(ip_address)
+
+    def clear(self):
+        self.widget_dict["sv_detect_forks"].set(128)
+        self.widget_dict["detect_forks_scale"].set(128)
+        self.widget_dict["text_input_ip"].delete("1.0", tkinter.END)
+        self.unduplicated_ip_list = []
+
+    def set_sv_detect_forks(self, detect_forks: int):
+        # print(type(detect_forks))  # <class 'str'>
+        self.widget_dict["sv_detect_forks"].set(detect_forks)
+
+    def set_detect_forks_scale_on_spinbox_change(self):
+        netmask_int_str = self.widget_dict["sv_detect_forks"].get()
+        self.widget_dict["detect_forks_scale"].set(int(netmask_int_str))
+
+    def on_closing_terminal_pop_window(self):
+        print("DivisionTerminalWindow.on_closing_terminal_pop_window: 本子窗口隐藏了，并未删除，可再次显示")
+        # self.pop_window.destroy()  # 关闭子窗口
+        self.pop_window.withdraw()  # 隐藏窗口
+        # self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
+        self.global_info.main_window.window_obj.focus_force()  # 使主窗口获得焦点
+
+    def show(self):
+        self.pop_window.deiconify()  # 显示终端窗口，使隐藏的窗口再次显示出来
+        self.widget_dict["text_input_ip"].focus_force()
+
+
+class IcmpDetector:
+    def __init__(self, dest_ip='undefined', icmp_data='data', source_ip='undefined', icmp_type=8, icmp_code=0,
+                 probe_count=3, interval=3, timeout=3):
+        self.id = uuid.uuid4().__str__()  # <str>
+        self.dest_ip = dest_ip
+        self.icmp_data = icmp_data.encode('utf8')
+        self.source_ip = source_ip
+        self.icmp_type = icmp_type
+        self.icmp_code = icmp_code
+        self.icmp_id = random.randint(0, 0xFFFF)
+        self.icmp_sequence = random.randint(0, 0xFFFF)
+        self.icmp_checkum = 0x0000  # 生成icmp_packet报文后，icmp_checksum也更新了
+        self.probe_count = probe_count
+        self.interval = interval
+        self.timeout = timeout
+        self.icmp_packet = self.generate_icmp_packet()  # 生成icmp报文后，上面的icmp_checksum也更新了
+        self.icmp_socket = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))
+        self.probe_result_list = []
+        return
+
+    @staticmethod
+    def icmp_checksum(packet: bytes) -> int:
+        """
+        计算icmp报文的校验和
+        """
+        if len(packet) & 1:  # 长度的末位为1表示：长度不为2的倍数（即末位不为0）
+            packet = packet + b'\x00'  # 0填充
+        words = array.array('h', packet)
+        checksum = 0
+        for word in words:
+            checksum += (word & 0xffff)
+        while checksum > 0xFFFF:
+            checksum = (checksum >> 16) + (checksum & 0xffff)
+        return (~checksum) & 0xffff  # 反回2字节校验和的反码
+
+    def generate_icmp_packet(self):
+        icmp_checkum = 0x0000
+        icmp_header = struct.pack('BBHHH', self.icmp_type, self.icmp_code, icmp_checkum, self.icmp_id,
+                                  self.icmp_sequence)
+        icmp_packet = icmp_header + self.icmp_data
+        icmp_checkum = self.icmp_checksum(icmp_packet)
+        self.icmp_checkum = icmp_checkum
+        icmp_header = struct.pack('BBHHH', self.icmp_type, self.icmp_code, icmp_checkum, self.icmp_id,
+                                  self.icmp_sequence)
+        return icmp_header + self.icmp_data
+
+    def recv_icmp_packet(self):
+        time_start = time.time()
+        try:
+            recv_packet, addr = self.icmp_socket.recvfrom(1500)
+        except Exception as e:
+            if isinstance(e, TimeoutError):
+                print(f'timeout')
+            else:
+                print(f"Exception: {type(e)}")
+            return
+        icmp_type, icmp_code, icmp_checkum, recv_id, icmp_sequence = struct.unpack("BBHHH", recv_packet[20:28])
+        time_end = time.time()
+        time_used = (time_end - time_start) * 1000
+        if recv_id == self.icmp_id and icmp_sequence == self.icmp_sequence:
+            ttl = struct.unpack("!BBHHHBBHII", recv_packet[:20])[5]
+            print("目标回复: {}  ttl: {}，耗时: {:<7.2f} 毫秒".format(addr[0], ttl, time_used))
+            self.probe_result_list.append({"time_start": time_start, "time_end": time_end, "time_used": time_used})
+        return
+
+    def run(self):
+        self.icmp_socket.settimeout(self.timeout)  # 设置超时，单位，秒
+        probe_thread_list = []
+        for probe_index in range(self.probe_count):
+            probe_thread = threading.Thread(target=self.recv_icmp_packet, )  # 创建子线程
+            probe_thread.start()
+            try:
+                self.icmp_socket.sendto(self.icmp_packet, (self.dest_ip, 0))
+            except Exception as e:
+                raise e
+            probe_thread_list.append(probe_thread)
+            time.sleep(self.interval)
+        for probe_thread in probe_thread_list:
+            probe_thread.join()
+        self.icmp_socket.close()
 
 
 class MainWindow:
@@ -4056,6 +4341,7 @@ class MainWindow:
         menu_settings.add_command(label="终端配色方案设置", command=self.click_menu_settings_scheme_of_menu_bar_init)
         menu_settings.add_command(label="vt100终端设置", command=self.click_menu_settings_vt100_of_menu_bar_init, background="#aaaaaa")
         menu_tools.add_command(label="ip计算器", command=self.click_menu_ip_calculator_of_menu_bar_init)
+        menu_tools.add_command(label="批量ping检测", command=self.click_menu_batch_ping_detect_of_menu_bar_init)
         menu_help.add_command(label="About", command=self.click_menu_about_of_menu_bar_init)
         self.window_obj.config(menu=self.menu_bar)
 
@@ -4175,6 +4461,9 @@ class MainWindow:
 
     def click_menu_ip_calculator_of_menu_bar_init(self):
         self.global_info.show_ip_calculator_tool_window()
+
+    def click_menu_batch_ping_detect_of_menu_bar_init(self):
+        self.global_info.show_batch_ping_detector_tool_window()
 
     def click_menu_about_of_menu_bar_init(self):
         messagebox.showinfo("About", "\n".join(self.about_info_list))
