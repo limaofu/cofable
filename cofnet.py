@@ -1,9 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 # coding=utf-8
 # module name: cofnet
 # author: Cof-Lee
-# update: 2024-04-30
-# 本模块使用GPL-3.0开源协议
+# this module uses the GPL-3.0 open source protocol
+# update: 2024-05-01
 
 """
 术语解析:
@@ -15,13 +16,10 @@ cidr       地址块，网段及掩码位数 ，如 10.1.0.0/16      类型: str
 hostseg    主机号，一个ip地址去除网段后，剩下的部分       类型: int
 """
 
-import struct
-import time
-import threading
-import socket
-import random
-import uuid
-import array
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
 
 
 # #################################  start of module's function  ##############################
@@ -241,7 +239,8 @@ def ip_to_hex_string(ip_addresss: str) -> str:
     ip_hex_str_list = []
     for ip_seg in ip_addresss.split("."):
         ip_seg_int = int(ip_seg)
-        ip_hex_str_list.append(f"{ip_seg_int:0>2X}")
+        # ip_hex_str_list.append(f"{ip_seg_int:0>2X}")
+        ip_hex_str_list.append("{:0>2X}".format(ip_seg_int))
     return "".join(ip_hex_str_list)
 
 
@@ -269,7 +268,8 @@ def ip_mask_to_binary_space(ip_or_mask: str) -> str:
     bin_seg_list = []
     for ip_seg in ip_or_mask.split("."):
         ip_seg_int = int(ip_seg)
-        bin_seg_list.append(f"{ip_seg_int:0>8b}")
+        # bin_seg_list.append(f"{ip_seg_int:0>8b}")
+        bin_seg_list.append("{:0>8b}".format(ip_seg_int))
     return " ".join(bin_seg_list)
 
 
@@ -352,9 +352,9 @@ def get_netseg_byte_c(cidr: str) -> str:
 
 def get_hostseg_int(ip: str, maskintorbyte: str) -> int:
     """
-    根据 子网掩码 获 取ip地址的 网段（int值），子网掩码可为int型或byte型，例如：
-    输入 "10.99.1.1","24"             输出 174260480
-    输入 "10.99.1.1","255.255.255.0"  输出 174260480
+    根据 子网掩码 获 取ip地址的 主机号（int值），子网掩码可为int型或byte型，例如：
+    输入 "10.99.1.145","24"             输出 145 （主机号为第4个字节的值）
+    输入 "10.99.1.145","255.255.255.0"  输出 145
     """
     if not is_ip_addr(ip):
         raise Exception("不是正确的ip地址,E1", ip)
@@ -372,6 +372,15 @@ def get_hostseg_int(ip: str, maskintorbyte: str) -> int:
         return ip_mask_to_int(ip) & ~maskint2bin
     else:
         raise Exception("不是正确的掩码,E3", maskintorbyte)
+
+
+def get_hostseg_num(maskint: int) -> int:
+    """
+    根据子网掩码位数获取主机号可表示的主同ip数量
+    例如：24位的掩码，主机号为8位，可表示的主机ip数量为256
+    """
+    host_seg_num = (0xFFFFFFFF >> maskint) + 1
+    return host_seg_num
 
 
 def is_ip_in_cidr(ip: str, cidr: str) -> bool:
@@ -434,93 +443,6 @@ def is_ip_in_range(targetip: str, start_ip: str, end_ip: str) -> bool:
         return False
 
 
-def icmp_checksum(packet: bytes) -> int:
-    """
-    计算icmp报文的校验和
-    """
-    if len(packet) & 1:  # 长度的末位为1表示：长度不为2的倍数（即末位不为0）
-        packet = packet + b'\x00'  # 0填充
-    words = array.array('h', packet)
-    checksum = 0
-    for word in words:
-        checksum += (word & 0xffff)
-    while checksum > 0xFFFF:
-        checksum = (checksum >> 16) + (checksum & 0xffff)
-    return (~checksum) & 0xffff  # 反回2字节校验和的反码
-
-
 # #################################  end of module's function  ##############################
-#
-#
-# #################################  start of module's class  ##############################
-
-class IcmpDetector:
-    def __init__(self, dest_ip='undefined', icmp_data='data', source_ip='undefined', icmp_type=8, icmp_code=0,
-                 probe_count=3, interval=3, timeout=3):
-        self.id = uuid.uuid4().__str__()  # <str>
-        self.dest_ip = dest_ip
-        self.icmp_data = icmp_data.encode('utf8')
-        self.source_ip = source_ip
-        self.icmp_type = icmp_type
-        self.icmp_code = icmp_code
-        self.icmp_id = random.randint(0, 0xFFFF)
-        self.icmp_sequence = random.randint(0, 0xFFFF)
-        self.icmp_checkum = 0x0000  # 生成icmp_packet报文后，icmp_checksum也更新了
-        self.probe_count = probe_count
-        self.interval = interval
-        self.timeout = timeout
-        self.icmp_packet = self.generate_icmp_packet()  # 生成icmp报文后，上面的icmp_checksum也更新了
-        self.icmp_socket = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))
-        self.probe_result_list = []
-        return
-
-    def generate_icmp_packet(self):
-        icmp_checkum = 0x0000
-        icmp_header = struct.pack('BBHHH', self.icmp_type, self.icmp_code, icmp_checkum, self.icmp_id,
-                                  self.icmp_sequence)
-        icmp_packet = icmp_header + self.icmp_data
-        icmp_checkum = icmp_checksum(icmp_packet)
-        self.icmp_checkum = icmp_checkum
-        icmp_header = struct.pack('BBHHH', self.icmp_type, self.icmp_code, icmp_checkum, self.icmp_id,
-                                  self.icmp_sequence)
-        return icmp_header + self.icmp_data
-
-    def recv_icmp_packet(self):
-        time_start = time.time()
-        try:
-            recv_packet, addr = self.icmp_socket.recvfrom(1500)
-        except Exception as e:
-            if isinstance(e, TimeoutError):
-                print(f'timeout')
-            else:
-                print(f"Exception: {type(e)}")
-            return
-        icmp_type, icmp_code, icmp_checkum, recv_id, icmp_sequence = struct.unpack("BBHHH", recv_packet[20:28])
-        time_end = time.time()
-        time_used = (time_end - time_start) * 1000
-        if recv_id == self.icmp_id and icmp_sequence == self.icmp_sequence:
-            ttl = struct.unpack("!BBHHHBBHII", recv_packet[:20])[5]
-            print("目标回复: {}  ttl: {}，耗时: {:<7.2f} 毫秒".format(addr[0], ttl, time_used))
-            self.probe_result_list.append({"time_start": time_start, "time_end": time_end, "time_used": time_used})
-        return
-
-    def run(self):
-        self.icmp_socket.settimeout(self.timeout)  # 设置超时，单位，秒
-        probe_thread_list = []
-        for probe_index in range(self.probe_count):
-            probe_thread = threading.Thread(target=self.recv_icmp_packet, )  # 创建子线程
-            probe_thread.start()
-            try:
-                self.icmp_socket.sendto(self.icmp_packet, (self.dest_ip, 0))
-            except Exception as e:
-                raise e
-            probe_thread_list.append(probe_thread)
-            time.sleep(self.interval)
-        for probe_thread in probe_thread_list:
-            probe_thread.join()
-        self.icmp_socket.close()
-
-
-# #################################  end of module's class  ##############################
 if __name__ == '__main__':
     print("this is cofnet.py")
