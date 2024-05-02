@@ -6,7 +6,7 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-05-01
+# update: 2024-05-03
 
 """
 【开发日志】
@@ -3996,6 +3996,10 @@ class BatchPingDetector:
         self.text_font = None
         self.padx = 2  # <int>
         self.pady = 2  # <int>
+        self.start_color = "#0095d3"  # 淡蓝色
+        self.succeed_color = "#7ffd01"  # 绿色
+        self.failed_color = "red"
+        self.part_succeed_color = "#84c67b"  # 浅绿色
         self.scrollbar_width = 25
         self.unduplicated_ip_list = []  # 需要检测的目标ip，去重的
         self.top_frame_height = 240
@@ -4013,10 +4017,10 @@ class BatchPingDetector:
         self.pop_window.geometry(win_pos_1 + win_pos_2)  # 设置子窗口大小及位置，居中
         self.pop_window.focus_force()  # 使子窗口获得焦点
         # 子窗口点击右上角的关闭按钮后，触发此函数
-        self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_terminal_pop_window)
+        self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_pop_window)
         # 添加控件，整个pop_window分为上下2个frame
-        top_frame = tkinter.Frame(self.pop_window, width=self.pop_win_width, height=self.top_frame_height, bg="pink")
-        bottom_frame = tkinter.Frame(self.pop_window, width=self.pop_win_width, height=self.bottom_frame_height, bg="green")
+        top_frame = tkinter.Frame(self.pop_window, width=self.pop_win_width, height=self.top_frame_height, bg="#d9e1f2")
+        bottom_frame = tkinter.Frame(self.pop_window, width=self.pop_win_width, height=self.bottom_frame_height, bg="#e2efda")
         top_frame.grid_propagate(False)
         top_frame.pack_propagate(False)
         bottom_frame.grid_propagate(False)
@@ -4055,12 +4059,12 @@ class BatchPingDetector:
         self.clear_tkinter_widget(bottom_frame)
         self.detector_info_widget_dict["scrollbar_normal"] = tkinter.Scrollbar(bottom_frame)
         self.detector_info_widget_dict["scrollbar_normal"].pack(side=tkinter.RIGHT, fill=tkinter.Y)
-        self.detector_info_widget_dict["canvas"] = tkinter.Canvas(bottom_frame,
+        self.detector_info_widget_dict["canvas"] = tkinter.Canvas(bottom_frame, bg="#e2efda",
                                                                   yscrollcommand=self.detector_info_widget_dict["scrollbar_normal"].set)
         self.detector_info_widget_dict["canvas"].place(x=0, y=0, width=int(self.pop_win_width - self.scrollbar_width),
                                                        height=self.bottom_frame_height)
         self.detector_info_widget_dict["scrollbar_normal"].config(command=self.detector_info_widget_dict["canvas"].yview)
-        self.detector_info_widget_dict["frame"] = tkinter.Frame(self.detector_info_widget_dict["canvas"])
+        self.detector_info_widget_dict["frame"] = tkinter.Frame(self.detector_info_widget_dict["canvas"], bg="#e2efda")
         self.detector_info_widget_dict["frame"].pack(fill=tkinter.X, expand=tkinter.TRUE)
         self.detector_info_widget_dict["canvas"].create_window((0, 0), window=self.detector_info_widget_dict["frame"], anchor='nw')
         self.widget_dict["text_input_ip"].focus_force()
@@ -4089,6 +4093,7 @@ class BatchPingDetector:
 
     def detect(self):
         self.unduplicated_ip_list = []  # 每次检测前都先清空之前的ip信息
+        self.clear_tkinter_widget(self.detector_info_widget_dict["frame"])
         input_lines = self.widget_dict["text_input_ip"].get("1.0", tkinter.END).strip()
         detect_forks = self.widget_dict["sv_detect_forks"].get()
         if detect_forks.isdigit():
@@ -4100,10 +4105,54 @@ class BatchPingDetector:
         self.get_unduplicated_ip(input_lines)
         # 启动检测线程，并在detector_info_frame展示结果
         # print("BatchPingDetector.detect: 要检测的ip如下:")
+        len_ip_ist = len(self.unduplicated_ip_list)
+        if len_ip_ist > 2048:
+            warning_info = f"BatchPingDetector.detect: 非常抱歉，要检测的ip数量为 {len_ip_ist}，超出2048个数量限制，本工具无能为力了"
+            print(warning_info)
+            warning_label = tkinter.Label(self.detector_info_widget_dict["frame"], text=warning_info)
+            warning_label.pack()
+            return
+        button1 = tkinter.Button(self.detector_info_widget_dict["frame"], text="背景颜色代表:", width=15, bg="white")
+        button2 = tkinter.Button(self.detector_info_widget_dict["frame"], text="灰: 未开始", width=15, bg="gray")
+        button3 = tkinter.Button(self.detector_info_widget_dict["frame"], text="淡蓝: 检测中", width=15, bg=self.start_color)
+        button4 = tkinter.Button(self.detector_info_widget_dict["frame"], text="绿色: 成功", width=15, bg=self.succeed_color)
+        button5 = tkinter.Button(self.detector_info_widget_dict["frame"], text="浅绿色: 部分成功", width=15, bg=self.part_succeed_color)
+        button6 = tkinter.Button(self.detector_info_widget_dict["frame"], text="红色: 失败", width=15, bg=self.failed_color)
+        button1.grid(row=0, column=0)
+        button2.grid(row=0, column=1)
+        button3.grid(row=0, column=2)
+        button4.grid(row=0, column=3)
+        button5.grid(row=0, column=4)
+        button6.grid(row=0, column=5)
+        button1.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        button2.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        button3.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        button4.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        button5.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        button6.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        # 插入空白行
+        for tmp in range(5):
+            button_t = tkinter.Button(self.detector_info_widget_dict["frame"], text="", width=15, bg="white")
+            button_t.grid(row=1, column=tmp)
+            button_t.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        # 创建后端检测线程池
+        thread_pool_1 = ThreadPoolExecutor(max_workers=detect_forks_int)
+        index = 0
         for ip in self.unduplicated_ip_list:
             # print(ip)
-            buttonxx = tkinter.Button(self.detector_info_widget_dict["frame"], text=ip)
-            buttonxx.pack()
+            row = index // 5
+            column = index % 5
+            start_ping_detect_obj = StartPingDetect(top_frame=self.detector_info_widget_dict["frame"], global_info=self.global_info,
+                                                    width=self.pop_win_width - self.scrollbar_width, top_window=self.pop_window,
+                                                    ip_address=ip, probe_count=4, interval=2, timeout=2,
+                                                    start_color=self.start_color, succeed_color=self.succeed_color,
+                                                    failed_color=self.failed_color, part_succeed_color=self.part_succeed_color)
+            thread_pool_1.submit(start_ping_detect_obj.start)  # 向线程池提交一个作业
+            start_ping_detect_obj.detect_result_button.grid(row=row + 2, column=column)
+            start_ping_detect_obj.detect_result_button.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+            index += 1
+        thread_pool_1.shutdown(wait=False)  # wait=False时，此方法会立即返回，而不会等待任务完成
+        print(f"BatchPingDetector.detect: 检测的ip数量为 {index}")
         self.update_top_frame()
 
     def get_unduplicated_ip(self, input_lines):
@@ -4167,8 +4216,8 @@ class BatchPingDetector:
         netmask_int_str = self.widget_dict["sv_detect_forks"].get()
         self.widget_dict["detect_forks_scale"].set(int(netmask_int_str))
 
-    def on_closing_terminal_pop_window(self):
-        print("DivisionTerminalWindow.on_closing_terminal_pop_window: 本子窗口隐藏了，并未删除，可再次显示")
+    def on_closing_pop_window(self):
+        print("BatchPingDetector.on_closing_pop_window: 本子窗口隐藏了，并未删除，可再次显示")
         # self.pop_window.destroy()  # 关闭子窗口
         self.pop_window.withdraw()  # 隐藏窗口
         # self.global_info.main_window.window_obj.attributes("-disabled", 0)  # 使主窗口响应
@@ -4179,9 +4228,137 @@ class BatchPingDetector:
         self.widget_dict["text_input_ip"].focus_force()
 
 
+class StartPingDetect:
+    def __init__(self, top_frame=None, width=300, height=50, ip_address="", probe_count=4, interval=2, timeout=2,
+                 start_color="", succeed_color="", failed_color="", part_succeed_color="", top_window=None, global_info=None):
+        self.top_frame = top_frame
+        self.width = width
+        self.height = height
+        self.ip_address = ip_address
+        self.probe_count = probe_count  # 发送的检测包数量
+        self.interval = interval  # 每个检测包发送时间间隔，单位：秒
+        self.timeout = timeout  # 每个检测包超时时间，单位：秒
+        self.top_window = top_window  # 上一级window
+        self.global_info = global_info
+        self.detect_result_button = tkinter.Button(self.top_frame, text=self.ip_address, width=15, bg="gray", bd=1)
+        self.start_color = start_color
+        self.succeed_color = succeed_color
+        self.failed_color = failed_color
+        self.part_succeed_color = part_succeed_color
+        self.padx = 5
+        self.pady = 5
+        self.screen_width = self.global_info.main_window.window_obj.winfo_screenwidth()
+        self.screen_height = self.global_info.main_window.window_obj.winfo_screenheight()
+        self.pop_win_width = 600
+        self.pop_win_height = 200
+        self.pop_window = None  # 用于查看本ip检测情况的子窗口
+        self.detect_result_frame = None  # 对每个ip的检测结果都在这个Frame里展示
+        self.result_widget_dict = {}
+        self.icmp_detector_obj = None
+
+    def start(self):
+        self.icmp_detector_obj = IcmpDetector(dest_ip=self.ip_address, probe_count=self.probe_count, interval=self.interval,
+                                              timeout=self.timeout, detect_result_button=self.detect_result_button,
+                                              start_color=self.start_color, succeed_color=self.succeed_color,
+                                              failed_color=self.failed_color, part_succeed_color=self.part_succeed_color)
+        # icmp_detect_thread=threading.Thread(target=icmp_detector_obj.run)
+        # icmp_detect_thread.start()
+        self.detect_result_button.config(command=self.show_detect_details)
+        self.icmp_detector_obj.run()
+
+    def show_detect_details(self):
+        # ★★创建BatchPingDetector窗口★★
+        self.pop_window = tkinter.Toplevel(self.top_window)
+        self.pop_window.title(f"{self.icmp_detector_obj.dest_ip} 检测详情")
+        win_pos_1 = f"{self.pop_win_width}x{self.pop_win_height}+"
+        win_pos_2 = f"{self.screen_width // 2 - int(self.pop_win_width // 2)}+{self.screen_height // 2 - self.pop_win_height // 2}"
+        self.pop_window.geometry(win_pos_1 + win_pos_2)  # 设置子窗口大小及位置，居中
+        self.top_window.attributes("-disabled", 1)  # 禁止父窗口响应
+        self.pop_window.focus_force()  # 使子窗口获得焦点
+        # 子窗口点击右上角的关闭按钮后，触发此函数
+        self.pop_window.protocol("WM_DELETE_WINDOW", self.on_closing_pop_window)
+        # 添加控件
+        self.detect_result_frame = tkinter.Frame(self.pop_window, width=self.pop_win_width, height=82, bg="gray",
+                                                 highlightthickness=0, bd=1)
+        self.detect_result_frame.pack_propagate(False)
+        self.result_widget_dict["button_ip_address"] = tkinter.Label(self.detect_result_frame, width=15, text=self.ip_address)
+        scrollbar = tkinter.Scrollbar(self.detect_result_frame, orient=tkinter.HORIZONTAL)
+        self.result_widget_dict["canvas"] = tkinter.Canvas(self.detect_result_frame, width=self.pop_win_width - 180, height=82, bg="pink",
+                                                           highlightthickness=0, xscrollcommand=scrollbar.set)  # 创建画布组件
+        # highlightthickness设置高亮边框的宽度，Canvas是有highlightthickness的，这使得有时边框会变色，影响效果，所以每次建立Canvas的时候最好设为0
+        scrollbar.configure(command=self.result_widget_dict["canvas"].xview)
+        self.result_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        self.detect_result_frame.pack(padx=self.padx, pady=self.pady)
+        self.result_widget_dict["button_ip_address"].grid(row=0, column=0, rowspan=2, sticky="NSEW")
+        self.result_widget_dict["canvas"].grid(row=0, column=1)
+        scrollbar.grid(row=1, column=1, sticky="EW")
+        # 添加结果展示
+        offset = 50
+        index = 0
+        for probe_result_obj in self.icmp_detector_obj.probe_result_list:
+            self.result_widget_dict["canvas"].create_oval(index * 50 + (index * offset), 0, (index + 1) * 50 + (index * offset), 50,
+                                                          fill="green",
+                                                          width=0,
+                                                          outline="green")  # 画圆形，底座
+            angle = (probe_result_obj.time_used / self.timeout) * 360  # 时间使用率 乘以 360
+            if angle < 5:
+                angle = 5
+            elif angle > 359:
+                angle = 359.99
+            else:
+                pass
+            if probe_result_obj.is_succeed:
+                # 画扇形，成功时的时间占比
+                self.result_widget_dict["canvas"].create_arc(index * 50 + (index * offset), 0, (index + 1) * 50 + (index * offset), 50,
+                                                             extent=angle,
+                                                             start=90 - angle,
+                                                             fill="gray",
+                                                             width=0, outline="gray")
+                # 写文字，probe序号，时延（毫秒），TTL
+                self.result_widget_dict["canvas"].create_text(index * 50 + 25 + (index * offset), 25, text=str(index), fill="red")
+                self.result_widget_dict["canvas"].create_text(index * 50 + 25 + (index * offset), 50 + 7,
+                                                              text=f"时延 {probe_result_obj.time_used * 1000:.2f} ms", fill="red")  # 时延（毫秒）
+                self.result_widget_dict["canvas"].create_text(index * 50 + 25 + (index * offset), 50 + 22,
+                                                              text=f"ttl:  {probe_result_obj.ttl}", fill="red")  # ttl
+            else:
+                # 画扇形，失败，全红
+                self.result_widget_dict["canvas"].create_arc(index * 50 + (index * offset), 0, (index + 1) * 50 + (index * offset), 50,
+                                                             extent=359,
+                                                             start=0,
+                                                             fill="red",
+                                                             width=0, outline="red")
+                # 写文字，probe序号，时延（毫秒），TTL
+                self.result_widget_dict["canvas"].create_text(index * 50 + 25 + (index * offset), 25, text=str(index), fill="red")
+                self.result_widget_dict["canvas"].create_text(index * 50 + 25 + (index * offset), 50 + 7,
+                                                              text=f"时延 * ms", fill="red")  # 时延（毫秒）
+                self.result_widget_dict["canvas"].create_text(index * 50 + 25 + (index * offset), 50 + 22,
+                                                              text=f"ttl:  lost!", fill="red")  # ttl
+            # 画圆形，中心空白
+            self.result_widget_dict["canvas"].create_oval(index * 50 + 15 + (index * offset), 15, (index + 1) * 50 - 15 + (index * offset),
+                                                          50 - 15,
+                                                          fill="white", width=0,
+                                                          outline="white")
+            index += 1
+        # 更新Frame的尺寸
+        self.result_widget_dict["canvas"].configure(scrollregion=(0, 0, self.probe_count * 50 + ((self.probe_count - 1) * offset), 50))
+        self.result_widget_dict["canvas"].xview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
+
+    def proces_mouse_scroll_of_top_frame(self, event):
+        if event.delta > 0:
+            self.result_widget_dict["canvas"].xview_scroll(-1, 'units')  # 向上移动
+        else:
+            self.result_widget_dict["canvas"].xview_scroll(1, 'units')  # 向下移动
+
+    def on_closing_pop_window(self):
+        self.pop_window.destroy()  # 关闭子窗口
+        self.top_window.attributes("-disabled", 0)  # 使父窗口响应
+        self.top_window.focus_force()  # 使父窗口获得焦点
+
+
 class IcmpDetector:
     def __init__(self, dest_ip='undefined', icmp_data='data', source_ip='undefined', icmp_type=8, icmp_code=0,
-                 probe_count=3, interval=3, timeout=3):
+                 probe_count=3, interval=3, timeout=3, detect_result_button=None, start_color="", succeed_color="",
+                 failed_color="", part_succeed_color=""):
         self.id = uuid.uuid4().__str__()  # <str>
         self.dest_ip = dest_ip
         self.icmp_data = icmp_data.encode('utf8')
@@ -4194,10 +4371,19 @@ class IcmpDetector:
         self.probe_count = probe_count
         self.interval = interval
         self.timeout = timeout
+        self.detect_result_button = detect_result_button  # tkinter.Button对象，用于展示icmp检测结果，根据检测结果设置相应背景颜色
+        self.start_color = start_color
+        self.succeed_color = succeed_color
+        self.failed_color = failed_color
+        self.part_succeed_color = part_succeed_color
         self.icmp_packet = self.generate_icmp_packet()  # 生成icmp报文后，上面的icmp_checksum也更新了
         self.icmp_socket = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))
-        self.probe_result_list = []
-        return
+        self.probe_result_list = []  # 元素为IcmpProbeResult对象
+        self.received_at_least_1_package = False  # 至少收到了1个回复
+        self.part_probe_succeed = False
+        self.total_probe_succeed = False
+        self.total_probe_failed = False
+        self.is_finished = False  # 检测是否完成，完成时置True
 
     @staticmethod
     def icmp_checksum(packet: bytes) -> int:
@@ -4229,24 +4415,44 @@ class IcmpDetector:
         time_start = time.time()
         try:
             recv_packet, addr = self.icmp_socket.recvfrom(1500)
-        except Exception as e:
-            if isinstance(e, TimeoutError):
+        except Exception as err:
+            if isinstance(err, TimeoutError):
                 print(f'timeout')
+                self.probe_result_list.append(IcmpProbeResult(time_used=time.time() - time_start, is_succeed=False,
+                                                              failed_result="timeout"))
+                if self.received_at_least_1_package:
+                    self.detect_result_button.config(bg=self.part_succeed_color)
+                else:
+                    self.detect_result_button.config(bg=self.failed_color)
             else:
-                print(f"Exception: {type(e)}")
+                print(f"Exception: {err.__str__()}")
+                self.probe_result_list.append(
+                    IcmpProbeResult(time_used=time.time() - time_start, is_succeed=False, failed_result=err.__str__()))
+                if self.received_at_least_1_package:
+                    self.detect_result_button.config(bg=self.part_succeed_color)
+                else:
+                    self.detect_result_button.config(bg=self.failed_color)
             return
         icmp_type, icmp_code, icmp_checkum, recv_id, icmp_sequence = struct.unpack("BBHHH", recv_packet[20:28])
-        time_end = time.time()
-        time_used = (time_end - time_start) * 1000
+        time_used = (time.time() - time_start)  # 秒
         if recv_id == self.icmp_id and icmp_sequence == self.icmp_sequence:
             ttl = struct.unpack("!BBHHHBBHII", recv_packet[:20])[5]
-            print("目标回复: {}  ttl: {}，耗时: {:<7.2f} 毫秒".format(addr[0], ttl, time_used))
-            self.probe_result_list.append({"time_start": time_start, "time_end": time_end, "time_used": time_used})
-        return
+            print("目标回复: {}  ttl: {}，耗时: {:<7.2f} 毫秒".format(addr[0], ttl, time_used * 1000))
+            self.probe_result_list.append(IcmpProbeResult(ttl=ttl, time_used=time_used, is_succeed=True))
+            self.received_at_least_1_package = True
+            self.detect_result_button.config(bg=self.succeed_color)
+        else:
+            self.probe_result_list.append(IcmpProbeResult(time_used=time.time() - time_start, is_succeed=False,
+                                                          failed_result="unknown"))
+            if self.received_at_least_1_package:
+                self.detect_result_button.config(bg=self.part_succeed_color)
+            else:
+                self.detect_result_button.config(bg=self.failed_color)
 
     def run(self):
         self.icmp_socket.settimeout(self.timeout)  # 设置超时，单位，秒
         probe_thread_list = []
+        self.detect_result_button.config(bg=self.start_color)
         for probe_index in range(self.probe_count):
             probe_thread = threading.Thread(target=self.recv_icmp_packet, )  # 创建子线程
             probe_thread.start()
@@ -4259,6 +4465,36 @@ class IcmpDetector:
         for probe_thread in probe_thread_list:
             probe_thread.join()
         self.icmp_socket.close()
+        self.is_finished = True
+        self.judge_detect_result()
+        if self.part_probe_succeed:
+            self.detect_result_button.config(bg=self.part_succeed_color)
+        elif self.total_probe_succeed:
+            self.detect_result_button.config(bg=self.succeed_color)
+        elif self.total_probe_failed:
+            self.detect_result_button.config(bg=self.failed_color)
+        else:
+            self.detect_result_button.config(bg=self.failed_color)
+
+    def judge_detect_result(self):
+        failed_count = 0
+        for probe_result in self.probe_result_list:
+            if not probe_result.is_succeed:
+                failed_count += 1
+        if failed_count == self.probe_count:
+            self.total_probe_failed = True
+        elif failed_count > 0:
+            self.part_probe_succeed = True
+        else:
+            self.total_probe_succeed = True
+
+
+class IcmpProbeResult:
+    def __init__(self, ttl: int = 0, time_used: float = 0.0, is_succeed=False, failed_result: str = ""):
+        self.ttl = ttl
+        self.time_used = time_used  # 单位：秒
+        self.is_succeed = is_succeed
+        self.failed_result = failed_result  # 如果不成功，则记录失败的原因
 
 
 class MainWindow:
