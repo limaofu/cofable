@@ -4175,6 +4175,10 @@ class BatchPingDetector:
             button_t = tkinter.Button(self.detector_info_widget_dict["frame"], text="", width=15, bg="white")
             button_t.grid(row=1, column=tmp)
             button_t.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+        # 插入一个所有检测是否完成提示按钮
+        button_all_status = tkinter.Button(self.detector_info_widget_dict["frame"], text="检测中", width=15, bg=self.start_color)
+        button_all_status.grid(row=1, column=5)
+        button_all_status.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         # 创建后端检测线程池
         # recv_package_thread = threading.Thread(target=self.recv_all_icmp_packet)
         # recv_package_thread.start()
@@ -4200,10 +4204,10 @@ class BatchPingDetector:
         print(f"BatchPingDetector.detect: 检测的ip数量为 {index}")
         self.update_top_frame()
         # 创建一个线程用于判断是否所有检测对象都完成了检测工作 self.ping_detect_obj_list=[]
-        judge_all_work_finished_thread = threading.Thread(target=self.judge_all_work_finished)
+        judge_all_work_finished_thread = threading.Thread(target=lambda: self.judge_all_work_finished(button_all_status))
         judge_all_work_finished_thread.start()
 
-    def judge_all_work_finished(self):
+    def judge_all_work_finished(self, button_all_status):
         while True:
             not_finished_num = 0
             for start_ping_detect_obj in self.ping_detect_obj_list:
@@ -4214,30 +4218,8 @@ class BatchPingDetector:
                 continue
             else:
                 print("BatchPingDetector.judge_all_work_finished: 检测完成")
+                button_all_status.config(text="检测完成", bg=self.succeed_color)
                 return
-
-    def recv_all_icmp_packet(self):
-        # 暂时不搞这个，这个可能不对
-        icmp_socket = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))
-        icmp_socket.settimeout(0.01)  # 设置超时，单位，秒
-        while True:
-            try:
-                recv_packet, addr = icmp_socket.recvfrom(1500)
-            except Exception as err:
-                if isinstance(err, TimeoutError):
-                    print(f'timeout')
-                    continue
-                else:
-                    print(f"Exception: {err.__str__()}")
-                    continue
-            received_time = time.time()
-            icmp_type, icmp_code, icmp_checkum, recv_id, icmp_sequence = struct.unpack("BBHHH", recv_packet[20:28])
-            ttl = struct.unpack("!BBHHHBBHII", recv_packet[:20])[5]
-            # 则往公共信息列表里放
-            received_data_obj = IcmpDetectReceivedData(icmp_type=icmp_type, icmp_code=icmp_code,
-                                                       icmp_checkum=icmp_checkum, icmp_sequence=icmp_sequence,
-                                                       ttl=ttl, received_time=received_time)
-            self.public_icmp_detect_recv_data_list.append(received_data_obj)
 
     def get_unduplicated_ip(self, input_lines):
         for line in input_lines.split("\n"):
@@ -4460,11 +4442,12 @@ class IcmpDetector:
     针对单个主机，每个主机（ip）对应一个IcmpDetector对象
     """
 
-    def __init__(self, dest_ip='undefined', icmp_data='data', source_ip='undefined', icmp_type=8, icmp_code=0,
+    def __init__(self, dest_ip='', icmp_data='', source_ip='', icmp_type=8, icmp_code=0,
                  probe_count=4, interval=2, timeout=2, detect_result_button=None, start_color="", succeed_color="",
                  failed_color="", part_succeed_color="", batch_ping_detector=None):
         self.id = uuid.uuid4().__str__()  # <str>
         self.dest_ip = dest_ip
+        self.dest_ip_int = cofnet.ip_mask_to_int(dest_ip)
         self.icmp_data = icmp_data.encode('utf8')
         self.source_ip = source_ip
         self.icmp_type = icmp_type
@@ -4523,7 +4506,7 @@ class IcmpDetector:
             recv_packet, addr = self.icmp_socket.recvfrom(1500)
         except Exception as err:
             if isinstance(err, TimeoutError):
-                print(f'timeout')
+                print(f'IcmpDetector.recv_icmp_packet: timeout')
                 self.probe_result_list.append(IcmpProbeResult(time_used=time.time() - time_start, is_succeed=False,
                                                               failed_result="timeout"))
                 if self.received_at_least_1_package:
@@ -4531,7 +4514,7 @@ class IcmpDetector:
                 else:
                     self.detect_result_button.config(bg=self.failed_color)
             else:
-                print(f"Exception: {err.__str__()}")
+                print(f"IcmpDetector.recv_icmp_packet: Exception: {err.__str__()}")
                 self.probe_result_list.append(
                     IcmpProbeResult(time_used=time.time() - time_start, is_succeed=False, failed_result=err.__str__()))
                 if self.received_at_least_1_package:
@@ -4540,35 +4523,41 @@ class IcmpDetector:
                     self.detect_result_button.config(bg=self.failed_color)
             return
         received_time = time.time()
+        # ip数据解析
+        target_ip_int, = struct.unpack("!I", recv_packet[12:16])  # 回复报文的源ip，即我们检测时的目标ip
+        # icmp数据解析
         icmp_type, icmp_code, icmp_checkum, icmp_id, icmp_sequence = struct.unpack("BBHHH", recv_packet[20:28])
         time_used = (received_time - time_start)  # 秒
         ttl = struct.unpack("!BBHHHBBHII", recv_packet[:20])[5]
-        if icmp_id == self.icmp_id and icmp_sequence == current_icmp_sequence:
-            print("目标回复: {}  ttl: {}，耗时: {:<7.2f} 毫秒".format(addr[0], ttl, time_used * 1000))
+        # 如果收到的回复是给自己的，则成功
+        if icmp_id == self.icmp_id and icmp_sequence == current_icmp_sequence and target_ip_int == self.dest_ip_int:
+            print("IcmpDetector.recv_icmp_packet: 目标回复: {}  ttl: {}，耗时: {:<7.2f} 毫秒".format(addr[0], ttl, time_used * 1000))
             self.probe_result_list.append(IcmpProbeResult(ttl=ttl, time_used=time_used, is_succeed=True))
             self.received_at_least_1_package = True
             self.detect_result_button.config(bg=self.succeed_color)
         else:  # 如果当前接收到的回复不是给自己的，则往公共信息列表里放
-            received_data_obj = IcmpDetectReceivedData(icmp_type=icmp_type, icmp_code=icmp_code,
+            received_data_obj = IcmpDetectReceivedData(icmp_type=icmp_type, icmp_code=icmp_code, target_ip_int=target_ip_int,
                                                        icmp_checkum=icmp_checkum, icmp_id=icmp_id, icmp_sequence=icmp_sequence,
                                                        ttl=ttl, received_time=received_time)
             self.batch_ping_detector.public_icmp_detect_recv_data_list.append(received_data_obj)
             # 再去查询公共信息列表是否已收到回包
-            wait_count = int(self.timeout / 0.5) + 1
+            wait_count = int(self.timeout / 0.2) + 1
             for i in range(wait_count):
-                time.sleep(0.5)
                 my_received_data_obj = self.get_received_data_in_public_icmp_detect_recv_data_list(current_icmp_sequence)
                 if my_received_data_obj is not None:
                     time_used2 = my_received_data_obj.received_time - time_start
-                    print("目标回复: {}  ttl: {}，耗时: {:<7.2f} 毫秒".format(addr[0], my_received_data_obj.ttl, time_used2 * 1000))
+                    print(f"IcmpDetector.recv_icmp_packet: 目标回复: {addr[0]}  ttl: {my_received_data_obj.ttl}",
+                          f"耗时: {time_used2 * 1000:<7.2f} 毫秒")
                     self.probe_result_list.append(IcmpProbeResult(ttl=ttl, time_used=time_used2, is_succeed=True))
                     self.received_at_least_1_package = True
                     self.detect_result_button.config(bg=self.succeed_color)
                     return
+                time.sleep(0.2)
             self.probe_result_list.append(IcmpProbeResult(time_used=time.time() - time_start, is_succeed=False,
                                                           failed_result="unknown"))
-            print(f"失败的目标回复: {addr[0]}  ttl: {ttl}，耗时: {time_used * 1000:<7.2f} 毫秒",
-                  f"current_seq {current_icmp_sequence},收到的seq_ {icmp_sequence}")
+            print(
+                f"IcmpDetector.recv_icmp_packet: 本次发包未收到回复: {addr[0]}  ttl: lost!  本函数处理耗时: {time_used * 1000:<7.2f} 毫秒",
+                f"current_seq {current_icmp_sequence}")
             if self.received_at_least_1_package:
                 self.detect_result_button.config(bg=self.part_succeed_color)
             else:
@@ -4576,13 +4565,13 @@ class IcmpDetector:
 
     def get_received_data_in_public_icmp_detect_recv_data_list(self, current_icmp_sequence):
         for received_data_obj in self.batch_ping_detector.public_icmp_detect_recv_data_list:
-            if received_data_obj.icmp_id == self.icmp_id and received_data_obj.icmp_sequence == current_icmp_sequence:
+            if received_data_obj.icmp_id == self.icmp_id and received_data_obj.icmp_sequence == current_icmp_sequence and received_data_obj.target_ip_int == self.dest_ip_int:
                 return received_data_obj
         return None
 
     def run(self):
         self.icmp_socket.settimeout(self.timeout)  # 设置超时，单位，秒
-        probe_thread_list = []
+        # probe_thread_list = []
         self.detect_result_button.config(bg=self.start_color)
         self.generate_new_icmp_packet()  # 先构建数据包
         # 发包
@@ -4636,7 +4625,7 @@ class IcmpProbeResult:
 
 class IcmpDetectReceivedData:
     def __init__(self, icmp_id=0x0000, icmp_type=8, icmp_code=0, icmp_checkum=0x0000,
-                 icmp_sequence=0x0000, ttl=0, received_time=0.0):
+                 icmp_sequence=0x0000, ttl=0, received_time=0.0, target_ip_int=0x0000):
         self.icmp_id = icmp_id
         self.icmp_type = icmp_type
         self.icmp_code = icmp_code
@@ -4644,6 +4633,7 @@ class IcmpDetectReceivedData:
         self.icmp_sequence = icmp_sequence
         self.ttl = ttl
         self.received_time = received_time
+        self.target_ip_int = target_ip_int  # 收到的回复报文的 源ip地址int值，即我们ping检测的目标ip
 
 
 class MainWindow:
