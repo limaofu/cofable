@@ -52,6 +52,8 @@
 ★. 优化输出逻辑，提升显示速度，如 TerminalFrontend.app_mode_print_all 这个函数           2024年4月17日 完成
 ★. 主机资源支持导出到xlsx表格文件，也支持从xlsx导入主机资源                                2024年4月26日 完成
 ★. 修改了主机登录认证凭据结构，之前是所有凭据都保存在Host.credential_oid_list里，现在改为单个登录认证凭据  2024年4月27日 完成
+★. 新增工具：ip计算器                                                                2024年4月30日 完成
+★. 新增工具：批量ping检测                                                            2024年5月3日 完成
 
 【资源操作逻辑】
 ★创建-资源        CreateResourceInFrame.show()  →  SaveResourceInMainWindow.save()
@@ -4004,9 +4006,12 @@ class BatchPingDetector:
         self.unduplicated_ip_list = []  # 需要检测的目标ip，去重的
         self.top_frame_height = 240
         self.bottom_frame_height = self.pop_win_height - self.top_frame_height
+        self.ping_detect_obj_list = []
         self.detector_info_widget_dict = {}
         self.widget_dict = {}  # 存放pop_window上的所有控件
         self.create_init_top_level_window()
+        self.public_icmp_detect_recv_data_list = []  # 元素为IcmpDetectReceivedData对象
+        self.is_finished = False  # 所有的检测工作是否完成
 
     def create_init_top_level_window(self):
         # ★★创建BatchPingDetector窗口★★
@@ -4031,12 +4036,12 @@ class BatchPingDetector:
         label_input_ip = tkinter.Label(top_frame, text="输入ip信息★:")  # ip信息为【必填】
         label_input_ip.grid(row=0, column=0, padx=self.padx, pady=self.pady)
         self.widget_dict["scrollbar_input_ip"] = tkinter.Scrollbar(top_frame)
-        self.widget_dict["text_input_ip"] = tkinter.Text(top_frame, width=56, height=6, insertbackground='green',
+        self.widget_dict["text_input_ip"] = tkinter.Text(top_frame, width=56, height=5, insertbackground='green',
                                                          font=self.text_font, bg="black", fg="white",
                                                          yscrollcommand=self.widget_dict["scrollbar_input_ip"].set)
-        self.widget_dict["text_input_ip"].grid(row=1, column=0, columnspan=3, padx=self.padx, pady=self.pady)
+        self.widget_dict["text_input_ip"].grid(row=1, column=0, columnspan=6, padx=self.padx, pady=self.pady)
         self.widget_dict["scrollbar_input_ip"].config(command=self.widget_dict["text_input_ip"].yview)
-        self.widget_dict["scrollbar_input_ip"].grid(row=1, column=3, padx=self.padx, pady=self.pady, sticky="NS")
+        self.widget_dict["scrollbar_input_ip"].grid(row=1, column=6, padx=self.padx, pady=self.pady, sticky="NS")
 
         label_detect_forks = tkinter.Label(top_frame, text="检测线程数:")  # 检测线程数为【选填】，默认为64
         label_detect_forks.grid(row=2, column=0, padx=self.padx, pady=self.pady)
@@ -4050,11 +4055,33 @@ class BatchPingDetector:
                                                                showvalue=False, length=200, sliderlength=50)
         self.widget_dict["detect_forks_scale"].configure(command=self.set_sv_detect_forks)
         self.widget_dict["detect_forks_scale"].set(128)
-        self.widget_dict["detect_forks_scale"].grid(row=2, column=2, padx=self.padx, pady=self.pady)
+        self.widget_dict["detect_forks_scale"].grid(row=2, column=2, columnspan=2, padx=self.padx, pady=self.pady)
+        # 每ip检测发包数量
+        label_probe_count = tkinter.Label(top_frame, text="每ip检测发包数量")
+        label_probe_count.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        self.widget_dict["sv_probe_count"] = tkinter.StringVar()
+        entry_probe_count = tkinter.Entry(top_frame, textvariable=self.widget_dict["sv_probe_count"], width=10)
+        self.widget_dict["sv_probe_count"].set("4")
+        entry_probe_count.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        # 发包间隔时间
+        label_probe_interval = tkinter.Label(top_frame, text="发包间隔时间")
+        label_probe_interval.grid(row=3, column=2, padx=self.padx, pady=self.pady)
+        self.widget_dict["sv_probe_interval"] = tkinter.StringVar()
+        entry_probe_interval = tkinter.Entry(top_frame, textvariable=self.widget_dict["sv_probe_interval"], width=10)
+        self.widget_dict["sv_probe_interval"].set("2")
+        entry_probe_interval.grid(row=3, column=3, padx=self.padx, pady=self.pady)
+        # 每个检测包超时
+        label_probe_timeout = tkinter.Label(top_frame, text="每个检测包超时")
+        label_probe_timeout.grid(row=3, column=4, padx=self.padx, pady=self.pady)
+        self.widget_dict["sv_probe_timeout"] = tkinter.StringVar()
+        entry_probe_timeout = tkinter.Entry(top_frame, textvariable=self.widget_dict["sv_probe_timeout"], width=10)
+        self.widget_dict["sv_probe_timeout"].set("2")
+        entry_probe_timeout.grid(row=3, column=5, padx=self.padx, pady=self.pady)
+        # 添加按钮
         button_detect = tkinter.Button(top_frame, text="开始检测", command=self.detect)
-        button_detect.grid(row=3, column=0, padx=self.padx, pady=self.pady)
+        button_detect.grid(row=4, column=0, padx=self.padx, pady=self.pady)
         button_clear = tkinter.Button(top_frame, text="清空", command=self.clear)
-        button_clear.grid(row=3, column=1, padx=self.padx, pady=self.pady)
+        button_clear.grid(row=4, column=1, padx=self.padx, pady=self.pady)
         # 在bottom_frame中添加canvas-frame滚动框
         self.clear_tkinter_widget(bottom_frame)
         self.detector_info_widget_dict["scrollbar_normal"] = tkinter.Scrollbar(bottom_frame)
@@ -4096,12 +4123,25 @@ class BatchPingDetector:
         self.clear_tkinter_widget(self.detector_info_widget_dict["frame"])
         input_lines = self.widget_dict["text_input_ip"].get("1.0", tkinter.END).strip()
         detect_forks = self.widget_dict["sv_detect_forks"].get()
+        probe_count = self.widget_dict["sv_probe_count"].get()
+        probe_interval = self.widget_dict["sv_probe_interval"].get()
+        probe_timeout = self.widget_dict["sv_probe_timeout"].get()
         if detect_forks.isdigit():
             detect_forks_int = int(detect_forks)
         else:
             detect_forks_int = 128
-        print(input_lines)
-        print(detect_forks_int)
+        if probe_count.isdigit():
+            probe_count_int = int(probe_count)
+        else:
+            probe_count_int = 4
+        if probe_interval.isdigit():
+            probe_interval_int = int(probe_interval)
+        else:
+            probe_interval_int = 2
+        if probe_timeout.isdigit():
+            probe_timeout_int = int(probe_timeout)
+        else:
+            probe_timeout_int = 2
         self.get_unduplicated_ip(input_lines)
         # 启动检测线程，并在detector_info_frame展示结果
         # print("BatchPingDetector.detect: 要检测的ip如下:")
@@ -4136,6 +4176,8 @@ class BatchPingDetector:
             button_t.grid(row=1, column=tmp)
             button_t.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
         # 创建后端检测线程池
+        # recv_package_thread = threading.Thread(target=self.recv_all_icmp_packet)
+        # recv_package_thread.start()
         thread_pool_1 = ThreadPoolExecutor(max_workers=detect_forks_int)
         index = 0
         for ip in self.unduplicated_ip_list:
@@ -4144,16 +4186,58 @@ class BatchPingDetector:
             column = index % 5
             start_ping_detect_obj = StartPingDetect(top_frame=self.detector_info_widget_dict["frame"], global_info=self.global_info,
                                                     width=self.pop_win_width - self.scrollbar_width, top_window=self.pop_window,
-                                                    ip_address=ip, probe_count=4, interval=2, timeout=2,
+                                                    ip_address=ip, probe_count=probe_count_int,
+                                                    interval=probe_interval_int, timeout=probe_timeout_int,
                                                     start_color=self.start_color, succeed_color=self.succeed_color,
-                                                    failed_color=self.failed_color, part_succeed_color=self.part_succeed_color)
+                                                    failed_color=self.failed_color, part_succeed_color=self.part_succeed_color,
+                                                    batch_ping_detector=self)
             thread_pool_1.submit(start_ping_detect_obj.start)  # 向线程池提交一个作业
             start_ping_detect_obj.detect_result_button.grid(row=row + 2, column=column)
             start_ping_detect_obj.detect_result_button.bind("<MouseWheel>", self.proces_mouse_scroll_of_top_frame)
+            self.ping_detect_obj_list.append(start_ping_detect_obj)
             index += 1
         thread_pool_1.shutdown(wait=False)  # wait=False时，此方法会立即返回，而不会等待任务完成
         print(f"BatchPingDetector.detect: 检测的ip数量为 {index}")
         self.update_top_frame()
+        # 创建一个线程用于判断是否所有检测对象都完成了检测工作 self.ping_detect_obj_list=[]
+        judge_all_work_finished_thread = threading.Thread(target=self.judge_all_work_finished)
+        judge_all_work_finished_thread.start()
+
+    def judge_all_work_finished(self):
+        while True:
+            not_finished_num = 0
+            for start_ping_detect_obj in self.ping_detect_obj_list:
+                if not start_ping_detect_obj.is_finished:
+                    not_finished_num += 1
+            if not_finished_num > 0:
+                time.sleep(0.1)
+                continue
+            else:
+                print("BatchPingDetector.judge_all_work_finished: 检测完成")
+                return
+
+    def recv_all_icmp_packet(self):
+        # 暂时不搞这个，这个可能不对
+        icmp_socket = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))
+        icmp_socket.settimeout(0.01)  # 设置超时，单位，秒
+        while True:
+            try:
+                recv_packet, addr = icmp_socket.recvfrom(1500)
+            except Exception as err:
+                if isinstance(err, TimeoutError):
+                    print(f'timeout')
+                    continue
+                else:
+                    print(f"Exception: {err.__str__()}")
+                    continue
+            received_time = time.time()
+            icmp_type, icmp_code, icmp_checkum, recv_id, icmp_sequence = struct.unpack("BBHHH", recv_packet[20:28])
+            ttl = struct.unpack("!BBHHHBBHII", recv_packet[:20])[5]
+            # 则往公共信息列表里放
+            received_data_obj = IcmpDetectReceivedData(icmp_type=icmp_type, icmp_code=icmp_code,
+                                                       icmp_checkum=icmp_checkum, icmp_sequence=icmp_sequence,
+                                                       ttl=ttl, received_time=received_time)
+            self.public_icmp_detect_recv_data_list.append(received_data_obj)
 
     def get_unduplicated_ip(self, input_lines):
         for line in input_lines.split("\n"):
@@ -4206,7 +4290,12 @@ class BatchPingDetector:
         self.widget_dict["sv_detect_forks"].set(128)
         self.widget_dict["detect_forks_scale"].set(128)
         self.widget_dict["text_input_ip"].delete("1.0", tkinter.END)
+        self.widget_dict["sv_probe_count"].set("4")
+        self.widget_dict["sv_probe_interval"].set("2")
+        self.widget_dict["sv_probe_timeout"].set("2")
+        self.clear_tkinter_widget(self.detector_info_widget_dict["frame"])
         self.unduplicated_ip_list = []
+        self.ping_detect_obj_list = []
 
     def set_sv_detect_forks(self, detect_forks: int):
         # print(type(detect_forks))  # <class 'str'>
@@ -4229,8 +4318,13 @@ class BatchPingDetector:
 
 
 class StartPingDetect:
+    """
+    针对单个主机，每个主机（ip）对应一个StartPingDetect对象
+    """
+
     def __init__(self, top_frame=None, width=300, height=50, ip_address="", probe_count=4, interval=2, timeout=2,
-                 start_color="", succeed_color="", failed_color="", part_succeed_color="", top_window=None, global_info=None):
+                 start_color="", succeed_color="", failed_color="", part_succeed_color="",
+                 batch_ping_detector=None, top_window=None, global_info=None):
         self.top_frame = top_frame
         self.width = width
         self.height = height
@@ -4238,6 +4332,7 @@ class StartPingDetect:
         self.probe_count = probe_count  # 发送的检测包数量
         self.interval = interval  # 每个检测包发送时间间隔，单位：秒
         self.timeout = timeout  # 每个检测包超时时间，单位：秒
+        self.batch_ping_detector = batch_ping_detector
         self.top_window = top_window  # 上一级window
         self.global_info = global_info
         self.detect_result_button = tkinter.Button(self.top_frame, text=self.ip_address, width=15, bg="gray", bd=1)
@@ -4255,16 +4350,19 @@ class StartPingDetect:
         self.detect_result_frame = None  # 对每个ip的检测结果都在这个Frame里展示
         self.result_widget_dict = {}
         self.icmp_detector_obj = None
+        self.is_finished = False
 
     def start(self):
         self.icmp_detector_obj = IcmpDetector(dest_ip=self.ip_address, probe_count=self.probe_count, interval=self.interval,
                                               timeout=self.timeout, detect_result_button=self.detect_result_button,
                                               start_color=self.start_color, succeed_color=self.succeed_color,
-                                              failed_color=self.failed_color, part_succeed_color=self.part_succeed_color)
+                                              failed_color=self.failed_color, part_succeed_color=self.part_succeed_color,
+                                              batch_ping_detector=self.batch_ping_detector)
         # icmp_detect_thread=threading.Thread(target=icmp_detector_obj.run)
         # icmp_detect_thread.start()
         self.detect_result_button.config(command=self.show_detect_details)
-        self.icmp_detector_obj.run()
+        self.icmp_detector_obj.run()  # 这个结束后，就检测完成了
+        self.is_finished = True
 
     def show_detect_details(self):
         # ★★创建BatchPingDetector窗口★★
@@ -4317,7 +4415,7 @@ class StartPingDetect:
                 # 写文字，probe序号，时延（毫秒），TTL
                 self.result_widget_dict["canvas"].create_text(index * 50 + 25 + (index * offset), 25, text=str(index), fill="red")
                 self.result_widget_dict["canvas"].create_text(index * 50 + 25 + (index * offset), 50 + 7,
-                                                              text=f"时延 {probe_result_obj.time_used * 1000:.2f} ms", fill="red")  # 时延（毫秒）
+                                                              text=f"时延 {probe_result_obj.time_used * 1000:.2f} ms", fill="red")
                 self.result_widget_dict["canvas"].create_text(index * 50 + 25 + (index * offset), 50 + 22,
                                                               text=f"ttl:  {probe_result_obj.ttl}", fill="red")  # ttl
             else:
@@ -4338,6 +4436,8 @@ class StartPingDetect:
                                                           50 - 15,
                                                           fill="white", width=0,
                                                           outline="white")
+            self.result_widget_dict["canvas"].create_text(index * 50 + 25 + (index * offset), 25,
+                                                          text=f"{index}", fill="red")  # ttl
             index += 1
         # 更新Frame的尺寸
         self.result_widget_dict["canvas"].configure(scrollregion=(0, 0, self.probe_count * 50 + ((self.probe_count - 1) * offset), 50))
@@ -4356,17 +4456,21 @@ class StartPingDetect:
 
 
 class IcmpDetector:
+    """
+    针对单个主机，每个主机（ip）对应一个IcmpDetector对象
+    """
+
     def __init__(self, dest_ip='undefined', icmp_data='data', source_ip='undefined', icmp_type=8, icmp_code=0,
-                 probe_count=3, interval=3, timeout=3, detect_result_button=None, start_color="", succeed_color="",
-                 failed_color="", part_succeed_color=""):
+                 probe_count=4, interval=2, timeout=2, detect_result_button=None, start_color="", succeed_color="",
+                 failed_color="", part_succeed_color="", batch_ping_detector=None):
         self.id = uuid.uuid4().__str__()  # <str>
         self.dest_ip = dest_ip
         self.icmp_data = icmp_data.encode('utf8')
         self.source_ip = source_ip
         self.icmp_type = icmp_type
         self.icmp_code = icmp_code
-        self.icmp_id = random.randint(0, 0xFFFF)
-        self.icmp_sequence = random.randint(0, 0xFFFF)
+        self.icmp_id = random.randint(0, 0xFFFF)  # 一次检测中不论发几个包，id都不变
+        self.icmp_sequence = random.randint(0, 0xFFFF)  # 每发一个包，就增加1
         self.icmp_checkum = 0x0000  # 生成icmp_packet报文后，icmp_checksum也更新了
         self.probe_count = probe_count
         self.interval = interval
@@ -4376,7 +4480,8 @@ class IcmpDetector:
         self.succeed_color = succeed_color
         self.failed_color = failed_color
         self.part_succeed_color = part_succeed_color
-        self.icmp_packet = self.generate_icmp_packet()  # 生成icmp报文后，上面的icmp_checksum也更新了
+        self.batch_ping_detector = batch_ping_detector
+        self.icmp_packet = b''  # 生成icmp报文后，上面的icmp_checksum也更新了
         self.icmp_socket = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))
         self.probe_result_list = []  # 元素为IcmpProbeResult对象
         self.received_at_least_1_package = False  # 至少收到了1个回复
@@ -4400,7 +4505,8 @@ class IcmpDetector:
             checksum = (checksum >> 16) + (checksum & 0xffff)
         return (~checksum) & 0xffff  # 反回2字节校验和的反码
 
-    def generate_icmp_packet(self):
+    def generate_new_icmp_packet(self):
+        self.icmp_sequence = (self.icmp_sequence + 1) % 0xFFFF
         icmp_checkum = 0x0000
         icmp_header = struct.pack('BBHHH', self.icmp_type, self.icmp_code, icmp_checkum, self.icmp_id,
                                   self.icmp_sequence)
@@ -4409,9 +4515,9 @@ class IcmpDetector:
         self.icmp_checkum = icmp_checkum
         icmp_header = struct.pack('BBHHH', self.icmp_type, self.icmp_code, icmp_checkum, self.icmp_id,
                                   self.icmp_sequence)
-        return icmp_header + self.icmp_data
+        self.icmp_packet = icmp_header + self.icmp_data
 
-    def recv_icmp_packet(self):
+    def recv_icmp_packet(self, current_icmp_sequence):
         time_start = time.time()
         try:
             recv_packet, addr = self.icmp_socket.recvfrom(1500)
@@ -4433,39 +4539,70 @@ class IcmpDetector:
                 else:
                     self.detect_result_button.config(bg=self.failed_color)
             return
-        icmp_type, icmp_code, icmp_checkum, recv_id, icmp_sequence = struct.unpack("BBHHH", recv_packet[20:28])
-        time_used = (time.time() - time_start)  # 秒
-        if recv_id == self.icmp_id and icmp_sequence == self.icmp_sequence:
-            ttl = struct.unpack("!BBHHHBBHII", recv_packet[:20])[5]
+        received_time = time.time()
+        icmp_type, icmp_code, icmp_checkum, icmp_id, icmp_sequence = struct.unpack("BBHHH", recv_packet[20:28])
+        time_used = (received_time - time_start)  # 秒
+        ttl = struct.unpack("!BBHHHBBHII", recv_packet[:20])[5]
+        if icmp_id == self.icmp_id and icmp_sequence == current_icmp_sequence:
             print("目标回复: {}  ttl: {}，耗时: {:<7.2f} 毫秒".format(addr[0], ttl, time_used * 1000))
             self.probe_result_list.append(IcmpProbeResult(ttl=ttl, time_used=time_used, is_succeed=True))
             self.received_at_least_1_package = True
             self.detect_result_button.config(bg=self.succeed_color)
-        else:
+        else:  # 如果当前接收到的回复不是给自己的，则往公共信息列表里放
+            received_data_obj = IcmpDetectReceivedData(icmp_type=icmp_type, icmp_code=icmp_code,
+                                                       icmp_checkum=icmp_checkum, icmp_id=icmp_id, icmp_sequence=icmp_sequence,
+                                                       ttl=ttl, received_time=received_time)
+            self.batch_ping_detector.public_icmp_detect_recv_data_list.append(received_data_obj)
+            # 再去查询公共信息列表是否已收到回包
+            wait_count = int(self.timeout / 0.5) + 1
+            for i in range(wait_count):
+                time.sleep(0.5)
+                my_received_data_obj = self.get_received_data_in_public_icmp_detect_recv_data_list(current_icmp_sequence)
+                if my_received_data_obj is not None:
+                    time_used2 = my_received_data_obj.received_time - time_start
+                    print("目标回复: {}  ttl: {}，耗时: {:<7.2f} 毫秒".format(addr[0], my_received_data_obj.ttl, time_used2 * 1000))
+                    self.probe_result_list.append(IcmpProbeResult(ttl=ttl, time_used=time_used2, is_succeed=True))
+                    self.received_at_least_1_package = True
+                    self.detect_result_button.config(bg=self.succeed_color)
+                    return
             self.probe_result_list.append(IcmpProbeResult(time_used=time.time() - time_start, is_succeed=False,
                                                           failed_result="unknown"))
+            print(f"失败的目标回复: {addr[0]}  ttl: {ttl}，耗时: {time_used * 1000:<7.2f} 毫秒",
+                  f"current_seq {current_icmp_sequence},收到的seq_ {icmp_sequence}")
             if self.received_at_least_1_package:
                 self.detect_result_button.config(bg=self.part_succeed_color)
             else:
                 self.detect_result_button.config(bg=self.failed_color)
 
+    def get_received_data_in_public_icmp_detect_recv_data_list(self, current_icmp_sequence):
+        for received_data_obj in self.batch_ping_detector.public_icmp_detect_recv_data_list:
+            if received_data_obj.icmp_id == self.icmp_id and received_data_obj.icmp_sequence == current_icmp_sequence:
+                return received_data_obj
+        return None
+
     def run(self):
         self.icmp_socket.settimeout(self.timeout)  # 设置超时，单位，秒
         probe_thread_list = []
         self.detect_result_button.config(bg=self.start_color)
+        self.generate_new_icmp_packet()  # 先构建数据包
+        # 发包
         for probe_index in range(self.probe_count):
-            probe_thread = threading.Thread(target=self.recv_icmp_packet, )  # 创建子线程
+            probe_thread = threading.Thread(target=lambda: self.recv_icmp_packet(self.icmp_sequence))  # 创建子线程
             probe_thread.start()
             try:
+                # 每次发送完报文后，此icmp_socket就变了，所以要先创建match_recv_icmp_packet匹配接收线程
                 self.icmp_socket.sendto(self.icmp_packet, (self.dest_ip, 0))
             except Exception as e:
                 raise e
-            probe_thread_list.append(probe_thread)
-            time.sleep(self.interval)
-        for probe_thread in probe_thread_list:
             probe_thread.join()
-        self.icmp_socket.close()
+            # probe_thread_list.append(probe_thread)
+            # time.sleep(self.interval)
+        # 等待所有的包都接收到回复或超时
+        # for probe_thread in probe_thread_list:
+        #     probe_thread.join()
+        self.icmp_socket.close()  # 关闭socket
         self.is_finished = True
+        # 判断完成情况
         self.judge_detect_result()
         if self.part_probe_succeed:
             self.detect_result_button.config(bg=self.part_succeed_color)
@@ -4495,6 +4632,18 @@ class IcmpProbeResult:
         self.time_used = time_used  # 单位：秒
         self.is_succeed = is_succeed
         self.failed_result = failed_result  # 如果不成功，则记录失败的原因
+
+
+class IcmpDetectReceivedData:
+    def __init__(self, icmp_id=0x0000, icmp_type=8, icmp_code=0, icmp_checkum=0x0000,
+                 icmp_sequence=0x0000, ttl=0, received_time=0.0):
+        self.icmp_id = icmp_id
+        self.icmp_type = icmp_type
+        self.icmp_code = icmp_code
+        self.icmp_checkum = icmp_checkum
+        self.icmp_sequence = icmp_sequence
+        self.ttl = ttl
+        self.received_time = received_time
 
 
 class MainWindow:
