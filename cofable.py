@@ -6633,7 +6633,6 @@ class ListResourceInFrame:
                                                                                  canvas_width=100, canvas_height=24,
                                                                                  global_info=self.global_info)
                 set_inspection_template_status_obj.set()
-                start_obj.inspection_template_status = set_inspection_template_status_obj
             # ★Host-open_terminal
             if self.resource_type == RESOURCE_TYPE_HOST:
                 # 打开单独式终端
@@ -6694,26 +6693,15 @@ class SetInspectionTemplateStatus:
             self.inspection_template.oid)
         if len(existed_inspection_job_obj_list) > 0:
             print("SetInspectionTemplateStatus.set: 已有历史巡检作业！")
+            self.canvas_status.delete(*self.canvas_status.find_all())
             self.canvas_status.create_oval(0, 0, self.canvas_height, self.canvas_height, fill="#1075d8", width=0, outline="#1075d8")
             for job in existed_inspection_job_obj_list:
                 if job.job_state == INSPECTION_JOB_EXEC_STATE_STARTED:
                     print("SetInspectionTemplateStatus.set: 还有历史作业未完成！")
+                    self.canvas_status.delete(*self.canvas_status.find_all())
                     self.canvas_status.create_oval(0, 0, self.canvas_height, self.canvas_height, fill="green", width=0, outline="green")
-
-    def set_started(self):
-        self.canvas_status.delete(*self.canvas_status.find_all())
-        self.canvas_status.create_oval(0, 0, self.canvas_height, self.canvas_height, fill="green", width=0, outline="green")
-        self.canvas_status.create_text(self.canvas_height + 30, self.canvas_height // 2, text="运行中", fill="black")
-
-    def set_completed(self):
-        self.canvas_status.delete(*self.canvas_status.find_all())
-        self.canvas_status.create_oval(0, 0, self.canvas_height, self.canvas_height, fill="#00b7c3", width=0, outline="#00b7c3")
-        self.canvas_status.create_text(self.canvas_height + 30, self.canvas_height // 2, text="已完成", fill="black")
-
-    def set_failed(self):
-        self.canvas_status.delete(*self.canvas_status.find_all())
-        self.canvas_status.create_oval(0, 0, self.canvas_height, self.canvas_height, fill="red", width=0, outline="red")
-        self.canvas_status.create_text(self.canvas_height + 30, self.canvas_height // 2, text="失败", fill="black")
+                    self.canvas_status.create_text(self.canvas_height + 30, self.canvas_height // 2, text="运行中", fill="black")
+        self.canvas_status.after(1000, self.set, )
 
 
 class ViewResourceInFrame:
@@ -9552,7 +9540,6 @@ class StartInspectionTemplateInFrame:
         # self.resource_info_dict = {}  # 用于存储资源对象信息的diction，这个可不要了
         self.current_inspection_job_obj = None  # 为 <LaunchInspectionJob> 类对象
         self.current_row_index = 0
-        self.inspection_template_status = None  # <SetInspectionTemplateStatus> 用于显示当前模板的状态，启动作业后要更新一次
 
     def start(self):
         existed_inspection_job_obj_list = self.global_info.get_inspection_job_record_obj_by_inspection_template_oid(
@@ -9573,62 +9560,8 @@ class StartInspectionTemplateInFrame:
                                                                   global_info=self.global_info)
             launch_job_thread = threading.Thread(target=self.current_inspection_job_obj.start_job)
             launch_job_thread.start()  # 线程start后，不要join()，主界面才不会卡住
-            self.inspection_template_status.set_started()  # 更新显示状态
-            refresh_template_status_thread = threading.Thread(target=self.refresh_template_status)
-            refresh_template_status_thread.start()
-            # ★进入作业详情页面★
-            # for widget in self.global_info.main_window.nav_frame_r.winfo_children():
-            #     widget.destroy()
-            # self.create_frame_with_scrollbar()
-            # self.show_inspection_job_status()
-            # self.add_return_button()
-            # self.update_frame()  # 更新Frame的尺寸，并将滚动条移到最开头
         else:
             print("StartInspectionTemplateInFrame.start: 取消启动巡检作业")
-
-    def refresh_template_status(self):
-        index = 0
-        while True:
-            if index >= MAX_EXEC_WAIT_COUNT:
-                break
-            time.sleep(CODE_POST_WAIT_TIME_DEFAULT)
-            if self.current_inspection_job_obj.job_state == INSPECTION_JOB_EXEC_STATE_FAILED:
-                self.inspection_template_status.set_failed()  # 更新显示状态
-                break
-            elif self.current_inspection_job_obj.job_state == INSPECTION_JOB_EXEC_STATE_COMPLETED:
-                self.inspection_template_status.set_completed()  # 更新显示状态
-                break
-            elif self.current_inspection_job_obj.job_state == INSPECTION_JOB_EXEC_STATE_PART_COMPLETED:
-                self.inspection_template_status.set_completed()  # 更新显示状态
-                break
-            else:
-                index += 1
-                continue
-
-    def proces_mouse_scroll(self, event):
-        if event.delta > 0:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(-1, 'units')  # 向上移动
-        else:
-            self.nav_frame_r_widget_dict["canvas"].yview_scroll(1, 'units')  # 向下移动
-
-    def update_frame(self):
-        # 更新Frame的尺寸
-        self.nav_frame_r_widget_dict["frame"].update_idletasks()
-        self.nav_frame_r_widget_dict["canvas"].configure(
-            scrollregion=(0, 0, self.nav_frame_r_widget_dict["frame"].winfo_width(),
-                          self.nav_frame_r_widget_dict["frame"].winfo_height()))
-        self.nav_frame_r_widget_dict["canvas"].bind("<MouseWheel>", self.proces_mouse_scroll)
-        self.nav_frame_r_widget_dict["frame"].bind("<MouseWheel>", self.proces_mouse_scroll)
-        # 滚动条移到最开头
-        self.nav_frame_r_widget_dict["canvas"].yview(tkinter.MOVETO, 0.0)  # MOVETO表示移动到，0.0表示最开头
-
-    def add_return_button(self):
-        # ★★添加“返回资源列表”按钮★★
-        button_return = tkinter.Button(self.nav_frame_r_widget_dict["frame"], text="返回资源列表",
-                                       command=lambda: self.global_info.main_window.nav_frame_r_resource_top_page_display(
-                                           RESOURCE_TYPE_INSPECTION_TEMPLATE))
-        button_return.bind("<MouseWheel>", self.proces_mouse_scroll)
-        button_return.grid(row=self.current_row_index + 1, column=1, padx=self.padx, pady=self.pady)
 
 
 class ListInspectionJobInFrame:
