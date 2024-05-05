@@ -1959,7 +1959,8 @@ class SSHOperatorOutput:
 
 class SSHOperator:
     """
-    一个<SSHOperator>对象操作一个<InspectionCodeBlock>巡检代码块的所有命令
+    一个<SSHOperator>对象负责一台主机的ssh会话建议与关闭，目前只支持invoke_shell交互式shell，
+    每次调用 run_invoke_shell()函数去操作一个<InspectionCodeBlock>巡检代码块的所有命令
     """
 
     def __init__(self, hostname='', username='', password='', private_key='', port=22,
