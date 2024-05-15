@@ -1,0 +1,5 @@
+paramiko
+pyglet
+pyperclip
+openpyxl
+schedule
