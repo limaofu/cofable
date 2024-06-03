@@ -6,12 +6,13 @@
 # author: Cof-Lee
 # start_date: 2024-01-17
 # this module uses the GPL-3.0 open source protocol
-# update: 2024-05-05
+# update: 2024-06-03
 
 """
 【开发日志】
 ★. 执行命令时进行判断回复                                                             2024年1月23日 基本完成
-★. 登录凭据的选择与多次尝试各同类凭据（当同类型凭据有多个时），只选择第一个能成功登录的cred     2024年1月23日 完成
+★. 登录凭据的选择与多次尝试各同类凭据（当同类型凭据有多个时），只选择第一个能成功登录的cred     2024年1月23日 完成 （已改逻辑）
+    ↑ 登录凭据已固定为1个，做成Host类的属性了
 ★. ssh密码登录，ssh密钥登录                                                          2024年1月23日 完成
 ★. 所有输出整理到txt文件                                                             2024年1月24日 完成
 ★. 所有输出根据模板设置，确认是否自动保存到txt文件以及文件名风格                           2024年3月4日 完成
@@ -121,6 +122,9 @@ COF_TRUE = 1
 COF_FALSE = 0
 COF_YES = 1
 COF_NO = 0
+COF_STATUS_FAILED = 0
+COF_STATUS_SUCCEED = 1
+COF_STATUS_UNKNOWN = 2
 CRED_TYPE_SSH_PASS = 0
 CRED_TYPE_SSH_KEY = 1
 CRED_TYPE_TELNET = 2
@@ -1351,7 +1355,13 @@ class LaunchInspectionJob:
         ssh_operator = SSHOperator(hostname=host_obj.address, port=host_obj.port, username=cred.username,
                                    password=cred.password, private_key=cred.private_key, auth_method=auth_method,
                                    timeout=LOGIN_AUTH_TIMEOUT, host_job_status_obj=host_job_status_obj)
-        ssh_operator.create_invoke_shell()  # 创建ssh连接，不论有多少个巡检代码块，这里只用登录一次
+        ret = ssh_operator.create_invoke_shell()  # 创建ssh连接，不论有多少个巡检代码块，这里只用登录一次
+        if ret != COF_STATUS_SUCCEED:
+            # 整体完成情况
+            host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_FAILED
+            print("LaunchInspectionJob.create_ssh_operator_invoke_shell: 目标主机",
+                  f"{host_obj.name} 巡检失败，远程方式: ssh <<<<<<<<<<<<<<<<<<")
+            return
         # 巡检代码块不去重，依次执行，串行执行
         inspection_code_block_index = 0
         for inspection_code_block_obj in inspection_code_block_obj_list:
@@ -2002,10 +2012,10 @@ class SSHOperator:
                 pass
         except paramiko.AuthenticationException as err:
             print(f"SSHOperator.create_invoke_shell : Authentication Error: {err}")
-            return
+            return COF_STATUS_FAILED
         except Exception as err:
             print(f"SSHOperator.create_invoke_shell: {err}")
-            return
+            return COF_STATUS_FAILED
         # ★★连接后，创建invoke_shell交互式shell★★
         self.ssh_shell = self.ssh_client.invoke_shell(width=SHELL_TERMINAL_WIDTH, height=SHELL_TERMINAL_HEIGHT)  # 创建一个交互式shell
         time.sleep(CODE_POST_WAIT_TIME_DEFAULT)  # 远程连接后，首先等待一会，可能会有信息输出
@@ -2014,7 +2024,7 @@ class SSHOperator:
         except Exception as err:
             print(f"SSHOperator.create_invoke_shell: {err}")
             self.run_status = INSPECTION_JOB_EXEC_STATE_FAILED
-            return
+            return COF_STATUS_FAILED
         # 创建命令输出对象<SSHOperatorOutput>，一条命令对应一个<SSHOperatorOutput>对象
         invoke_shell_output_str_list = login_recv.decode('utf8').split('\r\n')
         invoke_shell_output_str = '\n'.join(invoke_shell_output_str_list)  # 这与前面一行共同作用是去除'\r'
@@ -2023,6 +2033,7 @@ class SSHOperator:
                                          invoke_shell_output_bytes=login_recv)
         self.output_list.append(output_login)  # 刚登录后的输出信息保存到output_list里
         print("SSHOperator.create_invoke_shell : 登录后输出内容如下 #################\n", invoke_shell_output_str)
+        return COF_STATUS_SUCCEED
 
     def close_invoke_shell(self):
         """
@@ -4574,8 +4585,8 @@ class MainWindow:
         self.about_info_list = ["CofAble，可视化运维巡检工具，个人运维工具中的瑞士军刀",
                                 "版本:  v1.0 pre",
                                 "本软件使用GPL-v3.0协议开源",
-                                "作者:  Cof-Lee（李茂福）",
-                                "更新时间: 2024-05-05"]
+                                "作者:  李茂福",
+                                "更新时间: 2024-06-03"]
         self.padx = 2
         self.pady = 2
         self.view_width = 20
@@ -6602,9 +6613,9 @@ class SetInspectionTemplateStatus:
         existed_inspection_job_obj_list = self.global_info.get_inspection_job_record_obj_by_inspection_template_oid(
             self.inspection_template.oid)
         if len(existed_inspection_job_obj_list) > 0:
-            print("SetInspectionTemplateStatus.set: 已有历史巡检作业！")
+            # print("SetInspectionTemplateStatus.set: 已有历史巡检作业！")
             self.canvas_status.delete(*self.canvas_status.find_all())
-            self.canvas_status.create_oval(0, 0, self.canvas_height, self.canvas_height, fill="#1075d8", width=0, outline="#1075d8")
+            # self.canvas_status.create_oval(0, 0, self.canvas_height, self.canvas_height, fill="#1075d8", width=0, outline="#1075d8")
             for job in existed_inspection_job_obj_list:
                 if job.job_state == INSPECTION_JOB_EXEC_STATE_STARTED:
                     print("SetInspectionTemplateStatus.set: 还有历史作业未完成！")
