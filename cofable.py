@@ -1351,11 +1351,11 @@ class LaunchInspectionJob:
             auth_method = AUTH_METHOD_SSH_PASS
         else:
             auth_method = AUTH_METHOD_SSH_KEY
-        # 一个<SSHOperator>对象操作一个<InspectionCodeBlock>巡检代码块的所有命令，这种做法决定了每执行一个巡检代码块都要登录一次主机，后续需要优化一下
+        # 一个<SSHOperator>对象操作所有<InspectionCodeBlock>巡检代码块的所有命令
         ssh_operator = SSHOperator(hostname=host_obj.address, port=host_obj.port, username=cred.username,
                                    password=cred.password, private_key=cred.private_key, auth_method=auth_method,
                                    timeout=LOGIN_AUTH_TIMEOUT, host_job_status_obj=host_job_status_obj)
-        ret = ssh_operator.create_invoke_shell()  # 创建ssh连接，不论有多少个巡检代码块，这里只用登录一次
+        ret = ssh_operator.create_invoke_shell()  # 创建ssh连接，不论有多少个巡检代码块，这里只用登录一次，登录后首次输出内容也是在这里获取
         if ret != COF_STATUS_SUCCEED:
             # 整体完成情况
             host_job_status_obj.job_status = INSPECTION_JOB_EXEC_STATE_FAILED
@@ -1388,7 +1388,7 @@ class LaunchInspectionJob:
             # 1台主机所有巡检代码块的输出都保存在一个文件里里 （含首次登录后输出的信息）
             if self.inspection_template.save_output_to_file == COF_YES:
                 self.save_ssh_operator_output_to_file(ssh_operator.output_list, host_obj, self.inspection_template.output_file_name_style)
-            # 输出信息保存到sqlite数据库★★   首次登录后输出的信息 没有保存到数据库中！有待后续优化
+            # 输出信息保存到sqlite数据库★★
             self.save_ssh_operator_invoke_shell_output_to_sqlite(ssh_operator.output_list, host_obj)
         # 判断整体完成情况
         if host_job_status_obj.exec_timeout == COF_NO and host_job_status_obj.find_credential_status == FIND_CREDENTIAL_STATUS_SUCCEED:
@@ -1781,6 +1781,32 @@ class Vt100ToPlaintext:
                 new_block_str = block_str[ret.end():]
                 if len(new_block_str) > 0:
                     self.plain_text_block_list.append(new_block_str)
+                continue
+            # ★匹配 [?25h  [?2004h  -->  显示光标；普通模式暂不处理这个，直接在当前位置插入剩下的普通字符
+            match_pattern = r'^\[\?\d{1,}h'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode: 匹配到了 {match_pattern}")
+                # 匹配到之后，可能 block_bytes[ret.end():] 有其他内容
+                new_block_str = block_str[ret.end():]
+                if len(new_block_str) > 0:
+                    self.plain_text_block_list.append(new_block_str)
+                continue
+            # ★匹配 [?25l  [?2004l  -->  隐藏光标；普通模式暂不处理这个，直接在当前位置插入剩下的普通字符
+            match_pattern = r'^\[\?\d{1,}l'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                # print(f"TerminalFrontend.process_received_bytes_on_normal_mode: 匹配到了 {match_pattern}")
+                # 匹配到之后，可能 block_bytes[ret.end():] 之后有个\r（光标移到行首）
+                new_block_str = block_str[ret.end():]
+                if len(new_block_str) > 0:
+                    match_pattern = '^\\r'
+                    ret = re.search(match_pattern, new_block_str)
+                    if ret is not None:
+                        new_block_str2 = new_block_str[1:]
+                        self.plain_text_block_list.append(new_block_str2)
+                    else:
+                        self.plain_text_block_list.append(new_block_str)
                 continue
             # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
             # print("TerminalFrontend.process_received_bytes_on_normal_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
@@ -10791,6 +10817,26 @@ class TerminalFrontend:
                 new_block_str = block_str[ret.end():]
                 if len(new_block_str) > 0:
                     self.normal_mode_print_lines(new_block_str, "default")
+                continue
+            # ★匹配 [?25h  [?2004h  -->  显示光标；普通模式暂不处理这个，直接在当前位置插入剩下的普通字符
+            match_pattern = r'^\[\?\d{1,}h'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode: 匹配到了 {match_pattern}")
+                # 匹配到之后，可能 block_bytes[ret.end():] 有其他内容
+                new_block_str = block_str[ret.end():]
+                if len(new_block_str) > 0:
+                    self.normal_mode_print_lines(new_block_str, "default")
+                continue
+            # ★匹配 [?25l  [?2004l  -->  隐藏光标；普通模式暂不处理这个，直接在当前位置插入剩下的普通字符
+            match_pattern = r'^\[\?\d{1,}l'
+            ret = re.search(match_pattern, block_str)
+            if ret is not None:
+                print(f"TerminalFrontend.process_received_bytes_on_normal_mode: 匹配到了 {match_pattern}")
+                # 匹配到之后，可能 block_bytes[ret.end():] 之后有个\r（光标移到行首）
+                new_block_str = block_str[ret.end():]
+                if len(new_block_str) > 0:
+                    self.normal_mode_print_chars(new_block_str, "default")
                 continue
             # ★★最后，未匹配到任何属性（非控制序列，非特殊字符如\x08\x07这些）则视为普通文本，使用默认颜色方案
             # print("TerminalFrontend.process_received_bytes_on_normal_mode: 最后未匹配到任何属性，视为普通文本，使用默认颜色方案")
