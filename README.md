@@ -22,4 +22,4 @@ python3 cofable.py
 ![ip_calc_demo](not_resource_img/ip_calc_demo.png)
 <br>
 赞助者列表：<br>
-Mr. Fox Gao --> ￥1 <br>
+Mr. Fox Gao （2025-05-09）--> ￥1 <br>
