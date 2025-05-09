@@ -7,6 +7,7 @@ A graphical operation and maintenance inspection tool<br>
 以及在线批量shell交互，shell终端支持彩色及自定义单词/字符高亮<br>
 开发不易，请大家多多支持，万分感谢。<br>
 ![limaofu-zhifubao.jpg](not_resource_img/limaofu-zhifubao.jpg)
+<br>
 How to run it? 如何运行此程序？<br>
 ```shell
 python3 cofable.py
